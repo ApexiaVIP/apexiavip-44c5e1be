@@ -14,12 +14,6 @@ const Header = () => {
           
           <div className="hidden md:flex items-center space-x-12">
             <a 
-              href="#fleet" 
-              className="text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
-            >
-              Fleet
-            </a>
-            <a 
               href="#services" 
               className="text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
             >
