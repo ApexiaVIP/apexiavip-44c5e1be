@@ -18,7 +18,7 @@ const Hero = () => {
         <div className="max-w-3xl mx-auto space-y-8">
           <div className="animate-fade-in-slow">
             <p className="text-smoke text-xs tracking-[0.4em] uppercase mb-6">
-              Est. London
+              Est. UK
             </p>
             <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-light tracking-wider text-foreground leading-tight">
               Apex

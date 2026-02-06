@@ -22,7 +22,7 @@ const Contact = () => {
           
           <div className="mt-16 pt-16 border-t border-border">
             <p className="text-smoke text-xs tracking-wider">
-              London • Dubai • Monaco
+              UK • Dubai • Monaco • Marbella • Miami • NYC
             </p>
           </div>
         </div>
