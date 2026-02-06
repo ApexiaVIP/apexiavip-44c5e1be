@@ -10,7 +10,7 @@ const Footer = () => {
           </div>
           
           <p className="text-smoke text-xs tracking-wider">
-            © 2024 Apex Limousine Services. All enquiries confidential.
+            © 2026 Apex Limousine Services. All enquiries confidential.
           </p>
         </div>
       </div>
