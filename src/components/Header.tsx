@@ -4,7 +4,7 @@ const Header = () => {
       <div className="container mx-auto px-8 py-6">
         <nav className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <span className="font-display text-2xl tracking-[0.15em] text-foreground">
+            <span className="font-display text-2xl tracking-tight text-foreground" style={{ fontStretch: 'condensed' }}>
               APEXIA VIP
             </span>
 
