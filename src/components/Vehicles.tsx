@@ -1,13 +1,11 @@
 import rangeRover from "@/assets/vehicle-range-rover.jpg";
 import sClass from "@/assets/vehicle-s-class.jpg";
 import vClass from "@/assets/vehicle-v-class.jpg";
-import jetClass from "@/assets/vehicle-jet-class.jpg";
 
 const vehicles = [
   { name: "Range Rover", image: rangeRover },
   { name: "S-Class", image: sClass },
   { name: "Viano", image: vClass },
-  { name: "AC13 Jet Class", image: jetClass },
 ];
 
 const Vehicles = () => {
