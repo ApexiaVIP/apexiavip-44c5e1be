@@ -21,7 +21,7 @@ const Hero = () => {
               Est. UK
             </p>
             <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-light tracking-wider text-foreground leading-tight">
-              Apex
+              Apexia VIP
             </h1>
             <div className="h-px w-24 mx-auto my-6 bg-champagne-muted" />
             <p className="text-smoke text-sm md:text-base tracking-[0.2em] font-light">

@@ -5,10 +5,10 @@ const Header = () => {
         <nav className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <span className="font-display text-2xl tracking-[0.15em] text-foreground">
-              APEX
+              APEXIA VIP
             </span>
             <span className="text-champagne text-xs tracking-[0.3em] font-light">
-              LIMOUSINE SERVICES
+              EXECUTIVE SERVICES
             </span>
           </div>
           
