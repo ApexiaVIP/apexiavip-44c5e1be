@@ -7,9 +7,8 @@ const Header = () => {
             <span className="font-display text-2xl tracking-[0.15em] text-foreground">
               APEXIA VIP
             </span>
-            <span className="text-champagne text-xs tracking-[0.3em] font-light">
-              EXECUTIVE SERVICES
-            </span>
+
+
           </div>
           
           <div className="hidden md:flex items-center space-x-12">
