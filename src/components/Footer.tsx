@@ -5,12 +5,12 @@ const Footer = () => {
         <div className="flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0">
           <div className="flex items-center space-x-3">
             <span className="font-display text-lg tracking-[0.15em] text-foreground">
-              APEX
+              APEXIA VIP
             </span>
           </div>
           
           <p className="text-smoke text-xs tracking-wider">
-            © 2026 Apex Limousine Services. All enquiries confidential.
+            © 2026 Apexia VIP. All enquiries confidential.
           </p>
         </div>
       </div>
