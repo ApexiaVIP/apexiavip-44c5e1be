@@ -5,7 +5,7 @@ import vClass from "@/assets/vehicle-v-class.jpg";
 const vehicles = [
   { name: "Range Rover", image: rangeRover },
   { name: "S-Class", image: sClass },
-  { name: "V-Class", image: vClass },
+  { name: "Viano", image: vClass },
 ];
 
 const Vehicles = () => {
@@ -14,12 +14,9 @@ const Vehicles = () => {
       <div className="container mx-auto px-8">
         <div className="max-w-5xl mx-auto">
           <div className="mb-16">
-            <p className="text-champagne text-xs tracking-[0.4em] uppercase mb-6">
+            <p className="text-champagne text-xs tracking-[0.4em] uppercase">
               Fleet
             </p>
-            <h2 className="font-display text-3xl md:text-4xl font-light tracking-wider text-foreground">
-              Select Vehicles
-            </h2>
           </div>
 
           <div className="space-y-12">
