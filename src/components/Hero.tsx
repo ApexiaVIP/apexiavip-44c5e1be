@@ -8,7 +8,7 @@ const Hero = () => {
         <img 
           src={heroVehicle} 
           alt="" 
-          className="w-full h-full object-cover opacity-70"
+          className="w-full h-full object-cover opacity-80"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-background/40" />
       </div>
