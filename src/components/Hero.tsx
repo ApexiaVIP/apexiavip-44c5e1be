@@ -20,7 +20,7 @@ const Hero = () => {
             <p className="text-smoke text-xs tracking-[0.4em] uppercase mb-6">
               Est. UK
             </p>
-            <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-light tracking-wider text-foreground leading-tight">
+            <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-light tracking-tight text-foreground leading-tight" style={{ fontStretch: 'condensed' }}>
               APEXIA VIP
             </h1>
             <div className="h-px w-24 mx-auto my-6 bg-champagne-muted" />
