@@ -28,7 +28,7 @@ const Vehicles = () => {
                   <img
                     src={vehicle.image}
                     alt={`${vehicle.name} executive transport`}
-                    className="w-full h-48 md:h-64 object-cover object-center opacity-70 group-hover:opacity-90 transition-opacity duration-700"
+                    className={`w-full h-48 md:h-64 object-cover object-center opacity-70 group-hover:opacity-90 transition-opacity duration-700 ${vehicle.name === "JetClass" ? "scale-x-[-1]" : ""}`}
                     loading="lazy"
                   />
                 </div>
