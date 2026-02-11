@@ -10,7 +10,7 @@ const Footer = () => {
           </div>
           
           <p className="text-smoke text-xs tracking-wider">
-            © 2026 Apexia VIP. All enquiries confidential.
+            Apexia VIP Ltd
           </p>
         </div>
       </div>
