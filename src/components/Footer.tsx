@@ -10,7 +10,7 @@ const Footer = () => {
           </div>
           
           <p className="text-smoke text-xs tracking-wider">
-            Apexia VIP Ltd
+            Apexia VIP Ltd. All enquiries confidential.
           </p>
         </div>
       </div>
