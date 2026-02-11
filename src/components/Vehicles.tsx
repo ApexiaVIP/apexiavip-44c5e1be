@@ -4,10 +4,10 @@ import vClass from "@/assets/vehicle-v-class.jpg";
 import jetClass from "@/assets/vehicle-jet-class.jpg";
 
 const vehicles = [
-  { name: "Range Rover", image: rangeRover },
-  { name: "S-Class", image: sClass },
-  { name: "Viano", image: vClass },
-  { name: "JetClass", image: jetClass },
+  { name: "Range Rover", image: rangeRover, objectPos: "object-bottom" },
+  { name: "S-Class", image: sClass, objectPos: "object-center" },
+  { name: "Viano", image: vClass, objectPos: "object-center" },
+  { name: "JetClass", image: jetClass, objectPos: "object-center" },
 ];
 
 const Vehicles = () => {
@@ -28,7 +28,7 @@ const Vehicles = () => {
                   <img
                     src={vehicle.image}
                     alt={`${vehicle.name} executive transport`}
-                    className={`w-full h-48 md:h-64 object-cover object-center opacity-70 group-hover:opacity-90 transition-opacity duration-700 ${vehicle.name === "JetClass" ? "scale-x-[-1]" : ""}`}
+                    className={`w-full h-48 md:h-64 object-cover ${vehicle.objectPos} opacity-70 group-hover:opacity-90 transition-opacity duration-700 ${vehicle.name === "JetClass" ? "scale-x-[-1]" : ""}`}
                     loading="lazy"
                   />
                 </div>
