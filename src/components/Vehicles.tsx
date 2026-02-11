@@ -4,7 +4,7 @@ import vClass from "@/assets/vehicle-v-class.jpg";
 import jetClass from "@/assets/vehicle-jet-class.jpg";
 
 const vehicles = [
-  { name: "Range Rover", image: rangeRover, objectPos: "object-bottom" },
+  { name: "Range Rover", image: rangeRover, objectPos: "object-[center_40%]" },
   { name: "S-Class", image: sClass, objectPos: "object-center" },
   { name: "Viano", image: vClass, objectPos: "object-center" },
   { name: "JetClass", image: jetClass, objectPos: "object-center" },
