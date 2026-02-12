@@ -8,8 +8,9 @@ const allowedOrigins = [
 
 const isAllowedOrigin = (origin: string) => {
   if (allowedOrigins.includes(origin)) return true;
-  // Allow any Lovable preview subdomain
+  // Allow any Lovable preview/dev subdomain
   if (/^https:\/\/[a-z0-9-]+\.lovable\.app$/.test(origin)) return true;
+  if (/^https:\/\/[a-z0-9-]+\.lovableproject\.com$/.test(origin)) return true;
   return false;
 };
 
