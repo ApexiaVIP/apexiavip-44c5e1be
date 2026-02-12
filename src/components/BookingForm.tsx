@@ -49,6 +49,7 @@ type BookingFormValues = z.infer<typeof bookingSchema>;
 const BookingForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [honeypot, setHoneypot] = useState("");
 
   const form = useForm<BookingFormValues>({
     resolver: zodResolver(bookingSchema),
@@ -74,6 +75,7 @@ const BookingForm = () => {
             phone: data.phone,
             travelDate: format(data.travelDate, "PPP"),
             vehicle: data.vehicle,
+            website: honeypot,
           },
         }
       );
@@ -116,6 +118,19 @@ const BookingForm = () => {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        {/* Honeypot field - hidden from real users, bots will fill it */}
+        <div className="absolute opacity-0 -z-10" aria-hidden="true" tabIndex={-1}>
+          <label htmlFor="website">Website</label>
+          <input
+            id="website"
+            name="website"
+            type="text"
+            value={honeypot}
+            onChange={(e) => setHoneypot(e.target.value)}
+            autoComplete="off"
+            tabIndex={-1}
+          />
+        </div>
         {/* Vehicle Selection */}
         <FormField
           control={form.control}
