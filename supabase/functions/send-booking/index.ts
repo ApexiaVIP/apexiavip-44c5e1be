@@ -68,7 +68,7 @@ serve(async (req) => {
         Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: "Apexia VIP <onboarding@resend.dev>",
+        from: "Apexia VIP <info@apexiavip.com>",
         to: ["jamesacton007@gmail.com"],
         subject: `Booking Enquiry — ${name} — ${vehicle}`,
         html: htmlBody,
