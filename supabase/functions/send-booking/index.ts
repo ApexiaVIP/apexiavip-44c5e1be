@@ -1,33 +1,17 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const allowedOrigins = [
-  "https://apexiavip.lovable.app",
-  "https://id-preview--47b1f34e-c2e6-4cdd-8d35-be71ddb4e18b.lovable.app",
-];
-
-const isAllowedOrigin = (origin: string) => {
-  if (allowedOrigins.includes(origin)) return true;
-  // Allow any Lovable preview/dev subdomain
-  if (/^https:\/\/[a-z0-9-]+\.lovable\.app$/.test(origin)) return true;
-  if (/^https:\/\/[a-z0-9-]+\.lovableproject\.com$/.test(origin)) return true;
-  return false;
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const getCorsHeaders = (req: Request) => {
-  const origin = req.headers.get("origin") || "";
-  return {
-    "Access-Control-Allow-Origin": isAllowedOrigin(origin) ? origin : allowedOrigins[0],
-    "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-  };
-};
-
-const MAX_REQUESTS_PER_HOUR = 50;
+const MAX_REQUESTS_PER_HOUR = 10;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: getCorsHeaders(req) });
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
@@ -43,7 +27,7 @@ serve(async (req) => {
       // Silently accept but don't process
       return new Response(JSON.stringify({ success: true }), {
         status: 200,
-        headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -52,28 +36,28 @@ serve(async (req) => {
     // Basic server-side validation
     if (!name || typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
       return new Response(JSON.stringify({ success: false, error: "Invalid name" }), {
-        status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     if (!email || typeof email !== "string" || !email.includes("@") || email.length > 255) {
       return new Response(JSON.stringify({ success: false, error: "Invalid email" }), {
-        status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     if (!phone || typeof phone !== "string" || phone.trim().length === 0 || phone.length > 30) {
       return new Response(JSON.stringify({ success: false, error: "Invalid phone" }), {
-        status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     if (!travelDate || typeof travelDate !== "string" || travelDate.length > 50) {
       return new Response(JSON.stringify({ success: false, error: "Invalid travel date" }), {
-        status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     const allowedVehicles = ["Range Rover", "S-Class", "Viano", "JetClass"];
     if (!vehicle || !allowedVehicles.includes(vehicle)) {
       return new Response(JSON.stringify({ success: false, error: "Invalid vehicle" }), {
-        status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -107,7 +91,7 @@ serve(async (req) => {
     if ((count ?? 0) >= MAX_REQUESTS_PER_HOUR) {
       return new Response(
         JSON.stringify({ success: false, error: "Too many requests. Please try again later." }),
-        { status: 429, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -169,7 +153,7 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
-      headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: unknown) {
     console.error("Error sending booking email:", error);
@@ -177,7 +161,7 @@ serve(async (req) => {
       JSON.stringify({ success: false, error: "An error occurred processing your request." }),
       {
         status: 500,
-        headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   }
