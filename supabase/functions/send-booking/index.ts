@@ -4,16 +4,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-interface BookingRequest {
-  name: string;
-  email: string;
-  phone: string;
-  travelDate: string;
-  vehicle: string;
-}
+const MAX_REQUESTS_PER_HOUR = 5;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -26,18 +20,89 @@ serve(async (req) => {
       throw new Error("RESEND_API_KEY is not configured");
     }
 
-    const { name, email, phone, travelDate, vehicle } =
-      (await req.json()) as BookingRequest;
+    const body = await req.json();
 
-    // Store in database
+    // Honeypot check - if this hidden field is filled, it's a bot
+    if (body.website) {
+      // Silently accept but don't process
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { name, email, phone, travelDate, vehicle } = body;
+
+    // Basic server-side validation
+    if (!name || typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid name" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!email || typeof email !== "string" || !email.includes("@") || email.length > 255) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid email" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!phone || typeof phone !== "string" || phone.trim().length === 0 || phone.length > 30) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid phone" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!travelDate || typeof travelDate !== "string" || travelDate.length > 50) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid travel date" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const allowedVehicles = ["Range Rover", "S-Class", "Viano", "JetClass"];
+    if (!vehicle || !allowedVehicles.includes(vehicle)) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid vehicle" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Sanitize inputs for HTML email
+    const sanitize = (str: string) =>
+      str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    const safeName = sanitize(name.trim());
+    const safeEmail = sanitize(email.trim());
+    const safePhone = sanitize(phone.trim());
+    const safeTravelDate = sanitize(travelDate.trim());
+    const safeVehicle = sanitize(vehicle);
+
+    // Database client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Rate limiting
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+               req.headers.get("cf-connecting-ip") || "unknown";
+
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { count } = await supabase
+      .from("rate_limits")
+      .select("*", { count: "exact", head: true })
+      .eq("ip_address", ip)
+      .eq("endpoint", "send-booking")
+      .gte("created_at", oneHourAgo);
+
+    if ((count ?? 0) >= MAX_REQUESTS_PER_HOUR) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Too many requests. Please try again later." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Record this request for rate limiting
+    await supabase.from("rate_limits").insert({ ip_address: ip, endpoint: "send-booking" });
+
+    // Store in database
     const { error: dbError } = await supabase.from("bookings").insert({
-      name,
-      email,
-      phone,
+      name: name.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
       travel_date: travelDate,
       vehicle,
     });
@@ -52,11 +117,11 @@ serve(async (req) => {
           New Booking Enquiry
         </h1>
         <table style="width: 100%; margin-top: 24px; border-collapse: collapse;">
-          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Name</td><td style="padding: 12px 0;">${name}</td></tr>
-          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Email</td><td style="padding: 12px 0;">${email}</td></tr>
-          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Phone</td><td style="padding: 12px 0;">${phone}</td></tr>
-          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Travel Date</td><td style="padding: 12px 0;">${travelDate}</td></tr>
-          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Vehicle</td><td style="padding: 12px 0;">${vehicle}</td></tr>
+          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Name</td><td style="padding: 12px 0;">${safeName}</td></tr>
+          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Email</td><td style="padding: 12px 0;">${safeEmail}</td></tr>
+          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Phone</td><td style="padding: 12px 0;">${safePhone}</td></tr>
+          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Travel Date</td><td style="padding: 12px 0;">${safeTravelDate}</td></tr>
+          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Vehicle</td><td style="padding: 12px 0;">${safeVehicle}</td></tr>
         </table>
       </div>
     `;
@@ -70,9 +135,9 @@ serve(async (req) => {
       body: JSON.stringify({
         from: "Apexia VIP <info@apexiavip.com>",
         to: ["jamesacton007@gmail.com", "info@apexiavip.com"],
-        subject: `Booking Enquiry — ${name} — ${vehicle}`,
+        subject: `Booking Enquiry — ${safeName} — ${safeVehicle}`,
         html: htmlBody,
-        reply_to: email,
+        reply_to: email.trim(),
       }),
     });
 
@@ -88,9 +153,8 @@ serve(async (req) => {
     });
   } catch (error: unknown) {
     console.error("Error sending booking email:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     return new Response(
-      JSON.stringify({ success: false, error: errorMessage }),
+      JSON.stringify({ success: false, error: "An error occurred processing your request." }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
