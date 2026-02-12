@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { format } from "date-fns";
-import { CalendarIcon, Check } from "lucide-react";
+import { CalendarIcon, Check, Users, Luggage, Minus, Plus } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -43,6 +43,8 @@ const bookingSchema = z.object({
   phone: z.string().trim().min(1, "Phone number is required").max(30),
   travelDate: z.date({ required_error: "Please select a travel date" }),
   vehicle: z.string().min(1, "Please select a vehicle"),
+  passengers: z.number().min(1, "At least 1 passenger").max(20),
+  bags: z.number().min(0).max(30),
 });
 
 type BookingFormValues = z.infer<typeof bookingSchema>;
@@ -60,6 +62,8 @@ const BookingForm = () => {
       email: "",
       phone: "",
       vehicle: "",
+      passengers: 1,
+      bags: 1,
     },
   });
 
@@ -77,6 +81,8 @@ const BookingForm = () => {
             phone: `${countryCode} ${data.phone}`,
             travelDate: format(data.travelDate, "PPP"),
             vehicle: data.vehicle,
+            passengers: data.passengers,
+            bags: data.bags,
             website: honeypot,
           },
         }
@@ -303,6 +309,71 @@ const BookingForm = () => {
                     />
                   </PopoverContent>
                 </Popover>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        {/* Passengers & Bags */}
+        <div className="grid grid-cols-2 gap-6">
+          <FormField
+            control={form.control}
+            name="passengers"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                  Passengers
+                </FormLabel>
+                <div className="flex items-center gap-3 h-11 border border-border px-3">
+                  <Users className="w-4 h-4 text-champagne shrink-0" />
+                  <button
+                    type="button"
+                    onClick={() => field.onChange(Math.max(1, field.value - 1))}
+                    className="w-7 h-7 flex items-center justify-center text-smoke hover:text-champagne transition-colors"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-foreground text-sm w-6 text-center tabular-nums">{field.value}</span>
+                  <button
+                    type="button"
+                    onClick={() => field.onChange(Math.min(20, field.value + 1))}
+                    className="w-7 h-7 flex items-center justify-center text-smoke hover:text-champagne transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="bags"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                  Luggage
+                </FormLabel>
+                <div className="flex items-center gap-3 h-11 border border-border px-3">
+                  <Luggage className="w-4 h-4 text-champagne shrink-0" />
+                  <button
+                    type="button"
+                    onClick={() => field.onChange(Math.max(0, field.value - 1))}
+                    className="w-7 h-7 flex items-center justify-center text-smoke hover:text-champagne transition-colors"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-foreground text-sm w-6 text-center tabular-nums">{field.value}</span>
+                  <button
+                    type="button"
+                    onClick={() => field.onChange(Math.min(30, field.value + 1))}
+                    className="w-7 h-7 flex items-center justify-center text-smoke hover:text-champagne transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
                 <FormMessage />
               </FormItem>
             )}
