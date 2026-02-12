@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,6 +28,23 @@ serve(async (req) => {
 
     const { name, email, phone, travelDate, vehicle } =
       (await req.json()) as BookingRequest;
+
+    // Store in database
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const { error: dbError } = await supabase.from("bookings").insert({
+      name,
+      email,
+      phone,
+      travel_date: travelDate,
+      vehicle,
+    });
+
+    if (dbError) {
+      console.error("DB insert error:", dbError);
+    }
 
     const htmlBody = `
       <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
