@@ -23,7 +23,7 @@ const getCorsHeaders = (req: Request) => {
   };
 };
 
-const MAX_REQUESTS_PER_HOUR = 20;
+const MAX_REQUESTS_PER_HOUR = 50;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
