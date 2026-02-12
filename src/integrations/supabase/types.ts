@@ -16,28 +16,34 @@ export type Database = {
     Tables: {
       bookings: {
         Row: {
+          bags: number | null
           created_at: string
           email: string
           id: string
           name: string
+          passengers: number | null
           phone: string
           travel_date: string
           vehicle: string
         }
         Insert: {
+          bags?: number | null
           created_at?: string
           email: string
           id?: string
           name: string
+          passengers?: number | null
           phone: string
           travel_date: string
           vehicle: string
         }
         Update: {
+          bags?: number | null
           created_at?: string
           email?: string
           id?: string
           name?: string
+          passengers?: number | null
           phone?: string
           travel_date?: string
           vehicle?: string

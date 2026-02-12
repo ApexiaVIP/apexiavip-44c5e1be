@@ -105,6 +105,8 @@ serve(async (req) => {
       phone: phone.trim(),
       travel_date: travelDate,
       vehicle,
+      passengers: passengers ?? 1,
+      bags: bags ?? 0,
     });
 
     if (dbError) {
