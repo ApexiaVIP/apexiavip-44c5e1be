@@ -6,10 +6,17 @@ const allowedOrigins = [
   "https://id-preview--47b1f34e-c2e6-4cdd-8d35-be71ddb4e18b.lovable.app",
 ];
 
+const isAllowedOrigin = (origin: string) => {
+  if (allowedOrigins.includes(origin)) return true;
+  // Allow any Lovable preview subdomain
+  if (/^https:\/\/[a-z0-9-]+\.lovable\.app$/.test(origin)) return true;
+  return false;
+};
+
 const getCorsHeaders = (req: Request) => {
   const origin = req.headers.get("origin") || "";
   return {
-    "Access-Control-Allow-Origin": allowedOrigins.includes(origin) ? origin : allowedOrigins[0],
+    "Access-Control-Allow-Origin": isAllowedOrigin(origin) ? origin : allowedOrigins[0],
     "Access-Control-Allow-Headers":
       "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   };
