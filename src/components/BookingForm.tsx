@@ -54,6 +54,7 @@ const BookingForm = () => {
   const [submitted, setSubmitted] = useState(false);
   const [honeypot, setHoneypot] = useState("");
   const [countryCode, setCountryCode] = useState("+44");
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   const form = useForm<BookingFormValues>({
     resolver: zodResolver(bookingSchema),
@@ -271,15 +272,15 @@ const BookingForm = () => {
             )}
           />
 
-          <FormField
-            control={form.control}
-            name="travelDate"
-            render={({ field }) => (
+        <FormField
+          control={form.control}
+          name="travelDate"
+          render={({ field }) => (
               <FormItem>
                 <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
                   Date of Travel
                 </FormLabel>
-                <Popover>
+                <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                   <PopoverTrigger asChild>
                     <FormControl>
                       <Button
@@ -302,7 +303,10 @@ const BookingForm = () => {
                     <Calendar
                       mode="single"
                       selected={field.value}
-                      onSelect={field.onChange}
+                      onSelect={(date) => {
+                        field.onChange(date);
+                        setCalendarOpen(false);
+                      }}
                       disabled={(date) => date < new Date()}
                       initialFocus
                       className={cn("p-3 pointer-events-auto")}
@@ -311,8 +315,8 @@ const BookingForm = () => {
                 </Popover>
                 <FormMessage />
               </FormItem>
-            )}
-          />
+          )}
+        />
         </div>
 
         {/* Passengers & Bags */}
