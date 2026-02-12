@@ -134,7 +134,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         from: "Apexia VIP <info@apexiavip.com>",
-        to: ["jamesacton007@gmail.com", "info@apexiavip.com"],
+        to: ["info@apexiavip.com"],
         subject: `Booking Enquiry — ${safeName} — ${safeVehicle}`,
         html: htmlBody,
         reply_to: email.trim(),
