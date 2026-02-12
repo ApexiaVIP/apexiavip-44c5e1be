@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { format } from "date-fns";
 import { CalendarIcon, Check } from "lucide-react";
 import { z } from "zod";
@@ -50,6 +51,7 @@ const BookingForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [honeypot, setHoneypot] = useState("");
+  const [countryCode, setCountryCode] = useState("+44");
 
   const form = useForm<BookingFormValues>({
     resolver: zodResolver(bookingSchema),
@@ -72,7 +74,7 @@ const BookingForm = () => {
           body: {
             name: data.name,
             email: data.email,
-            phone: data.phone,
+            phone: `${countryCode} ${data.phone}`,
             travelDate: format(data.travelDate, "PPP"),
             vehicle: data.vehicle,
             website: honeypot,
@@ -247,14 +249,17 @@ const BookingForm = () => {
                 <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
                   Phone
                 </FormLabel>
-                <FormControl>
-                  <Input
-                    {...field}
-                    type="tel"
-                    placeholder="+44 7..."
-                    className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm"
-                  />
-                </FormControl>
+                <div className="flex gap-2">
+                  <CountryCodeSelect value={countryCode} onChange={setCountryCode} />
+                  <FormControl>
+                    <Input
+                      {...field}
+                      type="tel"
+                      placeholder="7123 456789"
+                      className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm flex-1"
+                    />
+                  </FormControl>
+                </div>
                 <FormMessage />
               </FormItem>
             )}
