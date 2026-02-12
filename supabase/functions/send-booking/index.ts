@@ -69,7 +69,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         from: "Apexia VIP <info@apexiavip.com>",
-        to: ["jamesacton007@gmail.com"],
+        to: ["jamesacton007@gmail.com", "info@apexiavip.com"],
         subject: `Booking Enquiry — ${name} — ${vehicle}`,
         html: htmlBody,
         reply_to: email,
