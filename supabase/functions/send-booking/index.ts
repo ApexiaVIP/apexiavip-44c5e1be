@@ -31,7 +31,7 @@ serve(async (req) => {
       });
     }
 
-    const { name, email, phone, travelDate, vehicle } = body;
+    const { name, email, phone, travelDate, vehicle, passengers, bags } = body;
 
     // Basic server-side validation
     if (!name || typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
@@ -122,6 +122,8 @@ serve(async (req) => {
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Phone</td><td style="padding: 12px 0;">${safePhone}</td></tr>
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Travel Date</td><td style="padding: 12px 0;">${safeTravelDate}</td></tr>
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Vehicle</td><td style="padding: 12px 0;">${safeVehicle}</td></tr>
+          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Passengers</td><td style="padding: 12px 0;">${passengers ?? 'N/A'}</td></tr>
+          <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Luggage</td><td style="padding: 12px 0;">${bags ?? 0}</td></tr>
         </table>
       </div>
     `;
