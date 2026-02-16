@@ -41,23 +41,43 @@ const VehicleDetail = () => {
               {vehicle.name}
             </h1>
 
-            {/* Exterior image */}
-            <div className="overflow-hidden mb-8">
-              <img
-                src={vehicle.image}
-                alt={`${vehicle.name} exterior`}
-                className={`w-full h-64 md:h-96 object-cover ${vehicle.objectPos} ${vehicle.mirrored ? "scale-x-[-1]" : ""}`}
-              />
-            </div>
+            {/* Vehicle images */}
+            {vehicle.gallery && vehicle.gallery.length > 0 ? (
+              <div className="space-y-4 mb-16">
+                {vehicle.gallery.map((img, i) => (
+                  <div key={i} className="relative overflow-hidden">
+                    <img
+                      src={img}
+                      alt={`${vehicle.name} gallery ${i + 1}`}
+                      className="w-full h-64 md:h-96 object-cover object-center"
+                    />
+                    <div className="absolute inset-0 bg-background/30 pointer-events-none" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Exterior image */}
+                <div className="relative overflow-hidden mb-8">
+                  <img
+                    src={vehicle.image}
+                    alt={`${vehicle.name} exterior`}
+                    className={`w-full h-64 md:h-96 object-cover ${vehicle.objectPos} ${vehicle.mirrored ? "scale-x-[-1]" : ""}`}
+                  />
+                  <div className="absolute inset-0 bg-background/30 pointer-events-none" />
+                </div>
 
-            {/* Interior image */}
-            <div className="overflow-hidden mb-16">
-              <img
-                src={vehicle.interiorImage}
-                alt={`${vehicle.name} interior`}
-                className="w-full h-64 md:h-96 object-cover object-center"
-              />
-            </div>
+                {/* Interior image */}
+                <div className="relative overflow-hidden mb-16">
+                  <img
+                    src={vehicle.interiorImage}
+                    alt={`${vehicle.name} interior`}
+                    className="w-full h-64 md:h-96 object-cover object-center"
+                  />
+                  <div className="absolute inset-0 bg-background/30 pointer-events-none" />
+                </div>
+              </>
+            )}
 
             {/* Specs & Features */}
             <div className="grid md:grid-cols-2 gap-16 mb-20">

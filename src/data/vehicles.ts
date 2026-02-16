@@ -7,6 +7,15 @@ import interiorSClass from "@/assets/interior-s-class.jpg";
 import interiorViano from "@/assets/interior-viano.jpg";
 import interiorJetClass from "@/assets/interior-jetclass.jpg";
 
+import rrSide from "@/assets/rr-side.jpg";
+import rrWheel from "@/assets/rr-wheel.jpg";
+import rrInterior1 from "@/assets/rr-interior-1.jpg";
+import rrInterior2 from "@/assets/rr-interior-2.jpg";
+import rrInterior3 from "@/assets/rr-interior-3.jpg";
+import rrInterior4 from "@/assets/rr-interior-4.jpg";
+import rrDashboard from "@/assets/rr-dashboard.jpg";
+import rrFront from "@/assets/rr-front.jpg";
+
 export interface Vehicle {
   slug: string;
   name: string;
@@ -17,6 +26,7 @@ export interface Vehicle {
   passengers: number;
   luggage: number;
   features: string[];
+  gallery?: string[];
 }
 
 export const vehicles: Vehicle[] = [
@@ -36,6 +46,7 @@ export const vehicles: Vehicle[] = [
       "Wi-Fi Connectivity",
       "USB Charging Ports",
     ],
+    gallery: [rrSide, rrFront, rrWheel, rrInterior1, rrInterior2, rrInterior3, rrInterior4, rrDashboard],
   },
   {
     slug: "s-class",
