@@ -1,14 +1,5 @@
-import rangeRover from "@/assets/vehicle-range-rover.jpg";
-import sClass from "@/assets/vehicle-s-class.jpg";
-import vClass from "@/assets/vehicle-v-class.jpg";
-import jetClass from "@/assets/vehicle-jet-class.jpg";
-
-const vehicles = [
-  { name: "Range Rover", image: rangeRover, objectPos: "object-[center_40%]" },
-  { name: "S-Class", image: sClass, objectPos: "object-center" },
-  { name: "Viano", image: vClass, objectPos: "object-center" },
-  { name: "JetClass", image: jetClass, objectPos: "object-center" },
-];
+import { Link } from "react-router-dom";
+import { vehicles } from "@/data/vehicles";
 
 const Vehicles = () => {
   return (
@@ -23,12 +14,12 @@ const Vehicles = () => {
 
           <div className="space-y-12">
             {vehicles.map((vehicle) => (
-              <div key={vehicle.name} className="group">
+              <Link to={`/fleet/${vehicle.slug}`} key={vehicle.slug} className="group block">
                 <div className="overflow-hidden">
                   <img
                     src={vehicle.image}
                     alt={`${vehicle.name} executive transport`}
-                    className={`w-full h-48 md:h-64 object-cover ${vehicle.objectPos} opacity-70 group-hover:opacity-90 transition-opacity duration-700 ${vehicle.name === "JetClass" ? "scale-x-[-1]" : ""}`}
+                    className={`w-full h-48 md:h-64 object-cover ${vehicle.objectPos} opacity-70 group-hover:opacity-90 transition-opacity duration-700 ${vehicle.mirrored ? "scale-x-[-1]" : ""}`}
                     loading="lazy"
                   />
                 </div>
@@ -38,7 +29,7 @@ const Vehicles = () => {
                   </p>
                   <div className="h-px flex-1 mx-6 bg-border" />
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
