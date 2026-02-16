@@ -28,6 +28,9 @@ const Vehicles = () => {
                     {vehicle.name}
                   </p>
                   <div className="h-px flex-1 mx-6 bg-border" />
+                  <span className="text-champagne text-[10px] tracking-[0.25em] uppercase opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                    View Details
+                  </span>
                 </div>
               </Link>
             ))}
