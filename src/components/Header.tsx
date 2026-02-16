@@ -6,7 +6,7 @@ const Header = () => {
       <div className="container mx-auto px-8 py-6">
         <nav className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <img src={apexiaLogo} alt="Apexia VIP" className="h-16 w-auto" />
+            <img src={apexiaLogo} alt="Apexia VIP" className="h-24 w-auto" />
           </div>
           
           <div className="hidden md:flex items-center space-x-12">
