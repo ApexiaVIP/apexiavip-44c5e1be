@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { format } from "date-fns";
 import { CalendarIcon, Check, Users, Luggage, Minus, Plus } from "lucide-react";
@@ -54,6 +55,7 @@ const BookingForm = () => {
   const [submitted, setSubmitted] = useState(false);
   const [honeypot, setHoneypot] = useState("");
   const [countryCode, setCountryCode] = useState("+44");
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const form = useForm<BookingFormValues>({
     resolver: zodResolver(bookingSchema),
@@ -66,6 +68,17 @@ const BookingForm = () => {
       bags: 1,
     },
   });
+
+  // Pre-select vehicle from URL param (e.g. ?vehicle=Range+Rover)
+  useEffect(() => {
+    const vehicleParam = searchParams.get("vehicle");
+    if (vehicleParam && vehicles.some((v) => v.name === vehicleParam)) {
+      form.setValue("vehicle", vehicleParam);
+      // Clean up the URL param
+      searchParams.delete("vehicle");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []);
 
   const selectedVehicle = form.watch("vehicle");
 
