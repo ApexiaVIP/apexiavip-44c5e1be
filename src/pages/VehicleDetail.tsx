@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Users, Briefcase } from "lucide-react";
 import Header from "@/components/Header";
@@ -6,6 +7,10 @@ import { vehicles } from "@/data/vehicles";
 
 const VehicleDetail = () => {
   const { slug } = useParams<{ slug: string }>();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [slug]);
   const vehicle = vehicles.find((v) => v.slug === slug);
 
   if (!vehicle) {
