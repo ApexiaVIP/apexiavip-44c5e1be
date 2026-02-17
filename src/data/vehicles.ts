@@ -16,6 +16,11 @@ import rrInterior4 from "@/assets/rr-interior-4.jpg";
 import rrDashboard from "@/assets/rr-dashboard.jpg";
 import rrFront from "@/assets/rr-front.jpg";
 
+import scFront from "@/assets/sc-front.jpg";
+import scSide from "@/assets/sc-side.jpg";
+import scInterior from "@/assets/sc-interior.jpg";
+import scFrontTop from "@/assets/sc-front-top.jpg";
+
 export interface Vehicle {
   slug: string;
   name: string;
@@ -64,6 +69,7 @@ export const vehicles: Vehicle[] = [
       "Wi-Fi Connectivity",
       "Burmester Sound System",
     ],
+    gallery: [scFront, scSide, scInterior, scFrontTop],
   },
   {
     slug: "viano",
