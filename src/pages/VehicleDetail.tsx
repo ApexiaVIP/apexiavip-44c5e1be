@@ -50,26 +50,28 @@ const VehicleDetail = () => {
             {vehicle.gallery && vehicle.gallery.length > 0 ? (
               <div className="mb-20">
                 {/* Hero image */}
-                <div className="relative overflow-hidden mb-2">
+                <div className="relative overflow-hidden rounded-lg mb-3">
                   <img
                     src={vehicle.gallery[0]}
                     alt={`${vehicle.name} hero`}
                     className="w-full h-72 md:h-[28rem] object-cover object-center"
                   />
-                  <div className="absolute inset-0 bg-background/25 pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-transparent to-background/40 pointer-events-none" />
+                  <div className="absolute inset-0 bg-[hsl(40_30%_50%/0.08)] pointer-events-none" />
                 </div>
 
                 {/* Supporting grid */}
                 {vehicle.gallery.length > 1 && (
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-3">
                     {vehicle.gallery.slice(1).map((img, i) => (
-                      <div key={i} className="relative overflow-hidden">
+                      <div key={i} className="relative overflow-hidden rounded-lg">
                         <img
                           src={img}
                           alt={`${vehicle.name} detail ${i + 1}`}
                           className="w-full h-44 md:h-60 object-cover object-center"
                         />
-                        <div className="absolute inset-0 bg-background/25 pointer-events-none" />
+                        <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-transparent to-background/40 pointer-events-none" />
+                        <div className="absolute inset-0 bg-[hsl(40_30%_50%/0.08)] pointer-events-none" />
                       </div>
                     ))}
                   </div>
@@ -77,21 +79,23 @@ const VehicleDetail = () => {
               </div>
             ) : (
               <>
-                <div className="relative overflow-hidden mb-2">
+              <div className="relative overflow-hidden rounded-lg mb-3">
                   <img
                     src={vehicle.image}
                     alt={`${vehicle.name} exterior`}
                     className={`w-full h-72 md:h-[28rem] object-cover ${vehicle.objectPos} ${vehicle.mirrored ? "scale-x-[-1]" : ""}`}
                   />
-                  <div className="absolute inset-0 bg-background/25 pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-transparent to-background/40 pointer-events-none" />
+                  <div className="absolute inset-0 bg-[hsl(40_30%_50%/0.08)] pointer-events-none" />
                 </div>
-                <div className="relative overflow-hidden mb-20">
+                <div className="relative overflow-hidden rounded-lg mb-20">
                   <img
                     src={vehicle.interiorImage}
                     alt={`${vehicle.name} interior`}
                     className="w-full h-64 md:h-96 object-cover object-center"
                   />
-                  <div className="absolute inset-0 bg-background/25 pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-transparent to-background/40 pointer-events-none" />
+                  <div className="absolute inset-0 bg-[hsl(40_30%_50%/0.08)] pointer-events-none" />
                 </div>
               </>
             )}
