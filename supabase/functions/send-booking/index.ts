@@ -179,7 +179,7 @@ serve(async (req) => {
           "Content-Type": "application/json",
           Authorization: `Basic ${dispatchAuth}`,
         },
-        body: JSON.stringify(dispatchPayload),
+        body: JSON.stringify({ Bookings: [dispatchPayload] }),
       });
 
       const dispatchData = await dispatchRes.json();
