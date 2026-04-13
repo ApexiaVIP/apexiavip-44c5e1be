@@ -8,6 +8,7 @@ const corsHeaders = {
 };
 
 const MAX_REQUESTS_PER_HOUR = 10;
+const DEFAULT_COLLECTION_TIME = { hours: "09", minutes: "00" };
 
 // Map vehicle names to Dispatch booking classes
 const vehicleToBookingClass: Record<string, string> = {
@@ -15,6 +16,62 @@ const vehicleToBookingClass: Record<string, string> = {
   "S-Class": "Executive",
   "Viano": "VIP",
   "JetClass": "VIP",
+};
+
+const dispatchMonthNames = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+const dispatchMonthLookup = dispatchMonthNames.reduce<Record<string, number>>((acc, month, index) => {
+  acc[month.toLowerCase()] = index;
+  return acc;
+}, {});
+
+const padNumber = (value: number | string) => value.toString().padStart(2, "0");
+
+const formatDispatchDate = (day: number, monthIndex: number, year: number) =>
+  `${padNumber(day)}-${dispatchMonthNames[monthIndex]}-${year}`;
+
+const buildCollectionDateTime = (travelDateRaw?: string, travelDateDisplay?: string) => {
+  const candidates = [travelDateRaw, travelDateDisplay]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim().replace(/,/g, "").replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, "$1"));
+
+  for (const candidate of candidates) {
+    const dispatchFormatMatch = candidate.match(/^(\d{2})-([A-Za-z]{3})-(\d{4})(?:\s+(\d{2}):(\d{2}))?$/);
+    if (dispatchFormatMatch) {
+      const [, day, monthToken, year, hours = DEFAULT_COLLECTION_TIME.hours, minutes = DEFAULT_COLLECTION_TIME.minutes] = dispatchFormatMatch;
+      const monthIndex = dispatchMonthLookup[monthToken.toLowerCase()];
+
+      if (monthIndex !== undefined) {
+        return `${formatDispatchDate(Number(day), monthIndex, Number(year))} ${hours}:${minutes}`;
+      }
+    }
+
+    const isoFormatMatch = candidate.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::\d{2})?)?/);
+    if (isoFormatMatch) {
+      const [, year, month, day, hours = DEFAULT_COLLECTION_TIME.hours, minutes = DEFAULT_COLLECTION_TIME.minutes] = isoFormatMatch;
+      return `${formatDispatchDate(Number(day), Number(month) - 1, Number(year))} ${hours}:${minutes}`;
+    }
+
+    const parsed = new Date(candidate);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${formatDispatchDate(parsed.getDate(), parsed.getMonth(), parsed.getFullYear())} ${DEFAULT_COLLECTION_TIME.hours}:${DEFAULT_COLLECTION_TIME.minutes}`;
+    }
+  }
+
+  throw new Error("Invalid travel date supplied for Dispatch booking");
 };
 
 serve(async (req) => {
@@ -137,7 +194,7 @@ serve(async (req) => {
 
     // --- Send to Dispatch Transfer API ---
     const bookingReference = `APEXIA-${Date.now()}`;
-    const collectionDateTime = `${travelDateRaw || travelDate} 09:00`;
+    const collectionDateTime = buildCollectionDateTime(travelDateRaw, travelDate);
     const bookingClass = vehicleToBookingClass[vehicle] || "Executive";
 
     const dispatchPayload = {
@@ -172,6 +229,8 @@ serve(async (req) => {
 
     const dispatchUrl = `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`;
 
+    let dispatchFailureMessage: string | null = null;
+
     try {
       const dispatchRes = await fetch(dispatchUrl, {
         method: "POST",
@@ -185,12 +244,23 @@ serve(async (req) => {
       const dispatchData = await dispatchRes.json();
       console.log("Dispatch API response:", JSON.stringify(dispatchData));
 
-      if (dispatchData.TransferStatus === "Failed") {
-        console.error("Dispatch transfer failed:", dispatchData.Message);
+      const dispatchResult = Array.isArray(dispatchData?.Result) ? dispatchData.Result[0] : dispatchData;
+      const dispatchBooking = Array.isArray(dispatchResult?.Bookings) ? dispatchResult.Bookings[0] : undefined;
+
+      if (!dispatchRes.ok) {
+        dispatchFailureMessage = `Dispatch API returned HTTP ${dispatchRes.status}`;
+      } else if (dispatchResult?.TransferStatus === "Failed") {
+        dispatchFailureMessage = dispatchResult?.Message || "Dispatch transfer failed";
+      } else if (dispatchBooking?.Status === "Failed") {
+        dispatchFailureMessage = dispatchBooking?.Message || "Dispatch booking failed";
+      }
+
+      if (dispatchFailureMessage) {
+        console.error("Dispatch transfer failed:", dispatchFailureMessage);
       }
     } catch (dispatchErr) {
       console.error("Dispatch API call failed:", dispatchErr);
-      // Don't fail the whole request if Dispatch fails - email still goes out
+      dispatchFailureMessage = "Dispatch API call failed";
     }
 
     // --- Send email notification ---
@@ -235,6 +305,19 @@ serve(async (req) => {
 
     if (!res.ok) {
       throw new Error(`Resend API error [${res.status}]: ${JSON.stringify(data)}`);
+    }
+
+    if (dispatchFailureMessage) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "We couldn't send your booking to the booking system. Please try again or contact us directly.",
+        }),
+        {
+          status: 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     return new Response(JSON.stringify({ success: true }), {
