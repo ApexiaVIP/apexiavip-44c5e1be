@@ -38,6 +38,14 @@ const vehicles = [
   { name: "JetClass", image: jetClass },
 ];
 
+const addressSchema = z.object({
+  line1: z.string().trim().min(1, "Address line 1 is required").max(200),
+  line2: z.string().trim().max(200).optional().default(""),
+  town: z.string().trim().min(1, "Town/City is required").max(100),
+  postcode: z.string().trim().min(1, "Postcode is required").max(20),
+  country: z.string().trim().max(100).optional().default("United Kingdom"),
+});
+
 const bookingSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
   email: z.string().trim().email("Invalid email address").max(255),
@@ -46,6 +54,8 @@ const bookingSchema = z.object({
   vehicle: z.string().min(1, "Please select a vehicle"),
   passengers: z.number().min(1, "At least 1 passenger").max(20),
   bags: z.number().min(0).max(30),
+  pickupAddress: addressSchema,
+  dropoffAddress: addressSchema,
 });
 
 type BookingFormValues = z.infer<typeof bookingSchema>;
