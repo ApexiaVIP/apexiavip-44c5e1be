@@ -38,6 +38,14 @@ const vehicles = [
   { name: "JetClass", image: jetClass },
 ];
 
+const addressSchema = z.object({
+  line1: z.string().trim().min(1, "Address line 1 is required").max(200),
+  line2: z.string().trim().max(200).optional().default(""),
+  town: z.string().trim().min(1, "Town/City is required").max(100),
+  postcode: z.string().trim().min(1, "Postcode is required").max(20),
+  country: z.string().trim().max(100).optional().default("United Kingdom"),
+});
+
 const bookingSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
   email: z.string().trim().email("Invalid email address").max(255),
@@ -46,6 +54,8 @@ const bookingSchema = z.object({
   vehicle: z.string().min(1, "Please select a vehicle"),
   passengers: z.number().min(1, "At least 1 passenger").max(20),
   bags: z.number().min(0).max(30),
+  pickupAddress: addressSchema,
+  dropoffAddress: addressSchema,
 });
 
 type BookingFormValues = z.infer<typeof bookingSchema>;
@@ -66,6 +76,8 @@ const BookingForm = () => {
       vehicle: "",
       passengers: 1,
       bags: 1,
+      pickupAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
+      dropoffAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
     },
   });
 
@@ -93,9 +105,12 @@ const BookingForm = () => {
             email: data.email,
             phone: `${countryCode} ${data.phone}`,
             travelDate: format(data.travelDate, "PPP"),
+            travelDateRaw: format(data.travelDate, "dd-MMM-yyyy"),
             vehicle: data.vehicle,
             passengers: data.passengers,
             bags: data.bags,
+            pickupAddress: data.pickupAddress,
+            dropoffAddress: data.dropoffAddress,
             website: honeypot,
           },
         }
@@ -328,7 +343,85 @@ const BookingForm = () => {
           />
         </div>
 
-        {/* Passengers & Bags */}
+
+        {/* Pickup Address */}
+        <div className="space-y-4">
+          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Pickup Address</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField control={form.control} name="pickupAddress.line1" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Address Line 1" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="pickupAddress.line2" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Address Line 2 (optional)" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="pickupAddress.town" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Town / City" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="pickupAddress.postcode" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Postcode" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </div>
+        </div>
+
+        {/* Dropoff Address */}
+        <div className="space-y-4">
+          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Dropoff Address</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField control={form.control} name="dropoffAddress.line1" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Address Line 1" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="dropoffAddress.line2" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Address Line 2 (optional)" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="dropoffAddress.town" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Town / City" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="dropoffAddress.postcode" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Postcode" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-6">
           <FormField
             control={form.control}
