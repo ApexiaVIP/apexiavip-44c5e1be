@@ -140,35 +140,33 @@ serve(async (req) => {
     const collectionDateTime = `${travelDateRaw || travelDate} 09:00`;
     const bookingClass = vehicleToBookingClass[vehicle] || "Executive";
 
-    const dispatchPayload = [
-      {
-        Reference: bookingReference,
-        CollectionDateTime: collectionDateTime,
-        NumPassengers: passengers ?? 1,
-        PassengerName: name.trim(),
-        PassengerPhoneNumber: phone.trim(),
-        PassengerMobileNumber: phone.trim(),
-        PassengerEmailAddress: email.trim(),
-        BookingClass: bookingClass,
-        NumSuitcases: bags ?? 0,
-        BookedBy: "Website",
-        BookingNotes: `Vehicle: ${vehicle}`,
-        PickUpAddress: {
-          Line1: pickupAddress.line1?.trim() || "",
-          Line2: pickupAddress.line2?.trim() || "",
-          Town: pickupAddress.town?.trim() || "",
-          Postcode: pickupAddress.postcode?.trim() || "",
-          Country: pickupAddress.country?.trim() || "United Kingdom",
-        },
-        DropOffAddress: {
-          Line1: dropoffAddress.line1?.trim() || "",
-          Line2: dropoffAddress.line2?.trim() || "",
-          Town: dropoffAddress.town?.trim() || "",
-          Postcode: dropoffAddress.postcode?.trim() || "",
-          Country: dropoffAddress.country?.trim() || "United Kingdom",
-        },
+    const dispatchPayload = {
+      Reference: bookingReference,
+      CollectionDateTime: collectionDateTime,
+      NumPassengers: passengers ?? 1,
+      PassengerName: name.trim(),
+      PassengerPhoneNumber: phone.trim(),
+      PassengerMobileNumber: phone.trim(),
+      PassengerEmailAddress: email.trim(),
+      BookingClass: bookingClass,
+      NumSuitcases: bags ?? 0,
+      BookedBy: "Website",
+      BookingNotes: `Vehicle: ${vehicle}`,
+      PickUpAddress: {
+        Line1: pickupAddress.line1?.trim() || "",
+        Line2: pickupAddress.line2?.trim() || "",
+        Town: pickupAddress.town?.trim() || "",
+        Postcode: pickupAddress.postcode?.trim() || "",
+        Country: pickupAddress.country?.trim() || "United Kingdom",
       },
-    ];
+      DropOffAddress: {
+        Line1: dropoffAddress.line1?.trim() || "",
+        Line2: dropoffAddress.line2?.trim() || "",
+        Town: dropoffAddress.town?.trim() || "",
+        Postcode: dropoffAddress.postcode?.trim() || "",
+        Country: dropoffAddress.country?.trim() || "United Kingdom",
+      },
+    };
 
     const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
 
