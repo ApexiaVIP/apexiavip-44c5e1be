@@ -340,7 +340,85 @@ const BookingForm = () => {
           />
         </div>
 
-        {/* Passengers & Bags */}
+
+        {/* Pickup Address */}
+        <div className="space-y-4">
+          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Pickup Address</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField control={form.control} name="pickupAddress.line1" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Address Line 1" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="pickupAddress.line2" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Address Line 2 (optional)" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="pickupAddress.town" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Town / City" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="pickupAddress.postcode" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Postcode" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </div>
+        </div>
+
+        {/* Dropoff Address */}
+        <div className="space-y-4">
+          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Dropoff Address</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField control={form.control} name="dropoffAddress.line1" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Address Line 1" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="dropoffAddress.line2" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Address Line 2 (optional)" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="dropoffAddress.town" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Town / City" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="dropoffAddress.postcode" render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Input {...field} placeholder="Postcode" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-6">
           <FormField
             control={form.control}
