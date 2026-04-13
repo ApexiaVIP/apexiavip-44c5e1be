@@ -105,9 +105,12 @@ const BookingForm = () => {
             email: data.email,
             phone: `${countryCode} ${data.phone}`,
             travelDate: format(data.travelDate, "PPP"),
+            travelDateRaw: format(data.travelDate, "dd-MMM-yyyy"),
             vehicle: data.vehicle,
             passengers: data.passengers,
             bags: data.bags,
+            pickupAddress: data.pickupAddress,
+            dropoffAddress: data.dropoffAddress,
             website: honeypot,
           },
         }
