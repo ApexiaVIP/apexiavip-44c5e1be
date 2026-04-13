@@ -76,6 +76,8 @@ const BookingForm = () => {
       vehicle: "",
       passengers: 1,
       bags: 1,
+      pickupAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
+      dropoffAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
     },
   });
 
