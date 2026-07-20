@@ -7,6 +7,7 @@ import {
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { checkMfaStatus } from "@/lib/mfa";
 
 interface Profile {
   id: string;
@@ -22,8 +23,10 @@ interface AuthContextValue {
   user: User | null;
   profile: Profile | null;
   isAdmin: boolean;
-  /** True only once the user has passed SMS verification (AAL2) this session */
+  /** True only once the user has passed SMS verification this session */
   mfaVerified: boolean;
+  /** Re-check SMS verification status (call after a successful verify) */
+  refreshMfa: () => Promise<void>;
   loading: boolean;
   signOut: () => Promise<void>;
 }
@@ -80,17 +83,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [session?.user?.id]);
 
-  // Recompute assurance level whenever the token changes (e.g. after MFA verify)
+  // Check SMS verification status for this session
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
-    supabase.auth.mfa.getAuthenticatorAssuranceLevel().then(({ data }) => {
-      if (!cancelled) setMfaVerified(data?.currentLevel === "aal2");
-    });
+    checkMfaStatus()
+      .then((verified) => {
+        if (!cancelled) setMfaVerified(verified);
+      })
+      .catch(() => {
+        if (!cancelled) setMfaVerified(false);
+      });
     return () => {
       cancelled = true;
     };
   }, [session?.access_token]);
+
+  const refreshMfa = async () => {
+    try {
+      setMfaVerified(await checkMfaStatus());
+    } catch {
+      setMfaVerified(false);
+    }
+  };
 
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -104,6 +119,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         profile,
         isAdmin,
         mfaVerified,
+        refreshMfa,
         loading,
         signOut,
       }}

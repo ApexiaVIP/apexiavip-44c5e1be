@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const Welcome = () => {
-  const { user, loading } = useAuth();
+  const { user, refreshMfa, loading } = useAuth();
   const navigate = useNavigate();
 
   const [step, setStep] = useState<"password" | "code">("password");
@@ -41,7 +41,7 @@ const Welcome = () => {
       return;
     }
     try {
-      const fresh = await startPhoneChallenge(user.id);
+      const fresh = await startPhoneChallenge();
       setChallenge(fresh);
       setStep("code");
     } catch {
@@ -114,10 +114,12 @@ const Welcome = () => {
         </form>
       ) : challenge ? (
         <SmsCodeStep
-          userId={user.id}
           challenge={challenge}
           onChallengeChange={setChallenge}
-          onVerified={() => navigate("/#contact", { replace: true })}
+          onVerified={async () => {
+            await refreshMfa();
+            navigate("/#contact", { replace: true });
+          }}
         />
       ) : (
         <Loader2 className="w-5 h-5 animate-spin mx-auto text-champagne" />

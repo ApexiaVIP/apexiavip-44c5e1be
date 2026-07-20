@@ -104,18 +104,25 @@ serve(async (req) => {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    // Require the SMS second factor (AAL2) — the aal claim is trustworthy
-    // because getUser() has already validated the token's signature
-    let aal: string | null = null;
+    // Require the SMS second factor: this session must appear in mfa_sessions
+    // (the session_id claim is trustworthy because getUser() validated the token)
+    let sessionId: string | null = null;
     try {
       const payload = JSON.parse(
         atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))
       );
-      aal = payload?.aal ?? null;
+      sessionId = payload?.session_id ?? null;
     } catch {
-      aal = null;
+      sessionId = null;
     }
-    if (aal !== "aal2") {
+    const { data: verifiedSession } = sessionId
+      ? await supabase
+          .from("mfa_sessions")
+          .select("id")
+          .eq("session_id", sessionId)
+          .maybeSingle()
+      : { data: null };
+    if (!verifiedSession) {
       return new Response(
         JSON.stringify({ success: false, error: "Two-factor verification required" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }

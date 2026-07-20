@@ -14,14 +14,13 @@ import {
 const RESEND_COOLDOWN = 60;
 
 interface SmsCodeStepProps {
-  userId: string;
   challenge: PhoneChallenge;
   onChallengeChange: (challenge: PhoneChallenge) => void;
   onVerified: () => void;
 }
 
 /** 6-digit SMS code entry with resend cooldown; verifies against a phone MFA challenge. */
-const SmsCodeStep = ({ userId, challenge, onChallengeChange, onVerified }: SmsCodeStepProps) => {
+const SmsCodeStep = ({ challenge, onChallengeChange, onVerified }: SmsCodeStepProps) => {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -37,11 +36,15 @@ const SmsCodeStep = ({ userId, challenge, onChallengeChange, onVerified }: SmsCo
     setError(null);
     setSubmitting(true);
     try {
-      await verifyPhoneChallenge(challenge, token);
+      await verifyPhoneChallenge(token);
       onVerified();
-    } catch {
+    } catch (err) {
       setCode("");
-      setError("That code is incorrect or has expired. Please try again.");
+      setError(
+        err instanceof Error && err.message !== "Something went wrong"
+          ? err.message
+          : "That code is incorrect or has expired. Please try again."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -51,7 +54,7 @@ const SmsCodeStep = ({ userId, challenge, onChallengeChange, onVerified }: SmsCo
     setError(null);
     setSubmitting(true);
     try {
-      const fresh = await startPhoneChallenge(userId);
+      const fresh = await startPhoneChallenge();
       onChallengeChange(fresh);
       setCooldown(RESEND_COOLDOWN);
     } catch {

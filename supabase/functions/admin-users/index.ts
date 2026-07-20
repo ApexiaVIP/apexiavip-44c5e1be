@@ -43,6 +43,21 @@ serve(async (req) => {
     });
     if (!isAdmin) return json(403, { error: "Admin access required" });
 
+    // Admin actions also require the SMS-verified session
+    let sessionId: string | null = null;
+    try {
+      const payload = JSON.parse(
+        atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))
+      );
+      sessionId = payload?.session_id ?? null;
+    } catch {
+      sessionId = null;
+    }
+    const { data: verifiedSession } = sessionId
+      ? await admin.from("mfa_sessions").select("id").eq("session_id", sessionId).maybeSingle()
+      : { data: null };
+    if (!verifiedSession) return json(403, { error: "Two-factor verification required" });
+
     const body = await req.json();
     const action = body?.action;
 
@@ -148,6 +163,10 @@ serve(async (req) => {
         .eq("id", userId);
       if (statusError) throw statusError;
 
+      if (revoking) {
+        await admin.from("mfa_sessions").delete().eq("user_id", userId);
+      }
+
       return json(200, { success: true });
     }
 
@@ -176,12 +195,12 @@ serve(async (req) => {
         if (profileError) throw profileError;
       }
 
-      // Remove enrolled factors so the next sign-in re-verifies their mobile
-      const { data: target, error: getError } = await admin.auth.admin.getUserById(userId);
-      if (getError || !target?.user) return json(400, { error: "User not found" });
-      for (const factor of target.user.factors ?? []) {
-        await admin.auth.admin.mfa.deleteFactor({ id: factor.id, userId });
-      }
+      // Invalidate their verified sessions so every device re-verifies by SMS
+      const { error: wipeError } = await admin
+        .from("mfa_sessions")
+        .delete()
+        .eq("user_id", userId);
+      if (wipeError) throw wipeError;
 
       return json(200, { success: true });
     }

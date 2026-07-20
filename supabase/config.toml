@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.admin-users]
 verify_jwt = false
+
+[functions.sms-2fa]
+verify_jwt = false

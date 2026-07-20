@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const Login = () => {
-  const { user, mfaVerified, loading } = useAuth();
+  const { user, mfaVerified, refreshMfa, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const redirectTo = (location.state as { from?: string } | null)?.from ?? "/#contact";
@@ -32,15 +32,15 @@ const Login = () => {
     }
     if (user && !mfaVerified && step === "credentials" && !startedRef.current) {
       startedRef.current = true;
-      beginChallenge(user.id);
+      beginChallenge();
     }
   }, [loading, user, mfaVerified]);
 
-  const beginChallenge = async (userId: string) => {
+  const beginChallenge = async () => {
     setError(null);
     setSubmitting(true);
     try {
-      const fresh = await startPhoneChallenge(userId);
+      const fresh = await startPhoneChallenge();
       setChallenge(fresh);
       setStep("code");
     } catch (err) {
@@ -58,7 +58,7 @@ const Login = () => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+    const { error: signInError } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
@@ -73,7 +73,7 @@ const Login = () => {
       }
       return;
     }
-    await beginChallenge(data.user.id);
+    await beginChallenge();
   };
 
   return (
@@ -122,10 +122,12 @@ const Login = () => {
         </form>
       ) : user && challenge ? (
         <SmsCodeStep
-          userId={user.id}
           challenge={challenge}
           onChallengeChange={setChallenge}
-          onVerified={() => navigate(redirectTo, { replace: true })}
+          onVerified={async () => {
+            await refreshMfa();
+            navigate(redirectTo, { replace: true });
+          }}
         />
       ) : (
         <Loader2 className="w-5 h-5 animate-spin mx-auto text-champagne" />

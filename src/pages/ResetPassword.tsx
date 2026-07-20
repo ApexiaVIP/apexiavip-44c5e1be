@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 type Step = "request" | "sent" | "code" | "update";
 
 const ResetPassword = () => {
-  const { user, loading } = useAuth();
+  const { user, refreshMfa, loading } = useAuth();
   const navigate = useNavigate();
 
   const [step, setStep] = useState<Step>("request");
@@ -24,23 +24,18 @@ const ResetPassword = () => {
   const [error, setError] = useState<string | null>(null);
   const startedRef = useRef(false);
 
-  // Arriving via a recovery link signs the user in; decide whether SMS is needed first
+  // Arriving via a recovery link signs the user in; require SMS before the new password
   useEffect(() => {
     if (loading || !user || startedRef.current) return;
     startedRef.current = true;
     (async () => {
-      const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-      if (data?.currentLevel !== "aal2" && data?.nextLevel === "aal2") {
-        try {
-          const fresh = await startPhoneChallenge(user.id);
-          setChallenge(fresh);
-          setStep("code");
-        } catch {
-          setError("We could not send your verification code. Please try again.");
-          setStep("code");
-        }
-      } else {
-        setStep("update");
+      try {
+        const fresh = await startPhoneChallenge();
+        setChallenge(fresh);
+        setStep("code");
+      } catch {
+        setError("We could not send your verification code. Please try again.");
+        setStep("code");
       }
     })();
   }, [loading, user]);
@@ -75,8 +70,8 @@ const ResetPassword = () => {
       setError("We could not save your password. Please try again.");
       return;
     }
-    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    navigate(data?.currentLevel === "aal2" ? "/#contact" : "/login", { replace: true });
+    await refreshMfa();
+    navigate("/#contact", { replace: true });
   };
 
   const subtitles: Record<Step, string> = {
@@ -119,7 +114,6 @@ const ResetPassword = () => {
       {step === "code" &&
         (user && challenge ? (
           <SmsCodeStep
-            userId={user.id}
             challenge={challenge}
             onChallengeChange={setChallenge}
             onVerified={() => setStep("update")}
