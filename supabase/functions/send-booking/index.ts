@@ -90,6 +90,31 @@ serve(async (req) => {
       throw new Error("DISPATCH_TRANSFER_REFERENCE is not configured");
     }
 
+    // Database client
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Members only: require an authenticated user with an active profile
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const token = authHeader.replace("Bearer ", "");
+    const { data: userData, error: userError } = await supabase.auth.getUser(token);
+    if (userError || !userData?.user) {
+      return new Response(JSON.stringify({ success: false, error: "Sign in required" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { data: memberProfile } = await supabase
+      .from("profiles")
+      .select("status")
+      .eq("id", userData.user.id)
+      .maybeSingle();
+    if (!memberProfile || memberProfile.status !== "active") {
+      return new Response(JSON.stringify({ success: false, error: "Membership not active" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const body = await req.json();
 
     // Honeypot check
@@ -149,11 +174,6 @@ serve(async (req) => {
     const safePhone = sanitize(phone.trim());
     const safeTravelDate = sanitize(travelDate.trim());
     const safeVehicle = sanitize(vehicle);
-
-    // Database client
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Rate limiting
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||

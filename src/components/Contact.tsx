@@ -1,4 +1,5 @@
 import BookingForm from "@/components/BookingForm";
+import MembersGate from "@/components/MembersGate";
 
 const Contact = () => {
   return (
@@ -17,7 +18,9 @@ const Contact = () => {
             </p>
           </div>
 
-          <BookingForm />
+          <MembersGate>
+            <BookingForm />
+          </MembersGate>
 
           <div className="mt-20 pt-16 border-t border-border text-center">
             <p className="text-smoke text-xs tracking-wider">
