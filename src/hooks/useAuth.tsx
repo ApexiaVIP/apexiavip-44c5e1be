@@ -22,6 +22,8 @@ interface AuthContextValue {
   user: User | null;
   profile: Profile | null;
   isAdmin: boolean;
+  /** True only once the user has passed SMS verification (AAL2) this session */
+  mfaVerified: boolean;
   loading: boolean;
   signOut: () => Promise<void>;
 }
@@ -32,6 +34,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [mfaVerified, setMfaVerified] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,6 +44,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (!newSession?.user) {
           setProfile(null);
           setIsAdmin(false);
+          setMfaVerified(false);
           setLoading(false);
         }
       }
@@ -76,6 +80,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [session?.user?.id]);
 
+  // Recompute assurance level whenever the token changes (e.g. after MFA verify)
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    supabase.auth.mfa.getAuthenticatorAssuranceLevel().then(({ data }) => {
+      if (!cancelled) setMfaVerified(data?.currentLevel === "aal2");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token]);
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
@@ -87,6 +103,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         user: session?.user ?? null,
         profile,
         isAdmin,
+        mfaVerified,
         loading,
         signOut,
       }}

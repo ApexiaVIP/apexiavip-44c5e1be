@@ -104,6 +104,24 @@ serve(async (req) => {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    // Require the SMS second factor (AAL2) — the aal claim is trustworthy
+    // because getUser() has already validated the token's signature
+    let aal: string | null = null;
+    try {
+      const payload = JSON.parse(
+        atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))
+      );
+      aal = payload?.aal ?? null;
+    } catch {
+      aal = null;
+    }
+    if (aal !== "aal2") {
+      return new Response(
+        JSON.stringify({ success: false, error: "Two-factor verification required" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const { data: memberProfile } = await supabase
       .from("profiles")
       .select("status")

@@ -76,13 +76,16 @@ serve(async (req) => {
         return json(400, { error: "Phone must be in international format, e.g. +447700900123" });
       }
 
-      const { data: created, error: createError } = await admin.auth.admin.createUser({
-        phone,
+      // Send the invitation email; the link takes them to /welcome to set a
+      // password and verify their mobile
+      const origin = req.headers.get("origin") ?? "https://apexiavip.com";
+      const { data: created, error: createError } = await admin.auth.admin.inviteUserByEmail(
         email,
-        phone_confirm: true,
-        email_confirm: true,
-        user_metadata: { full_name: fullName },
-      });
+        {
+          data: { full_name: fullName },
+          redirectTo: `${origin}/welcome`,
+        }
+      );
       if (createError) {
         const msg = createError.message?.includes("already")
           ? "A user with this phone or email already exists"
@@ -91,6 +94,19 @@ serve(async (req) => {
       }
 
       const userId = created.user.id;
+
+      // Attach their mobile number; it becomes their SMS 2FA number on first sign-in
+      const { error: phoneError } = await admin.auth.admin.updateUserById(userId, {
+        phone,
+        phone_confirm: true,
+      });
+      if (phoneError) {
+        await admin.auth.admin.deleteUser(userId);
+        const msg = phoneError.message?.includes("already")
+          ? "A user with this phone number already exists"
+          : phoneError.message;
+        return json(400, { error: msg });
+      }
       const { error: profileError } = await admin.from("profiles").insert({
         id: userId,
         full_name: fullName,
@@ -131,6 +147,41 @@ serve(async (req) => {
         .update({ status: revoking ? "revoked" : "active" })
         .eq("id", userId);
       if (statusError) throw statusError;
+
+      return json(200, { success: true });
+    }
+
+    if (action === "reset_2fa") {
+      const userId = body?.user_id;
+      if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });
+
+      const newPhone =
+        typeof body.new_phone === "string" && body.new_phone.trim()
+          ? body.new_phone.replace(/[\s\-()]/g, "")
+          : null;
+      if (newPhone && !isValidPhone(newPhone)) {
+        return json(400, { error: "Phone must be in international format, e.g. +447700900123" });
+      }
+
+      if (newPhone) {
+        const { error: phoneError } = await admin.auth.admin.updateUserById(userId, {
+          phone: newPhone,
+          phone_confirm: true,
+        });
+        if (phoneError) return json(400, { error: phoneError.message });
+        const { error: profileError } = await admin
+          .from("profiles")
+          .update({ phone: newPhone })
+          .eq("id", userId);
+        if (profileError) throw profileError;
+      }
+
+      // Remove enrolled factors so the next sign-in re-verifies their mobile
+      const { data: target, error: getError } = await admin.auth.admin.getUserById(userId);
+      if (getError || !target?.user) return json(400, { error: "User not found" });
+      for (const factor of target.user.factors ?? []) {
+        await admin.auth.admin.mfa.deleteFactor({ id: factor.id, userId });
+      }
 
       return json(200, { success: true });
     }

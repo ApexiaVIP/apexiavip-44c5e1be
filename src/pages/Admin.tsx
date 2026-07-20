@@ -75,6 +75,9 @@ const Admin = () => {
   const [email, setEmail] = useState("");
   const [countryCode, setCountryCode] = useState("+44");
   const [phone, setPhone] = useState("");
+  const [resetTarget, setResetTarget] = useState<Member | null>(null);
+  const [resetCountryCode, setResetCountryCode] = useState("+44");
+  const [resetPhone, setResetPhone] = useState("");
 
   const { data: members, isLoading: membersLoading, error: membersError } = useQuery({
     queryKey: ["admin-members"],
@@ -100,6 +103,29 @@ const Admin = () => {
     },
     onError: (err: Error) => {
       toast({ title: "Invite failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const resetMfa = useMutation({
+    mutationFn: () =>
+      invokeAdmin({
+        action: "reset_2fa",
+        user_id: resetTarget!.id,
+        new_phone: resetPhone.trim()
+          ? `${resetCountryCode}${resetPhone.replace(/[\s\-()]/g, "").replace(/^0+/, "")}`
+          : undefined,
+      }),
+    onSuccess: () => {
+      toast({
+        title: "2FA reset",
+        description: "They will verify their mobile again on their next sign-in.",
+      });
+      setResetTarget(null);
+      setResetPhone("");
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Reset failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -159,8 +185,9 @@ const Admin = () => {
                   Invite a Member
                 </DialogTitle>
                 <DialogDescription>
-                  They will sign in with an SMS code sent to this mobile number.
-                  No email is sent; simply let them know they have access.
+                  They will receive an email invitation with a secure link to set
+                  their password and verify this mobile number, which becomes
+                  their SMS security number.
                 </DialogDescription>
               </DialogHeader>
               <form
@@ -260,7 +287,20 @@ const Admin = () => {
                         year: "numeric",
                       })}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right space-x-2">
+                      {!memberIsAdmin && m.id !== user.id && !revoked && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={resetMfa.isPending}
+                          onClick={() => {
+                            setResetTarget(m);
+                            setResetPhone("");
+                          }}
+                        >
+                          Reset 2FA
+                        </Button>
+                      )}
                       {memberIsAdmin || m.id === user.id ? null : revoked ? (
                         <Button
                           variant="outline"
@@ -312,6 +352,55 @@ const Admin = () => {
             </TableBody>
           </Table>
         )}
+
+        <Dialog
+          open={!!resetTarget}
+          onOpenChange={(open) => {
+            if (!open) setResetTarget(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="font-display tracking-wider font-light">
+                Reset 2FA for {resetTarget?.full_name || resetTarget?.phone}
+              </DialogTitle>
+              <DialogDescription>
+                They will verify their mobile by SMS again on their next sign-in.
+                To move them to a new number, enter it below; leave blank to keep
+                their current number ({resetTarget?.phone}).
+              </DialogDescription>
+            </DialogHeader>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                resetMfa.mutate();
+              }}
+              className="space-y-4 mt-2"
+            >
+              <div className="flex gap-3">
+                <CountryCodeSelect value={resetCountryCode} onChange={setResetCountryCode} />
+                <Input
+                  type="tel"
+                  placeholder="New number (optional)"
+                  value={resetPhone}
+                  onChange={(e) => setResetPhone(e.target.value)}
+                  className="flex-1"
+                />
+              </div>
+              <Button
+                type="submit"
+                disabled={resetMfa.isPending}
+                className="w-full tracking-[0.15em] uppercase"
+              >
+                {resetMfa.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Reset 2FA"
+                )}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

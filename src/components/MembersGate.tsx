@@ -5,13 +5,37 @@ import { useAuth } from "@/hooks/useAuth";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const MembersGate = ({ children }: { children: ReactNode }) => {
-  const { user, profile, loading, signOut } = useAuth();
+  const { user, profile, mfaVerified, loading, signOut } = useAuth();
 
   if (loading) {
     return (
       <div className="space-y-4 py-8">
         <Skeleton className="h-8 w-1/2 mx-auto" />
         <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
+  if (user && !mfaVerified) {
+    return (
+      <div className="text-center py-16 border border-border">
+        <div className="w-12 h-12 rounded-full border border-champagne-muted flex items-center justify-center mx-auto mb-6">
+          <Lock className="w-5 h-5 text-champagne" />
+        </div>
+        <h3 className="font-display text-2xl tracking-wider text-foreground mb-3">
+          Verification Required
+        </h3>
+        <p className="text-smoke text-sm font-light leading-relaxed mb-8 max-w-sm mx-auto">
+          For your security, please confirm the code sent to your registered
+          mobile before making a booking.
+        </p>
+        <Link
+          to="/login"
+          state={{ from: "/#contact" }}
+          className="inline-block border border-champagne text-champagne hover:bg-champagne hover:text-background transition-colors duration-500 text-xs tracking-[0.2em] uppercase px-10 py-4"
+        >
+          Verify Now
+        </Link>
       </div>
     );
   }
