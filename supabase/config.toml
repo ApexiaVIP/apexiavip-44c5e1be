@@ -1,7 +1,16 @@
 project_id = "mzqpvnxtwshjcyzaipea"
 
-[functions]
-  [functions.auth-email-hook]
-    verify_jwt = false
-  [functions.process-email-queue]
-    verify_jwt = true
+[functions.auth-email-hook]
+verify_jwt = false
+
+[functions.process-email-queue]
+verify_jwt = true
+
+[functions.send-booking]
+verify_jwt = false
+
+[functions.admin-users]
+verify_jwt = false
+
+[functions.sms-2fa]
+verify_jwt = false

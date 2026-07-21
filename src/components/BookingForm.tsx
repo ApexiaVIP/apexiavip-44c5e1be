@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 import rangeRover from "@/assets/vehicle-range-rover.jpg";
 import sClass from "@/assets/vehicle-s-class.jpg";
@@ -80,6 +81,23 @@ const BookingForm = () => {
       dropoffAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
     },
   });
+
+  const { profile } = useAuth();
+
+  // Prefill contact details from the signed-in member's profile
+  useEffect(() => {
+    if (!profile) return;
+    if (!form.getValues("name") && profile.full_name) {
+      form.setValue("name", profile.full_name);
+    }
+    if (!form.getValues("email") && profile.email) {
+      form.setValue("email", profile.email);
+    }
+    if (!form.getValues("phone") && profile.phone.startsWith("+44")) {
+      setCountryCode("+44");
+      form.setValue("phone", profile.phone.slice(3));
+    }
+  }, [profile]);
 
   // Pre-select vehicle from URL param (e.g. ?vehicle=Range+Rover)
   useEffect(() => {

@@ -11,7 +11,9 @@ const Index = () => {
   const location = useLocation();
 
   useEffect(() => {
-    if (location.hash) {
+    // Only scroll for simple #section hashes; auth links carry key=value hashes
+    // that are not valid CSS selectors
+    if (location.hash && /^#[A-Za-z][\w-]*$/.test(location.hash)) {
       const el = document.querySelector(location.hash);
       if (el) {
         setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
