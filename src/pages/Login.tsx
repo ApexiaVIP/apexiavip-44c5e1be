@@ -37,6 +37,9 @@ const Login = () => {
   }, [loading, user, mfaVerified]);
 
   const beginChallenge = async () => {
+    // Guard against the session-watcher effect and the submit handler both
+    // requesting a code for the same sign-in
+    startedRef.current = true;
     setError(null);
     setSubmitting(true);
     try {
