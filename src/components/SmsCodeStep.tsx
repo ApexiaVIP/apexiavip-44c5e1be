@@ -57,8 +57,12 @@ const SmsCodeStep = ({ challenge, onChallengeChange, onVerified }: SmsCodeStepPr
       const fresh = await startPhoneChallenge();
       onChallengeChange(fresh);
       setCooldown(RESEND_COOLDOWN);
-    } catch {
-      setError("We could not resend the code. Please wait a moment and try again.");
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message !== "Something went wrong"
+          ? err.message
+          : "We could not resend the code. Please wait a moment and try again."
+      );
     } finally {
       setSubmitting(false);
     }

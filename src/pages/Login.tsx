@@ -45,7 +45,7 @@ const Login = () => {
       setStep("code");
     } catch (err) {
       setError(
-        err instanceof Error && err.message.includes("registered")
+        err instanceof Error && err.message !== "Something went wrong"
           ? err.message
           : "We could not send your verification code. Please try again."
       );

@@ -44,8 +44,12 @@ const Welcome = () => {
       const fresh = await startPhoneChallenge();
       setChallenge(fresh);
       setStep("code");
-    } catch {
-      setError("Password saved, but we could not send your verification code. Please sign in.");
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message !== "Something went wrong"
+          ? err.message
+          : "Password saved, but we could not send your verification code. Please sign in."
+      );
     } finally {
       setSubmitting(false);
     }

@@ -33,8 +33,12 @@ const ResetPassword = () => {
         const fresh = await startPhoneChallenge();
         setChallenge(fresh);
         setStep("code");
-      } catch {
-        setError("We could not send your verification code. Please try again.");
+      } catch (err) {
+        setError(
+          err instanceof Error && err.message !== "Something went wrong"
+            ? err.message
+            : "We could not send your verification code. Please try again."
+        );
         setStep("code");
       }
     })();
