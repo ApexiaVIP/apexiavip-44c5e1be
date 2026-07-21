@@ -44,14 +44,24 @@ const SENDER_DOMAIN = "notify.apexiavip.com"
 const ROOT_DOMAIN = "apexiavip.com"
 const FROM_DOMAIN = "notify.apexiavip.com" // Domain shown in From address (may be root or sender subdomain)
 
-// Rewrite the confirmation URL host to the custom domain, preserving path/query/hash.
+// Keep the Supabase auth verify URL host intact; only rewrite the redirect_to
+// parameter so the post-verify landing page lives on the custom domain.
 function rewriteConfirmationUrl(rawUrl: string | undefined): string {
   if (!rawUrl) return `https://${ROOT_DOMAIN}`
   try {
     const url = new URL(rawUrl)
-    url.protocol = 'https:'
-    url.host = ROOT_DOMAIN
-    url.port = ''
+    const redirectTo = url.searchParams.get('redirect_to')
+    if (redirectTo) {
+      try {
+        const dest = new URL(redirectTo)
+        dest.protocol = 'https:'
+        dest.host = ROOT_DOMAIN
+        dest.port = ''
+        url.searchParams.set('redirect_to', dest.toString())
+      } catch {
+        // leave redirect_to as-is if unparseable
+      }
+    }
     return url.toString()
   } catch {
     return rawUrl
