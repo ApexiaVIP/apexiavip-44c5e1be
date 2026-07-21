@@ -48,11 +48,11 @@ const FROM_DOMAIN = "notify.apexiavip.com" // Domain shown in From address (may 
 function rewriteConfirmationUrl(rawUrl: string | undefined): string {
   if (!rawUrl) return `https://${ROOT_DOMAIN}`
   try {
-    const u = new URL(rawUrl)
-    u.protocol = 'https:'
-    u.host = ROOT_DOMAIN
-    u.port = ''
-    return u.toString()
+    const url = new URL(rawUrl)
+    url.protocol = 'https:'
+    url.host = ROOT_DOMAIN
+    url.port = ''
+    return url.toString()
   } catch {
     return rawUrl
   }
@@ -63,7 +63,7 @@ function rewriteConfirmationUrl(rawUrl: string | undefined): string {
 // The sample email uses a fixed placeholder (RFC 6761 .test TLD) so the Go backend
 // can always find-and-replace it with the actual recipient when sending test emails,
 // even if the project's domain has changed since the template was scaffolded.
-const SAMPLE_PROJECT_URL = "https://apexiavip.lovable.app"
+const SAMPLE_PROJECT_URL = "https://apexiavip.com"
 const SAMPLE_EMAIL = "user@example.test"
 const SAMPLE_DATA: Record<string, object> = {
   signup: {
