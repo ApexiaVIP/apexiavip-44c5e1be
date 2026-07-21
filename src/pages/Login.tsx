@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { startPhoneChallenge, type PhoneChallenge } from "@/lib/mfa";
+import { startPhoneChallenge, describeChallenge, type PhoneChallenge } from "@/lib/mfa";
 import AuthShell from "@/components/AuthShell";
 import SmsCodeStep from "@/components/SmsCodeStep";
 import { Button } from "@/components/ui/button";
@@ -81,8 +81,8 @@ const Login = () => {
       title={step === "credentials" ? "Sign In" : "Verify It's You"}
       subtitle={
         step === "credentials"
-          ? "Enter your membership email and password. We will then send a security code to your registered mobile."
-          : `A 6-digit code has been sent by SMS to ${challenge?.phone ?? "your mobile"}.`
+          ? "Enter your membership email and password. We will then send you a security code."
+          : describeChallenge(challenge)
       }
     >
       {step === "credentials" ? (

@@ -186,8 +186,8 @@ const Admin = () => {
                 </DialogTitle>
                 <DialogDescription>
                   They will receive an email invitation with a secure link to set
-                  their password and verify this mobile number, which becomes
-                  their SMS security number.
+                  their password and confirm a security code. This mobile number
+                  is used for SMS codes once SMS is enabled.
                 </DialogDescription>
               </DialogHeader>
               <form
@@ -365,7 +365,7 @@ const Admin = () => {
                 Reset 2FA for {resetTarget?.full_name || resetTarget?.phone}
               </DialogTitle>
               <DialogDescription>
-                They will verify their mobile by SMS again on their next sign-in.
+                They will confirm a security code again on their next sign-in.
                 To move them to a new number, enter it below; leave blank to keep
                 their current number ({resetTarget?.phone}).
               </DialogDescription>

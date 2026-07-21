@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { startPhoneChallenge, type PhoneChallenge } from "@/lib/mfa";
+import { startPhoneChallenge, describeChallenge, type PhoneChallenge } from "@/lib/mfa";
 import AuthShell from "@/components/AuthShell";
 import SmsCodeStep from "@/components/SmsCodeStep";
 import { Button } from "@/components/ui/button";
@@ -78,11 +78,11 @@ const Welcome = () => {
   return (
     <AuthShell
       eyebrow="Welcome to Apexia VIP"
-      title={step === "password" ? "Create Your Password" : "Verify Your Mobile"}
+      title={step === "password" ? "Create Your Password" : "Verify It's You"}
       subtitle={
         step === "password"
-          ? "Choose a password for your membership account. You will also verify your mobile number in the next step."
-          : `A 6-digit code has been sent by SMS to ${challenge?.phone ?? "your mobile"}.`
+          ? "Choose a password for your membership account. We will then send you a security code to confirm your identity."
+          : describeChallenge(challenge)
       }
     >
       {step === "password" ? (

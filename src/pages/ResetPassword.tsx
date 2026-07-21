@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { startPhoneChallenge, type PhoneChallenge } from "@/lib/mfa";
+import { startPhoneChallenge, describeChallenge, type PhoneChallenge } from "@/lib/mfa";
 import AuthShell from "@/components/AuthShell";
 import SmsCodeStep from "@/components/SmsCodeStep";
 import { Button } from "@/components/ui/button";
@@ -78,7 +78,7 @@ const ResetPassword = () => {
     request:
       "Enter your membership email and we will send you a secure link to reset your password.",
     sent: "If that email is registered with a membership, a reset link is on its way. The link is valid for a limited time.",
-    code: `A 6-digit code has been sent by SMS to ${challenge?.phone ?? "your registered mobile"}.`,
+    code: describeChallenge(challenge),
     update: "Choose a new password for your membership account.",
   };
   const titles: Record<Step, string> = {

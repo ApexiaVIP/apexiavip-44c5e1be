@@ -27,6 +27,12 @@ const sha256 = async (input: string) => {
 const maskPhone = (phone: string) =>
   phone.length > 3 ? `••• ••• ${phone.slice(-3)}` : phone;
 
+const maskEmail = (email: string) => {
+  const [local, domain] = email.split("@");
+  if (!domain) return email;
+  return `${local.slice(0, 1)}•••@${domain}`;
+};
+
 const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
   try {
     return JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
@@ -75,7 +81,7 @@ serve(async (req) => {
     // Only active members can send/verify codes
     const { data: profile } = await admin
       .from("profiles")
-      .select("phone, status")
+      .select("phone, email, status")
       .eq("id", user.id)
       .maybeSingle();
     if (!profile || profile.status !== "active") {
@@ -83,14 +89,20 @@ serve(async (req) => {
     }
 
     if (action === "send") {
+      // Channel: SMS via Twilio when configured, otherwise email via Resend (interim)
       const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
       const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
       const TWILIO_FROM = Deno.env.get("TWILIO_FROM");
-      if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM) {
-        throw new Error("Twilio is not configured");
+      const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+      const smsConfigured = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_FROM);
+      if (!smsConfigured && !RESEND_API_KEY) {
+        throw new Error("No 2FA delivery channel is configured");
       }
-      if (!profile.phone) {
+      if (smsConfigured && !profile.phone) {
         return json(400, { error: "No mobile number is registered for your account" });
+      }
+      if (!smsConfigured && !profile.email) {
+        return json(400, { error: "No email address is registered for your account" });
       }
 
       // Rate limit sends per user
@@ -120,31 +132,62 @@ serve(async (req) => {
       });
       if (insertError) throw insertError;
 
-      // Send via Twilio (From may be a number or a Messaging Service SID)
-      const params = new URLSearchParams({
-        To: profile.phone,
-        Body: `Your Apexia VIP security code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
-      });
-      params.append(TWILIO_FROM.startsWith("MG") ? "MessagingServiceSid" : "From", TWILIO_FROM);
+      if (smsConfigured) {
+        // Send via Twilio (From may be a number, alphanumeric sender, or Messaging Service SID)
+        const params = new URLSearchParams({
+          To: profile.phone,
+          Body: `Your Apexia VIP security code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
+        });
+        params.append(TWILIO_FROM!.startsWith("MG") ? "MessagingServiceSid" : "From", TWILIO_FROM!);
 
-      const twilioRes = await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-          },
-          body: params.toString(),
+        const twilioRes = await fetch(
+          `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+            },
+            body: params.toString(),
+          }
+        );
+        if (!twilioRes.ok) {
+          const twilioBody = await twilioRes.text();
+          console.error("Twilio error:", twilioRes.status, twilioBody);
+          return json(502, { error: "We could not send the SMS. Please try again." });
         }
-      );
-      if (!twilioRes.ok) {
-        const twilioBody = await twilioRes.text();
-        console.error("Twilio error:", twilioRes.status, twilioBody);
-        return json(502, { error: "We could not send the SMS. Please try again." });
+
+        return json(200, { success: true, channel: "sms", sent_to: maskPhone(profile.phone) });
       }
 
-      return json(200, { success: true, phone: maskPhone(profile.phone) });
+      // Interim channel: email the code via Resend
+      const emailRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+        },
+        body: JSON.stringify({
+          from: "Apexia VIP <info@apexiavip.com>",
+          to: [profile.email],
+          subject: `${code} is your Apexia VIP security code`,
+          html: `
+            <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 480px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px; text-align: center;">
+              <p style="color: #b89b5e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3em; margin-bottom: 24px;">Apexia VIP</p>
+              <p style="font-size: 14px; color: #8a8070;">Your security code is</p>
+              <p style="font-size: 36px; letter-spacing: 0.3em; color: #e0d5c4; margin: 16px 0;">${code}</p>
+              <p style="font-size: 12px; color: #8a8070;">It expires in ${CODE_TTL_MINUTES} minutes. If you did not request this, please contact us.</p>
+            </div>
+          `,
+        }),
+      });
+      if (!emailRes.ok) {
+        const emailBody = await emailRes.text();
+        console.error("Resend error:", emailRes.status, emailBody);
+        return json(502, { error: "We could not send the code. Please try again." });
+      }
+
+      return json(200, { success: true, channel: "email", sent_to: maskEmail(profile.email) });
     }
 
     if (action === "verify") {

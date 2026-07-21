@@ -26,8 +26,8 @@ const MembersGate = ({ children }: { children: ReactNode }) => {
           Verification Required
         </h3>
         <p className="text-smoke text-sm font-light leading-relaxed mb-8 max-w-sm mx-auto">
-          For your security, please confirm the code sent to your registered
-          mobile before making a booking.
+          For your security, please confirm the code we send you before
+          making a booking.
         </p>
         <Link
           to="/login"
@@ -51,7 +51,7 @@ const MembersGate = ({ children }: { children: ReactNode }) => {
         </h3>
         <p className="text-smoke text-sm font-light leading-relaxed mb-8 max-w-sm mx-auto">
           Bookings are reserved for invited members. Sign in with your
-          registered mobile number to continue.
+          membership details to continue.
         </p>
         <Link
           to="/login"
