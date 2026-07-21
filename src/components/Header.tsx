@@ -12,16 +12,16 @@ const Header = () => {
             <img src={apexiaLogo} alt="Apexia VIP" className="h-24 w-auto" />
           </div>
           
-          <div className="hidden md:flex items-center space-x-12">
-            <a 
-              href="#services" 
-              className="text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
+          <div className="flex items-center space-x-6 md:space-x-12">
+            <a
+              href="#services"
+              className="hidden md:inline text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
             >
               Services
             </a>
             <a
               href="#contact"
-              className="text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
+              className="hidden md:inline text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
             >
               Contact
             </a>
