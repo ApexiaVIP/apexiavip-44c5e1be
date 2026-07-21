@@ -36,10 +36,27 @@ const EMAIL_TEMPLATES: Record<string, React.ComponentType<any>> = {
 }
 
 // Configuration
-const SITE_NAME = "apexiavip"
+const SITE_NAME = "Apexia VIP"
+const FROM_NAME = "Apexia VIP"
+const FROM_LOCAL = "no-reply"
+const REPLY_TO = "info@apexiavip.com"
 const SENDER_DOMAIN = "notify.apexiavip.com"
 const ROOT_DOMAIN = "apexiavip.com"
 const FROM_DOMAIN = "notify.apexiavip.com" // Domain shown in From address (may be root or sender subdomain)
+
+// Rewrite the confirmation URL host to the custom domain, preserving path/query/hash.
+function rewriteConfirmationUrl(rawUrl: string | undefined): string {
+  if (!rawUrl) return `https://${ROOT_DOMAIN}`
+  try {
+    const u = new URL(rawUrl)
+    u.protocol = 'https:'
+    u.host = ROOT_DOMAIN
+    u.port = ''
+    return u.toString()
+  } catch {
+    return rawUrl
+  }
+}
 
 // Sample data for preview mode ONLY (not used in actual email sending).
 // URLs are baked in at scaffold time from the project's real data.
