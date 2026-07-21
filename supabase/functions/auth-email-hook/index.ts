@@ -17,12 +17,12 @@ const corsHeaders = {
 }
 
 const EMAIL_SUBJECTS: Record<string, string> = {
-  signup: 'Confirm your APEXIA VIP membership',
-  invite: 'Your APEXIA VIP invitation',
-  magiclink: 'Your APEXIA VIP access link',
-  recovery: 'Reset your APEXIA VIP password',
-  email_change: 'Confirm your APEXIA VIP email change',
-  reauthentication: 'Your APEXIA VIP verification code',
+  signup: 'Confirm your email',
+  invite: "You've been invited",
+  magiclink: 'Your login link',
+  recovery: 'Reset your password',
+  email_change: 'Confirm your new email',
+  reauthentication: 'Your verification code',
 }
 
 // Template mapping
@@ -36,28 +36,10 @@ const EMAIL_TEMPLATES: Record<string, React.ComponentType<any>> = {
 }
 
 // Configuration
-const SITE_NAME = "Apexia VIP"
-const FROM_NAME = "Apexia VIP"
-const FROM_LOCAL = "no-reply"
-const REPLY_TO = "info@apexiavip.com"
+const SITE_NAME = "apexiavip"
 const SENDER_DOMAIN = "notify.apexiavip.com"
 const ROOT_DOMAIN = "apexiavip.com"
 const FROM_DOMAIN = "notify.apexiavip.com" // Domain shown in From address (may be root or sender subdomain)
-
-// Rewrite auth action URLs to the public custom domain while preserving path/query/hash.
-function rewriteConfirmationUrl(rawUrl: string | undefined): string {
-  if (!rawUrl) return `https://${ROOT_DOMAIN}`
-
-  try {
-    const url = new URL(rawUrl)
-    url.protocol = 'https:'
-    url.host = ROOT_DOMAIN
-    url.port = ''
-    return url.toString()
-  } catch {
-    return rawUrl
-  }
-}
 
 // Sample data for preview mode ONLY (not used in actual email sending).
 // URLs are baked in at scaffold time from the project's real data.
@@ -241,7 +223,7 @@ async function handleWebhook(req: Request): Promise<Response> {
     siteName: SITE_NAME,
     siteUrl: `https://${ROOT_DOMAIN}`,
     recipient: payload.data.email,
-    confirmationUrl: rewriteConfirmationUrl(payload.data.url),
+    confirmationUrl: payload.data.url,
     token: payload.data.token,
     email: payload.data.email,
     oldEmail: payload.data.old_email,
@@ -276,8 +258,7 @@ async function handleWebhook(req: Request): Promise<Response> {
       run_id,
       message_id: messageId,
       to: payload.data.email,
-      from: `${FROM_NAME} <${FROM_LOCAL}@${FROM_DOMAIN}>`,
-      reply_to: REPLY_TO,
+      from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
       sender_domain: SENDER_DOMAIN,
       subject: EMAIL_SUBJECTS[emailType] || 'Notification',
       html,
