@@ -36,17 +36,34 @@ const EMAIL_TEMPLATES: Record<string, React.ComponentType<any>> = {
 }
 
 // Configuration
-const SITE_NAME = "apexiavip"
+const SITE_NAME = "Apexia VIP"
+const FROM_NAME = "Apexia VIP"
+const FROM_LOCAL = "no-reply"
+const REPLY_TO = "info@apexiavip.com"
 const SENDER_DOMAIN = "notify.apexiavip.com"
 const ROOT_DOMAIN = "apexiavip.com"
 const FROM_DOMAIN = "notify.apexiavip.com" // Domain shown in From address (may be root or sender subdomain)
+
+// Rewrite the confirmation URL host to the custom domain, preserving path/query/hash.
+function rewriteConfirmationUrl(rawUrl: string | undefined): string {
+  if (!rawUrl) return `https://${ROOT_DOMAIN}`
+  try {
+    const url = new URL(rawUrl)
+    url.protocol = 'https:'
+    url.host = ROOT_DOMAIN
+    url.port = ''
+    return url.toString()
+  } catch {
+    return rawUrl
+  }
+}
 
 // Sample data for preview mode ONLY (not used in actual email sending).
 // URLs are baked in at scaffold time from the project's real data.
 // The sample email uses a fixed placeholder (RFC 6761 .test TLD) so the Go backend
 // can always find-and-replace it with the actual recipient when sending test emails,
 // even if the project's domain has changed since the template was scaffolded.
-const SAMPLE_PROJECT_URL = "https://apexiavip.lovable.app"
+const SAMPLE_PROJECT_URL = "https://apexiavip.com"
 const SAMPLE_EMAIL = "user@example.test"
 const SAMPLE_DATA: Record<string, object> = {
   signup: {
@@ -219,11 +236,12 @@ async function handleWebhook(req: Request): Promise<Response> {
   }
 
   // Build template props from payload.data (HookData structure)
+  const confirmationUrl = rewriteConfirmationUrl(payload.data.url)
   const templateProps = {
     siteName: SITE_NAME,
     siteUrl: `https://${ROOT_DOMAIN}`,
     recipient: payload.data.email,
-    confirmationUrl: payload.data.url,
+    confirmationUrl,
     token: payload.data.token,
     email: payload.data.email,
     oldEmail: payload.data.old_email,
@@ -258,7 +276,8 @@ async function handleWebhook(req: Request): Promise<Response> {
       run_id,
       message_id: messageId,
       to: payload.data.email,
-      from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
+      from: `${FROM_NAME} <${FROM_LOCAL}@${FROM_DOMAIN}>`,
+      reply_to: REPLY_TO,
       sender_domain: SENDER_DOMAIN,
       subject: EMAIL_SUBJECTS[emailType] || 'Notification',
       html,
