@@ -91,16 +91,15 @@ serve(async (req) => {
         return json(400, { error: "Phone must be in international format, e.g. +447700900123" });
       }
 
-      // Send the invitation email; the link takes them to /welcome to set a
-      // password and verify their mobile
-      const origin = req.headers.get("origin") ?? "https://apexiavip.com";
-      const { data: created, error: createError } = await admin.auth.admin.inviteUserByEmail(
+      // Create the member directly: sign-in is passwordless (mobile + SMS code),
+      // so nothing in onboarding depends on an email being delivered
+      const { data: created, error: createError } = await admin.auth.admin.createUser({
         email,
-        {
-          data: { full_name: fullName },
-          redirectTo: `${origin}/welcome`,
-        }
-      );
+        phone,
+        email_confirm: true,
+        phone_confirm: true,
+        user_metadata: { full_name: fullName },
+      });
       if (createError) {
         const msg = createError.message?.includes("already")
           ? "A user with this phone or email already exists"
@@ -109,19 +108,6 @@ serve(async (req) => {
       }
 
       const userId = created.user.id;
-
-      // Attach their mobile number; it becomes their SMS 2FA number on first sign-in
-      const { error: phoneError } = await admin.auth.admin.updateUserById(userId, {
-        phone,
-        phone_confirm: true,
-      });
-      if (phoneError) {
-        await admin.auth.admin.deleteUser(userId);
-        const msg = phoneError.message?.includes("already")
-          ? "A user with this phone number already exists"
-          : phoneError.message;
-        return json(400, { error: msg });
-      }
       const { error: profileError } = await admin.from("profiles").insert({
         id: userId,
         full_name: fullName,
@@ -136,6 +122,36 @@ serve(async (req) => {
         .from("user_roles")
         .insert({ user_id: userId, role: "member" });
       if (roleError) throw roleError;
+
+      // Courtesy welcome email: purely informational, sign-in never depends on it
+      const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+      if (RESEND_API_KEY) {
+        try {
+          await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${RESEND_API_KEY}`,
+            },
+            body: JSON.stringify({
+              from: "Apexia VIP <info@apexiavip.com>",
+              to: [email],
+              subject: "Welcome to Apexia VIP",
+              html: `
+                <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 520px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 48px 40px; text-align: center;">
+                  <p style="color: #b89b5e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3em; margin-bottom: 28px;">Apexia VIP</p>
+                  <p style="font-size: 20px; font-weight: 300; letter-spacing: 0.05em; margin-bottom: 20px;">Welcome, ${fullName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+                  <p style="font-size: 14px; color: #8a8070; line-height: 1.7;">Your membership is now active. To sign in, simply visit the site, choose Members, and enter this mobile number ending ${phone.slice(-3)}. We will text you a secure access code. There is no password to remember.</p>
+                  <p style="margin: 32px 0;"><a href="https://apexiavip.com/login" style="color: #b89b5e; border: 1px solid #b89b5e; padding: 14px 36px; text-decoration: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.2em;">Member Sign In</a></p>
+                  <p style="font-size: 11px; color: #8a8070;">All enquiries are handled with complete discretion.</p>
+                </div>
+              `,
+            }),
+          });
+        } catch (emailError) {
+          console.error("Welcome email failed (non-blocking):", emailError);
+        }
+      }
 
       return json(200, { success: true, user_id: userId });
     }

@@ -185,9 +185,9 @@ const Admin = () => {
                   Invite a Member
                 </DialogTitle>
                 <DialogDescription>
-                  They will receive an email invitation with a secure link to set
-                  their password and confirm a security code. This mobile number
-                  is used for SMS codes once SMS is enabled.
+                  Access is immediate: they sign in with this mobile number and
+                  a one-time code sent by text. No password, no email link. A
+                  welcome email is sent as a courtesy.
                 </DialogDescription>
               </DialogHeader>
               <form

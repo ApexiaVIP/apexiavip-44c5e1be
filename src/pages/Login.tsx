@@ -1,13 +1,34 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { startPhoneChallenge, describeChallenge, type PhoneChallenge } from "@/lib/mfa";
+import {
+  startPhoneChallenge,
+  startPhoneLogin,
+  finishPhoneLogin,
+  describeChallenge,
+  type PhoneChallenge,
+} from "@/lib/mfa";
 import AuthShell from "@/components/AuthShell";
 import SmsCodeStep from "@/components/SmsCodeStep";
+import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+} from "@/components/ui/input-otp";
+
+const RESEND_COOLDOWN = 60;
+
+const normalisePhone = (countryCode: string, phone: string) => {
+  const digits = phone.replace(/[\s\-()]/g, "").replace(/^0+/, "");
+  return `${countryCode}${digits}`;
+};
+
+const surfaceError = (err: unknown, fallback: string) =>
+  err instanceof Error && err.message !== "Something went wrong" ? err.message : fallback;
 
 const Login = () => {
   const { user, mfaVerified, refreshMfa, loading } = useAuth();
@@ -15,115 +36,125 @@ const Login = () => {
   const location = useLocation();
   const redirectTo = (location.state as { from?: string } | null)?.from ?? "/#contact";
 
-  const [step, setStep] = useState<"credentials" | "code">("credentials");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  // "fresh": passwordless phone sign-in. "session": an existing signed-in
+  // session that just needs code re-verification (e.g. after an admin 2FA reset).
+  const [mode, setMode] = useState<"fresh" | "session">("fresh");
+  const [step, setStep] = useState<"phone" | "code">("phone");
+  const [countryCode, setCountryCode] = useState("+44");
+  const [phone, setPhone] = useState("");
   const [challenge, setChallenge] = useState<PhoneChallenge | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
   const startedRef = useRef(false);
 
-  // Fully signed in already: leave. Signed in but not SMS-verified: jump to code step.
+  const fullPhone = normalisePhone(countryCode, phone);
+
   useEffect(() => {
     if (loading) return;
     if (user && mfaVerified) {
       navigate(redirectTo, { replace: true });
       return;
     }
-    if (user && !mfaVerified && step === "credentials" && !startedRef.current) {
+    if (user && !mfaVerified && !startedRef.current) {
       startedRef.current = true;
-      beginChallenge();
+      (async () => {
+        setSubmitting(true);
+        try {
+          const fresh = await startPhoneChallenge();
+          setChallenge(fresh);
+          setMode("session");
+          setStep("code");
+        } catch (err) {
+          setError(surfaceError(err, "We could not send your access code. Please try again."));
+        } finally {
+          setSubmitting(false);
+        }
+      })();
     }
   }, [loading, user, mfaVerified]);
 
-  const beginChallenge = async () => {
-    // Guard against the session-watcher effect and the submit handler both
-    // requesting a code for the same sign-in
-    startedRef.current = true;
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const sendCode = async () => {
     setError(null);
+    if (!/^\+[1-9]\d{7,14}$/.test(fullPhone)) {
+      setError("Please enter a valid phone number.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const fresh = await startPhoneChallenge();
+      const fresh = await startPhoneLogin(fullPhone);
       setChallenge(fresh);
       setStep("code");
+      setCode("");
+      setCooldown(RESEND_COOLDOWN);
     } catch (err) {
-      setError(
-        err instanceof Error && err.message !== "Something went wrong"
-          ? err.message
-          : "We could not send your verification code. Please try again."
-      );
+      setError(surfaceError(err, "We could not send your access code. Please try again."));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const signIn = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const verifyFresh = async (token: string) => {
     setError(null);
     setSubmitting(true);
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-
-    if (signInError) {
+    try {
+      await finishPhoneLogin(fullPhone, token);
+      await refreshMfa();
+      navigate(redirectTo, { replace: true });
+    } catch (err) {
+      setCode("");
+      setError(surfaceError(err, "That code is incorrect or has expired. Please try again."));
+    } finally {
       setSubmitting(false);
-      const msg = signInError.message.toLowerCase();
-      if (msg.includes("banned")) {
-        setError("Your membership is not currently active. Please contact us.");
-      } else {
-        setError("Incorrect email or password.");
-      }
-      return;
     }
-    await beginChallenge();
   };
 
   return (
     <AuthShell
-      title={step === "credentials" ? "Sign In" : "Verify It's You"}
+      title={step === "phone" ? "Sign In" : "Enter Your Code"}
       subtitle={
-        step === "credentials"
-          ? "Enter your membership email and password. We will then send you a security code."
+        step === "phone"
+          ? "Enter the mobile number registered with your membership and we will send you a secure access code. No password needed."
           : describeChallenge(challenge)
       }
     >
-      {step === "credentials" ? (
-        <form onSubmit={signIn} className="space-y-4">
-          <Input
-            type="email"
-            autoComplete="email"
-            placeholder="Email address"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <Input
-            type="password"
-            autoComplete="current-password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+      {step === "phone" ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            sendCode();
+          }}
+          className="space-y-6"
+        >
+          <div className="flex gap-3">
+            <CountryCodeSelect value={countryCode} onChange={setCountryCode} />
+            <Input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="7700 900123"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="flex-1"
+            />
+          </div>
           {error && <p className="text-destructive text-sm">{error}</p>}
           <Button
             type="submit"
-            disabled={submitting || !email.trim() || !password}
+            disabled={submitting || !phone.trim()}
             className="w-full tracking-[0.2em] uppercase"
           >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Continue"}
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send Code"}
           </Button>
-          <div className="pt-2">
-            <Link
-              to="/reset-password"
-              className="text-smoke hover:text-foreground transition-colors text-xs tracking-[0.15em] uppercase"
-            >
-              Forgotten Password
-            </Link>
-          </div>
         </form>
-      ) : user && challenge ? (
+      ) : mode === "session" && user && challenge ? (
         <SmsCodeStep
           challenge={challenge}
           onChallengeChange={setChallenge}
@@ -133,7 +164,49 @@ const Login = () => {
           }}
         />
       ) : (
-        <Loader2 className="w-5 h-5 animate-spin mx-auto text-champagne" />
+        <div className="space-y-6">
+          <div className="flex justify-center">
+            <InputOTP
+              maxLength={6}
+              value={code}
+              onChange={(value) => {
+                setCode(value);
+                if (value.length === 6) verifyFresh(value);
+              }}
+              disabled={submitting}
+            >
+              <InputOTPGroup>
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <InputOTPSlot key={i} index={i} />
+                ))}
+              </InputOTPGroup>
+            </InputOTP>
+          </div>
+          {error && <p className="text-destructive text-sm">{error}</p>}
+          {submitting && (
+            <Loader2 className="w-4 h-4 animate-spin mx-auto text-champagne" />
+          )}
+          <div className="flex items-center justify-center gap-6 text-xs tracking-[0.15em] uppercase">
+            <button
+              type="button"
+              onClick={() => {
+                setStep("phone");
+                setError(null);
+              }}
+              className="text-smoke hover:text-foreground transition-colors"
+            >
+              Change Number
+            </button>
+            <button
+              type="button"
+              onClick={sendCode}
+              disabled={cooldown > 0 || submitting}
+              className="text-smoke hover:text-foreground transition-colors disabled:opacity-40"
+            >
+              {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend Code"}
+            </button>
+          </div>
+        </div>
       )}
     </AuthShell>
   );
