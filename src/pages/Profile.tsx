@@ -5,6 +5,7 @@ import { ArrowLeft, Camera, Loader2, UserPlus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { invokeMemberFamily } from "@/lib/mfa";
+import SignedAvatar, { resolveAvatarUrl } from "@/components/SignedAvatar";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +44,7 @@ const Profile = () => {
   const [town, setTown] = useState("");
   const [postcode, setPostcode] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarPreview, setAvatarPreview] = useState("");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -64,6 +66,7 @@ const Profile = () => {
     setTown(profile.town);
     setPostcode(profile.postcode);
     setAvatarUrl(profile.avatar_url);
+    resolveAvatarUrl(profile.avatar_url).then(setAvatarPreview);
   }, [profile]);
 
   const isPrimary = !!profile && !profile.primary_member_id;
@@ -116,8 +119,9 @@ const Profile = () => {
       const path = `${user.id}/avatar-${Date.now()}.${ext}`;
       const { error } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
       if (error) throw error;
-      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-      setAvatarUrl(data.publicUrl);
+      // The bucket is private: store the path and display via signed URLs
+      setAvatarUrl(path);
+      setAvatarPreview(URL.createObjectURL(file));
     } catch {
       toast({ title: "Upload failed", description: "Please try a different image.", variant: "destructive" });
     } finally {
@@ -200,8 +204,8 @@ const Profile = () => {
               className="relative w-24 h-24 rounded-full border border-champagne-muted overflow-hidden group"
               disabled={uploading}
             >
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+              {avatarPreview ? (
+                <img src={avatarPreview} alt="Profile" className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-charcoal">
                   <Camera className="w-6 h-6 text-champagne" />
@@ -364,15 +368,7 @@ const Profile = () => {
                     className="flex items-center justify-between border border-border px-4 py-3"
                   >
                     <div className="flex items-center gap-3">
-                      {m.avatar_url ? (
-                        <img
-                          src={m.avatar_url}
-                          alt=""
-                          className="w-8 h-8 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-charcoal border border-border" />
-                      )}
+                      <SignedAvatar src={m.avatar_url} className="w-8 h-8 rounded-full" />
                       <div className="text-left">
                         <p className="text-foreground text-sm">{m.full_name}</p>
                         <p className="text-smoke text-xs">{m.phone}</p>

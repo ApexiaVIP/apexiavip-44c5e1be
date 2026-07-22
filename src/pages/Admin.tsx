@@ -5,6 +5,7 @@ import { ArrowLeft, Loader2, UserPlus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
+import SignedAvatar from "@/components/SignedAvatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -289,15 +290,7 @@ const Admin = () => {
                   <TableRow key={m.id}>
                     <TableCell className="font-medium">
                       <span className="inline-flex items-center gap-2">
-                        {m.avatar_url ? (
-                          <img
-                            src={m.avatar_url}
-                            alt=""
-                            className="w-7 h-7 rounded-full object-cover"
-                          />
-                        ) : (
-                          <span className="w-7 h-7 rounded-full bg-charcoal border border-border inline-block" />
-                        )}
+                        <SignedAvatar src={m.avatar_url} className="w-7 h-7 rounded-full" />
                         <span>
                           {m.full_name || "—"}
                           {primary && (
