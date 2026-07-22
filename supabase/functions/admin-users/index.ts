@@ -64,7 +64,9 @@ serve(async (req) => {
     if (action === "list") {
       const { data: profiles, error } = await admin
         .from("profiles")
-        .select("id, full_name, email, phone, status, created_at")
+        .select(
+          "id, full_name, email, phone, status, created_at, avatar_url, primary_member_id, profile_completed"
+        )
         .order("created_at", { ascending: false });
       if (error) throw error;
 
@@ -85,16 +87,24 @@ serve(async (req) => {
       const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
       const phone = typeof body.phone === "string" ? body.phone.replace(/[\s\-()]/g, "") : "";
 
-      if (!fullName || fullName.length > 100) return json(400, { error: "Invalid name" });
-      if (!email.includes("@") || email.length > 255) return json(400, { error: "Invalid email" });
+      // Only the mobile number is required; the member completes the rest
+      // of their profile after first sign-in
+      if (fullName.length > 100) return json(400, { error: "Invalid name" });
+      if (email && (!email.includes("@") || email.length > 255)) {
+        return json(400, { error: "Invalid email" });
+      }
       if (!isValidPhone(phone)) {
         return json(400, { error: "Phone must be in international format, e.g. +447700900123" });
       }
 
+      // Sign-in never uses this address; it only anchors the auth account
+      // until the member provides their real email in their profile
+      const authEmail = email || `member-${phone.replace(/\D/g, "")}@members.apexiavip.com`;
+
       // Create the member directly: sign-in is passwordless (mobile + SMS code),
       // so nothing in onboarding depends on an email being delivered
       const { data: created, error: createError } = await admin.auth.admin.createUser({
-        email,
+        email: authEmail,
         phone,
         email_confirm: true,
         phone_confirm: true,
@@ -125,7 +135,7 @@ serve(async (req) => {
 
       // Courtesy welcome email: purely informational, sign-in never depends on it
       const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-      if (RESEND_API_KEY) {
+      if (RESEND_API_KEY && email) {
         try {
           await fetch("https://api.resend.com/emails", {
             method: "POST",
@@ -183,6 +193,38 @@ serve(async (req) => {
         await admin.from("mfa_sessions").delete().eq("user_id", userId);
       }
 
+      return json(200, { success: true });
+    }
+
+    if (action === "approve_family" || action === "reject_family") {
+      const userId = body?.user_id;
+      if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });
+
+      const { data: target } = await admin
+        .from("profiles")
+        .select("id, status")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!target || target.status !== "pending") {
+        return json(400, { error: "No pending request found for this member" });
+      }
+
+      if (action === "approve_family") {
+        const { error: unbanError } = await admin.auth.admin.updateUserById(userId, {
+          ban_duration: "none",
+        });
+        if (unbanError) throw unbanError;
+        const { error: statusError } = await admin
+          .from("profiles")
+          .update({ status: "active" })
+          .eq("id", userId);
+        if (statusError) throw statusError;
+        return json(200, { success: true });
+      }
+
+      // Reject: remove the account entirely (cascades to profile and role)
+      const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
+      if (deleteError) throw deleteError;
       return json(200, { success: true });
     }
 

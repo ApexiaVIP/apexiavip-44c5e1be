@@ -16,6 +16,14 @@ interface Profile {
   phone: string;
   status: string;
   created_at: string;
+  address_line1: string;
+  address_line2: string;
+  town: string;
+  postcode: string;
+  country: string;
+  avatar_url: string;
+  profile_completed: boolean;
+  primary_member_id: string | null;
 }
 
 interface AuthContextValue {
@@ -27,6 +35,8 @@ interface AuthContextValue {
   mfaVerified: boolean;
   /** Re-check SMS verification status (call after a successful verify) */
   refreshMfa: () => Promise<void>;
+  /** Re-fetch the profile (call after the member edits it) */
+  refreshProfile: () => Promise<void>;
   loading: boolean;
   signOut: () => Promise<void>;
 }
@@ -99,6 +109,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [session?.access_token]);
 
+  const refreshProfile = async () => {
+    const userId = session?.user?.id;
+    if (!userId) return;
+    const { data } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+    setProfile(data ?? null);
+  };
+
   const refreshMfa = async () => {
     try {
       setMfaVerified(await checkMfaStatus());
@@ -120,6 +137,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isAdmin,
         mfaVerified,
         refreshMfa,
+        refreshProfile,
         loading,
         signOut,
       }}

@@ -33,6 +33,14 @@ const Header = () => {
                 Admin
               </Link>
             )}
+            {user && (
+              <Link
+                to="/profile"
+                className="text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
+              >
+                Account
+              </Link>
+            )}
             {user ? (
               <button
                 type="button"

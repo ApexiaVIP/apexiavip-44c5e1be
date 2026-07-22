@@ -10,6 +10,7 @@ import Index from "./pages/Index";
 import VehicleDetail from "./pages/VehicleDetail";
 import Login from "./pages/Login";
 import Welcome from "./pages/Welcome";
+import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
@@ -47,6 +48,7 @@ const App = () => (
             <Route path="/welcome" element={<Welcome />} />
             {/* Legacy links from the password era */}
             <Route path="/reset-password" element={<Navigate to="/login" replace />} />
+            <Route path="/profile" element={<Profile />} />
             <Route path="/admin" element={<Admin />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

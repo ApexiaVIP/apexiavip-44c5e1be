@@ -44,6 +44,9 @@ interface Member {
   phone: string;
   status: string;
   created_at: string;
+  avatar_url: string;
+  primary_member_id: string | null;
+  profile_completed: boolean;
   roles: string[];
 }
 
@@ -94,7 +97,10 @@ const Admin = () => {
         phone: `${countryCode}${phone.replace(/[\s\-()]/g, "").replace(/^0+/, "")}`,
       }),
     onSuccess: () => {
-      toast({ title: "Member invited", description: `${fullName} can now sign in with their mobile number.` });
+      toast({
+        title: "Member invited",
+        description: `${fullName || "The new member"} can now sign in with their mobile number.`,
+      });
       setInviteOpen(false);
       setFullName("");
       setEmail("");
@@ -126,6 +132,20 @@ const Admin = () => {
     },
     onError: (err: Error) => {
       toast({ title: "Reset failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const familyDecision = useMutation({
+    mutationFn: ({ userId, action }: { userId: string; action: "approve_family" | "reject_family" }) =>
+      invokeAdmin({ action, user_id: userId }),
+    onSuccess: (_data, vars) => {
+      toast({
+        title: vars.action === "approve_family" ? "Family member approved" : "Request declined",
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Update failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -198,19 +218,17 @@ const Admin = () => {
                 className="space-y-4 mt-2"
               >
                 <Input
-                  placeholder="Full name"
+                  placeholder="Full name (optional)"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   maxLength={100}
-                  required
                 />
                 <Input
                   type="email"
-                  placeholder="Email address"
+                  placeholder="Email address (optional)"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   maxLength={255}
-                  required
                 />
                 <div className="flex gap-3">
                   <CountryCodeSelect value={countryCode} onChange={setCountryCode} />
@@ -263,10 +281,32 @@ const Admin = () => {
               {(members ?? []).map((m) => {
                 const memberIsAdmin = m.roles.includes("admin");
                 const revoked = m.status === "revoked";
+                const pending = m.status === "pending";
+                const primary = m.primary_member_id
+                  ? (members ?? []).find((p) => p.id === m.primary_member_id)
+                  : null;
                 return (
                   <TableRow key={m.id}>
                     <TableCell className="font-medium">
-                      {m.full_name || "—"}
+                      <span className="inline-flex items-center gap-2">
+                        {m.avatar_url ? (
+                          <img
+                            src={m.avatar_url}
+                            alt=""
+                            className="w-7 h-7 rounded-full object-cover"
+                          />
+                        ) : (
+                          <span className="w-7 h-7 rounded-full bg-charcoal border border-border inline-block" />
+                        )}
+                        <span>
+                          {m.full_name || "—"}
+                          {primary && (
+                            <span className="block text-xs text-smoke font-normal">
+                              Family of {primary.full_name || primary.phone}
+                            </span>
+                          )}
+                        </span>
+                      </span>
                       {memberIsAdmin && (
                         <Badge variant="outline" className="ml-2 text-champagne border-champagne">
                           Admin
@@ -274,10 +314,13 @@ const Admin = () => {
                       )}
                     </TableCell>
                     <TableCell>{m.phone}</TableCell>
-                    <TableCell>{m.email}</TableCell>
+                    <TableCell>{m.email || "—"}</TableCell>
                     <TableCell>
-                      <Badge variant={revoked ? "destructive" : "secondary"}>
-                        {revoked ? "Revoked" : "Active"}
+                      <Badge
+                        variant={revoked ? "destructive" : pending ? "outline" : "secondary"}
+                        className={pending ? "text-champagne border-champagne" : undefined}
+                      >
+                        {revoked ? "Revoked" : pending ? "Pending" : "Active"}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -288,7 +331,30 @@ const Admin = () => {
                       })}
                     </TableCell>
                     <TableCell className="text-right space-x-2">
-                      {!memberIsAdmin && m.id !== user.id && !revoked && (
+                      {pending && (
+                        <>
+                          <Button
+                            size="sm"
+                            disabled={familyDecision.isPending}
+                            onClick={() =>
+                              familyDecision.mutate({ userId: m.id, action: "approve_family" })
+                            }
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={familyDecision.isPending}
+                            onClick={() =>
+                              familyDecision.mutate({ userId: m.id, action: "reject_family" })
+                            }
+                          >
+                            Decline
+                          </Button>
+                        </>
+                      )}
+                      {!pending && !memberIsAdmin && m.id !== user.id && !revoked && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -301,7 +367,7 @@ const Admin = () => {
                           Reset 2FA
                         </Button>
                       )}
-                      {memberIsAdmin || m.id === user.id ? null : revoked ? (
+                      {pending || memberIsAdmin || m.id === user.id ? null : revoked ? (
                         <Button
                           variant="outline"
                           size="sm"

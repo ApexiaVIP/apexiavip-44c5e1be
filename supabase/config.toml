@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.phone-login]
 verify_jwt = false
+
+[functions.member-family]
+verify_jwt = false

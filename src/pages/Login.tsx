@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import {
   startPhoneChallenge,
@@ -50,6 +51,18 @@ const Login = () => {
   const startedRef = useRef(false);
 
   const fullPhone = normalisePhone(countryCode, phone);
+
+  // First sign-in goes to profile completion; after that, to the booking form
+  const destinationAfterVerify = async () => {
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) return redirectTo;
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("profile_completed")
+      .eq("id", data.user.id)
+      .maybeSingle();
+    return prof && !prof.profile_completed ? "/profile?welcome=1" : redirectTo;
+  };
 
   useEffect(() => {
     if (loading) return;
@@ -111,7 +124,7 @@ const Login = () => {
     try {
       await finishPhoneLogin(fullPhone, token);
       await refreshMfa();
-      navigate(redirectTo, { replace: true });
+      navigate(await destinationAfterVerify(), { replace: true });
     } catch (err) {
       setCode("");
       setError(surfaceError(err, "That code is incorrect or has expired. Please try again."));
@@ -164,7 +177,7 @@ const Login = () => {
           onChallengeChange={setChallenge}
           onVerified={async () => {
             await refreshMfa();
-            navigate(redirectTo, { replace: true });
+            navigate(await destinationAfterVerify(), { replace: true });
           }}
         />
       ) : (

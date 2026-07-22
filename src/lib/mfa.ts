@@ -34,6 +34,10 @@ const invokeFn = async (name: string, body: Record<string, unknown>) => {
 
 const invoke2fa = (body: Record<string, unknown>) => invokeFn("sms-2fa", body);
 
+/** Family member requests (primary members only). */
+export const invokeMemberFamily = (body: Record<string, unknown>) =>
+  invokeFn("member-family", body);
+
 /**
  * Passwordless sign-in, step 1: send an access code to a registered mobile.
  * Unauthenticated; the number must belong to an active member.
