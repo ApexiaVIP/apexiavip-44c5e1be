@@ -57,7 +57,10 @@ const Login = () => {
       navigate(redirectTo, { replace: true });
       return;
     }
-    if (user && !mfaVerified && !startedRef.current) {
+    // Only auto-start a challenge for an already-signed-in visitor landing on
+    // the phone step; never mid fresh sign-in (the session appears a moment
+    // before its verification stamp, which must not trigger a second code)
+    if (user && !mfaVerified && step === "phone" && !startedRef.current) {
       startedRef.current = true;
       (async () => {
         setSubmitting(true);
@@ -88,6 +91,7 @@ const Login = () => {
       return;
     }
     setSubmitting(true);
+    startedRef.current = true;
     try {
       const fresh = await startPhoneLogin(fullPhone);
       setChallenge(fresh);
