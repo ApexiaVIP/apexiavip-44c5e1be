@@ -33,6 +33,9 @@ interface AuthContextValue {
   isAdmin: boolean;
   /** True only once the user has passed SMS verification this session */
   mfaVerified: boolean;
+  /** True once the verification status has actually been determined; act on
+   * mfaVerified only when this is true (prevents duplicate code sends) */
+  mfaResolved: boolean;
   /** Re-check SMS verification status (call after a successful verify) */
   refreshMfa: () => Promise<void>;
   /** Re-fetch the profile (call after the member edits it) */
@@ -48,6 +51,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [mfaVerified, setMfaVerified] = useState(false);
+  const [mfaResolved, setMfaResolved] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -58,6 +62,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setProfile(null);
           setIsAdmin(false);
           setMfaVerified(false);
+          setMfaResolved(true);
           setLoading(false);
         }
       }
@@ -103,6 +108,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       })
       .catch(() => {
         if (!cancelled) setMfaVerified(false);
+      })
+      .finally(() => {
+        if (!cancelled) setMfaResolved(true);
       });
     return () => {
       cancelled = true;
@@ -136,6 +144,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         profile,
         isAdmin,
         mfaVerified,
+        mfaResolved,
         refreshMfa,
         refreshProfile,
         loading,

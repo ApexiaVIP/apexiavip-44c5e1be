@@ -5,9 +5,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const MembersGate = ({ children }: { children: ReactNode }) => {
-  const { user, profile, mfaVerified, loading, signOut } = useAuth();
+  const { user, profile, mfaVerified, mfaResolved, loading, signOut } = useAuth();
 
-  if (loading) {
+  if (loading || (user && !mfaResolved)) {
     return (
       <div className="space-y-4 py-8">
         <Skeleton className="h-8 w-1/2 mx-auto" />

@@ -42,7 +42,7 @@ interface FamilyMember {
 const fieldLabel = "text-smoke text-xs tracking-[0.2em] uppercase block text-left mb-2";
 
 const Profile = () => {
-  const { user, profile, mfaVerified, refreshProfile, loading } = useAuth();
+  const { user, profile, mfaVerified, mfaResolved, refreshProfile, loading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isWelcome = searchParams.get("welcome") === "1";
@@ -185,7 +185,7 @@ const Profile = () => {
     if (isWelcome) navigate("/#contact");
   };
 
-  if (loading) {
+  if (loading || (user && !mfaResolved)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-champagne" />

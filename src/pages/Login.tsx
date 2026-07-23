@@ -32,7 +32,7 @@ const surfaceError = (err: unknown, fallback: string) =>
   err instanceof Error && err.message !== "Something went wrong" ? err.message : fallback;
 
 const Login = () => {
-  const { user, mfaVerified, refreshMfa, loading } = useAuth();
+  const { user, mfaVerified, mfaResolved, refreshMfa, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const redirectTo = (location.state as { from?: string } | null)?.from ?? "/#contact";
@@ -65,7 +65,9 @@ const Login = () => {
   };
 
   useEffect(() => {
-    if (loading) return;
+    // Wait until the session's verification status is actually known;
+    // acting early sent a wasted code on every refresh
+    if (loading || (user && !mfaResolved)) return;
     if (user && mfaVerified) {
       navigate(redirectTo, { replace: true });
       return;
@@ -89,7 +91,7 @@ const Login = () => {
         }
       })();
     }
-  }, [loading, user, mfaVerified]);
+  }, [loading, user, mfaVerified, mfaResolved]);
 
   useEffect(() => {
     if (cooldown <= 0) return;

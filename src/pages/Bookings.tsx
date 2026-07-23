@@ -72,7 +72,7 @@ const addressLine = (a: StoredAddress | null) =>
   a ? [a.line1, a.town].filter(Boolean).join(", ") : "";
 
 const Bookings = () => {
-  const { user, mfaVerified, loading } = useAuth();
+  const { user, mfaVerified, mfaResolved, loading } = useAuth();
   const queryClient = useQueryClient();
 
   const cancel = useMutation({
@@ -149,7 +149,7 @@ const Bookings = () => {
   const liveFor = (reference: string | null): LiveBookingStatus | undefined =>
     liveStatuses?.find((s) => s.reference === reference);
 
-  if (loading) {
+  if (loading || (user && !mfaResolved)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-champagne" />
