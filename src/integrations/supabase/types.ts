@@ -361,6 +361,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_family_member_of: {
+        Args: { _member: string; _primary: string }
+        Returns: boolean
+      }
       move_to_dlq: {
         Args: {
           dlq_name: string
