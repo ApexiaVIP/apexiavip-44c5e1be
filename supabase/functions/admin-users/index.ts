@@ -16,6 +16,32 @@ const json = (status: number, body: unknown) =>
 // E.164: + followed by 8-15 digits
 const isValidPhone = (phone: string) => /^\+[1-9]\d{7,14}$/.test(phone);
 
+// Best-effort notification SMS via Twilio; failures are logged, never thrown
+const trySendSms = async (to: string, bodyText: string) => {
+  const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
+  const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
+  const TWILIO_FROM = Deno.env.get("TWILIO_FROM");
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM || !to) return;
+  try {
+    const params = new URLSearchParams({ To: to, Body: bodyText });
+    params.append(TWILIO_FROM.startsWith("MG") ? "MessagingServiceSid" : "From", TWILIO_FROM);
+    const res = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+        },
+        body: params.toString(),
+      }
+    );
+    if (!res.ok) console.error("Notification SMS failed:", res.status, await res.text());
+  } catch (err) {
+    console.error("Notification SMS failed:", err);
+  }
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -133,7 +159,13 @@ serve(async (req) => {
         .insert({ user_id: userId, role: "member" });
       if (roleError) throw roleError;
 
-      // Courtesy welcome email: purely informational, sign-in never depends on it
+      // Tell the new member they're in: welcome SMS, plus a courtesy email
+      // when we have an address. Sign-in never depends on either.
+      await trySendSms(
+        phone,
+        "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed."
+      );
+
       const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
       if (RESEND_API_KEY && email) {
         try {
@@ -202,7 +234,7 @@ serve(async (req) => {
 
       const { data: target } = await admin
         .from("profiles")
-        .select("id, status")
+        .select("id, status, full_name, phone, primary_member_id")
         .eq("id", userId)
         .maybeSingle();
       if (!target || target.status !== "pending") {
@@ -219,6 +251,26 @@ serve(async (req) => {
           .update({ status: "active" })
           .eq("id", userId);
         if (statusError) throw statusError;
+
+        // Tell the new family member they're in, and the primary it went through
+        await trySendSms(
+          target.phone,
+          "APEXIA VIP: Your family membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed."
+        );
+        if (target.primary_member_id) {
+          const { data: primary } = await admin
+            .from("profiles")
+            .select("phone")
+            .eq("id", target.primary_member_id)
+            .maybeSingle();
+          if (primary?.phone) {
+            await trySendSms(
+              primary.phone,
+              `APEXIA VIP: ${target.full_name || "Your family member"}'s access has been approved. They can now sign in with their own mobile number.`
+            );
+          }
+        }
+
         return json(200, { success: true });
       }
 
