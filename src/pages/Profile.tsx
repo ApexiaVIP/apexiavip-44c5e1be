@@ -18,6 +18,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
 
 interface FamilyMember {
@@ -104,6 +115,20 @@ const Profile = () => {
     },
     onError: (err: Error) => {
       toast({ title: "Request failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const removeFamily = useMutation({
+    mutationFn: (memberId: string) => invokeMemberFamily({ action: "remove", user_id: memberId }),
+    onSuccess: () => {
+      toast({
+        title: "Family member removed",
+        description: "You can add them again at any time, subject to approval.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["my-family"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Could not remove", description: err.message, variant: "destructive" });
     },
   });
 
@@ -374,9 +399,41 @@ const Profile = () => {
                         <p className="text-smoke text-xs">{m.phone}</p>
                       </div>
                     </div>
-                    <Badge variant={m.status === "active" ? "secondary" : "outline"}>
-                      {m.status === "active" ? "Active" : "Awaiting Approval"}
-                    </Badge>
+                    <div className="flex items-center gap-3">
+                      <Badge variant={m.status === "active" ? "secondary" : "outline"}>
+                        {m.status === "active" ? "Active" : "Awaiting Approval"}
+                      </Badge>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={removeFamily.isPending}
+                            className="text-smoke tracking-[0.15em] uppercase"
+                          >
+                            Remove
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              Remove {m.full_name || m.phone}?
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              They will lose access immediately and can no longer
+                              sign in or book. You can add them again in the
+                              future; new additions are subject to approval.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Keep</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => removeFamily.mutate(m.id)}>
+                              Remove
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </li>
                 ))}
               </ul>

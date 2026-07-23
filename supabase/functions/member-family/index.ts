@@ -180,6 +180,27 @@ serve(async (req) => {
       return json(200, { success: true, user_id: userId });
     }
 
+    if (action === "remove") {
+      const targetId = typeof body.user_id === "string" ? body.user_id : "";
+      if (!targetId) return json(400, { error: "Invalid family member" });
+
+      const { data: target } = await admin
+        .from("profiles")
+        .select("id, primary_member_id")
+        .eq("id", targetId)
+        .maybeSingle();
+      if (!target || target.primary_member_id !== caller.id) {
+        return json(404, { error: "Family member not found" });
+      }
+
+      // Removal deletes the account outright (profile, role and sessions
+      // cascade); re-adding later goes through admin approval like any request
+      const { error: deleteError } = await admin.auth.admin.deleteUser(targetId);
+      if (deleteError) throw deleteError;
+
+      return json(200, { success: true });
+    }
+
     return json(400, { error: "Unknown action" });
   } catch (error) {
     console.error("member-family error:", error);
