@@ -11,6 +11,7 @@ import VehicleDetail from "./pages/VehicleDetail";
 import Login from "./pages/Login";
 import Welcome from "./pages/Welcome";
 import Profile from "./pages/Profile";
+import Bookings from "./pages/Bookings";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
@@ -49,6 +50,7 @@ const App = () => (
             {/* Legacy links from the password era */}
             <Route path="/reset-password" element={<Navigate to="/login" replace />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/bookings" element={<Bookings />} />
             <Route path="/admin" element={<Admin />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

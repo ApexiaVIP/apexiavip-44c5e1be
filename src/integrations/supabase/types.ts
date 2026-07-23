@@ -16,36 +16,63 @@ export type Database = {
     Tables: {
       bookings: {
         Row: {
+          assigned_booking_id: number | null
+          assigned_reference: string | null
           bags: number | null
+          collection_at: string | null
           created_at: string
+          dropoff: Json | null
           email: string
           id: string
           name: string
           passengers: number | null
           phone: string
+          pickup: Json | null
+          reference: string | null
+          status: string
+          status_checked_at: string | null
           travel_date: string
+          user_id: string | null
           vehicle: string
         }
         Insert: {
+          assigned_booking_id?: number | null
+          assigned_reference?: string | null
           bags?: number | null
+          collection_at?: string | null
           created_at?: string
+          dropoff?: Json | null
           email: string
           id?: string
           name: string
           passengers?: number | null
           phone: string
+          pickup?: Json | null
+          reference?: string | null
+          status?: string
+          status_checked_at?: string | null
           travel_date: string
+          user_id?: string | null
           vehicle: string
         }
         Update: {
+          assigned_booking_id?: number | null
+          assigned_reference?: string | null
           bags?: number | null
+          collection_at?: string | null
           created_at?: string
+          dropoff?: Json | null
           email?: string
           id?: string
           name?: string
           passengers?: number | null
           phone?: string
+          pickup?: Json | null
+          reference?: string | null
+          status?: string
+          status_checked_at?: string | null
           travel_date?: string
+          user_id?: string | null
           vehicle?: string
         }
         Relationships: []

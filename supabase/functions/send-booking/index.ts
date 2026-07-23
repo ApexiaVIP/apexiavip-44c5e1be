@@ -222,7 +222,12 @@ serve(async (req) => {
     // Record this request for rate limiting
     await supabase.from("rate_limits").insert({ ip_address: ip, endpoint: "send-booking" });
 
-    // Store in database
+    // Store the booking against the member so it appears in My Bookings
+    const bookingReference = `APEXIA-${Date.now()}`;
+    const collectionAt =
+      typeof body.collectionAt === "string" && !Number.isNaN(Date.parse(body.collectionAt))
+        ? new Date(body.collectionAt).toISOString()
+        : null;
     const { error: dbError } = await supabase.from("bookings").insert({
       name: name.trim(),
       email: email.trim(),
@@ -231,6 +236,12 @@ serve(async (req) => {
       vehicle,
       passengers: passengers ?? 1,
       bags: bags ?? 0,
+      user_id: userData.user.id,
+      reference: bookingReference,
+      collection_at: collectionAt,
+      pickup: pickupAddress,
+      dropoff: dropoffAddress,
+      status: "Requested",
     });
 
     if (dbError) {
@@ -238,7 +249,6 @@ serve(async (req) => {
     }
 
     // --- Send to Dispatch Transfer API ---
-    const bookingReference = `APEXIA-${Date.now()}`;
     const collectionDateTime = buildCollectionDateTime(travelDateRaw, travelDate);
     const bookingClass = vehicleToBookingClass[vehicle] || "Executive";
 
@@ -302,10 +312,27 @@ serve(async (req) => {
 
       if (dispatchFailureMessage) {
         console.error("Dispatch transfer failed:", dispatchFailureMessage);
+      } else {
+        // Link our record to the booking created in Dispatch
+        await supabase
+          .from("bookings")
+          .update({
+            assigned_booking_id: dispatchBooking?.AssignedBookingID ?? null,
+            assigned_reference: dispatchBooking?.AssignedBookingReference ?? null,
+            status: "Confirmed",
+          })
+          .eq("reference", bookingReference);
       }
     } catch (dispatchErr) {
       console.error("Dispatch API call failed:", dispatchErr);
       dispatchFailureMessage = "Dispatch API call failed";
+    }
+
+    if (dispatchFailureMessage) {
+      await supabase
+        .from("bookings")
+        .update({ status: "Failed" })
+        .eq("reference", bookingReference);
     }
 
     // --- Send email notification ---

@@ -38,6 +38,30 @@ const invoke2fa = (body: Record<string, unknown>) => invokeFn("sms-2fa", body);
 export const invokeMemberFamily = (body: Record<string, unknown>) =>
   invokeFn("member-family", body);
 
+export interface LiveBookingStatus {
+  reference: string;
+  status: string | null;
+  bookingStatus: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  locationDateTime: string | null;
+  trackDriverUrl: string | null;
+  driver: { name: string; mobile: string; photoUrl: string } | null;
+  vehicle: { description: string; registration: string; photoUrl: string } | null;
+  totalAmount: number | null;
+  currencyCode: string | null;
+  message: string | null;
+}
+
+/** Live Dispatch status for the member's own bookings. */
+export const checkBookingStatuses = async (
+  references: string[]
+): Promise<LiveBookingStatus[]> => {
+  if (references.length === 0) return [];
+  const data = await invokeFn("booking-status", { references });
+  return Array.isArray(data?.statuses) ? data.statuses : [];
+};
+
 export interface PlaceSuggestion {
   label: string;
   line1: string;

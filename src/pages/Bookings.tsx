@@ -1,0 +1,275 @@
+import { Link, Navigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+
+interface StoredAddress {
+  line1?: string;
+  town?: string;
+  postcode?: string;
+}
+
+interface BookingRow {
+  id: string;
+  reference: string | null;
+  vehicle: string;
+  travel_date: string;
+  collection_at: string | null;
+  passengers: number | null;
+  bags: number | null;
+  pickup: StoredAddress | null;
+  dropoff: StoredAddress | null;
+  status: string;
+}
+
+/** Statuses where the journey is over */
+const FINAL_STATUSES = ["Clear/Completed", "Completed", "Cancelled", "No Show", "Invoice", "Failed"];
+/** Statuses meaning a driver is actively working the job */
+const ACTIVE_STATUSES = ["Dispatched", "En route to pickup", "At Pickup", "Passenger on board", "Soon to clear"];
+
+const statusVariant = (status: string): "secondary" | "outline" | "destructive" => {
+  if (status === "Cancelled" || status === "No Show" || status === "Failed") return "destructive";
+  if (ACTIVE_STATUSES.includes(status)) return "outline";
+  return "secondary";
+};
+
+const displayStatus = (status: string) => {
+  if (status === "Pending" || status === "Requested" || status === "Confirmed") return "Confirmed";
+  if (status === "Clear/Completed" || status === "Clear") return "Completed";
+  if (status === "Invoice") return "Completed";
+  return status;
+};
+
+const formatWhen = (b: BookingRow) => {
+  if (!b.collection_at) return b.travel_date;
+  const d = new Date(b.collection_at);
+  return d.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }) + ` · ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+};
+
+const addressLine = (a: StoredAddress | null) =>
+  a ? [a.line1, a.town].filter(Boolean).join(", ") : "";
+
+const Bookings = () => {
+  const { user, mfaVerified, loading } = useAuth();
+
+  const { data: bookings, isLoading } = useQuery({
+    queryKey: ["my-bookings"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bookings")
+        .select(
+          "id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, status"
+        )
+        .order("collection_at", { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return data as unknown as BookingRow[];
+    },
+    enabled: !!user && mfaVerified,
+  });
+
+  const now = Date.now();
+  const upcoming = (bookings ?? []).filter(
+    (b) =>
+      !FINAL_STATUSES.includes(b.status) &&
+      (!b.collection_at || new Date(b.collection_at).getTime() > now - 6 * 60 * 60 * 1000)
+  );
+  const past = (bookings ?? []).filter((b) => !upcoming.includes(b));
+
+  // A journey is "live" from 90 minutes before pickup until it finishes
+  const liveRefs = upcoming
+    .filter((b) => {
+      if (!b.reference) return false;
+      if (ACTIVE_STATUSES.includes(b.status)) return true;
+      if (!b.collection_at) return false;
+      const t = new Date(b.collection_at).getTime();
+      return t - now < 90 * 60 * 1000 && t > now - 6 * 60 * 60 * 1000;
+    })
+    .map((b) => b.reference as string);
+
+  const checkRefs = upcoming.map((b) => b.reference).filter(Boolean) as string[];
+
+  const { data: liveStatuses, isFetching: refreshing, refetch } = useQuery({
+    queryKey: ["booking-statuses", checkRefs.join(",")],
+    queryFn: () => checkBookingStatuses(checkRefs.slice(0, 10)),
+    enabled: !!user && mfaVerified && checkRefs.length > 0,
+    refetchInterval: liveRefs.length > 0 ? 60_000 : false,
+  });
+
+  const liveFor = (reference: string | null): LiveBookingStatus | undefined =>
+    liveStatuses?.find((s) => s.reference === reference);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-champagne" />
+      </div>
+    );
+  }
+  if (!user || !mfaVerified) {
+    return <Navigate to="/login" state={{ from: "/bookings" }} replace />;
+  }
+
+  const renderCard = (b: BookingRow, isUpcoming: boolean) => {
+    const live = isUpcoming ? liveFor(b.reference) : undefined;
+    const effectiveStatus = live?.bookingStatus ?? b.status;
+    const driverVisible = isUpcoming && live && (live.driver?.name || live.vehicle?.description);
+    return (
+      <div key={b.id} className="border border-border p-6 space-y-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-foreground text-lg font-light tracking-wide">{b.vehicle}</p>
+            <p className="text-smoke text-sm">{formatWhen(b)}</p>
+          </div>
+          <Badge
+            variant={statusVariant(effectiveStatus)}
+            className={
+              ACTIVE_STATUSES.includes(effectiveStatus)
+                ? "text-champagne border-champagne"
+                : undefined
+            }
+          >
+            {displayStatus(effectiveStatus)}
+          </Badge>
+        </div>
+
+        <div className="flex items-center gap-3 text-sm text-smoke flex-wrap">
+          <span className="inline-flex items-center gap-1.5">
+            <MapPin className="w-3.5 h-3.5 text-champagne" />
+            {addressLine(b.pickup) || "Pickup"}
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
+          <span>{addressLine(b.dropoff) || "Dropoff"}</span>
+        </div>
+
+        {driverVisible && (
+          <div className="border-t border-border pt-4 flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              {live?.driver?.photoUrl ? (
+                <img
+                  src={live.driver.photoUrl}
+                  alt=""
+                  className="w-10 h-10 rounded-full object-cover"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-charcoal border border-border" />
+              )}
+              <div>
+                <p className="text-foreground text-sm">
+                  {live?.driver?.name ? `Your chauffeur: ${live.driver.name}` : "Chauffeur assigned"}
+                </p>
+                <p className="text-smoke text-xs">
+                  {[live?.vehicle?.description, live?.vehicle?.registration]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {live?.driver?.mobile && (
+                <a
+                  href={`tel:${live.driver.mobile}`}
+                  className="inline-flex items-center gap-1.5 text-smoke hover:text-foreground transition-colors text-xs tracking-[0.15em] uppercase"
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  Call
+                </a>
+              )}
+              {live?.trackDriverUrl && (
+                <a href={live.trackDriverUrl} target="_blank" rel="noreferrer">
+                  <Button size="sm" className="tracking-[0.15em] uppercase">
+                    Track Driver
+                  </Button>
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto px-8 py-12 max-w-3xl">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-2 text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase mb-12"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Site
+        </Link>
+
+        <div className="flex items-end justify-between mb-10 gap-4 flex-wrap">
+          <div>
+            <p className="text-champagne text-xs tracking-[0.4em] uppercase mb-3">My Account</p>
+            <h1 className="font-display text-3xl font-light tracking-wider text-foreground">
+              My Bookings
+            </h1>
+          </div>
+          <div className="flex items-center gap-3">
+            {checkRefs.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                disabled={refreshing}
+                className="tracking-[0.15em] uppercase"
+              >
+                {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
+              </Button>
+            )}
+            <Link to="/#contact">
+              <Button size="sm" className="tracking-[0.15em] uppercase">
+                New Booking
+              </Button>
+            </Link>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="py-20 text-center">
+            <Loader2 className="w-6 h-6 animate-spin text-champagne mx-auto" />
+          </div>
+        ) : (bookings ?? []).length === 0 ? (
+          <div className="text-center py-16 border border-border">
+            <p className="text-smoke text-sm font-light mb-6">
+              You have no bookings yet.
+            </p>
+            <Link
+              to="/#contact"
+              className="inline-block border border-champagne text-champagne hover:bg-champagne hover:text-background transition-colors duration-500 text-xs tracking-[0.2em] uppercase px-10 py-4"
+            >
+              Make an Enquiry
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-12">
+            {upcoming.length > 0 && (
+              <section className="space-y-4">
+                <h2 className="text-smoke text-xs tracking-[0.3em] uppercase">Upcoming</h2>
+                {upcoming.map((b) => renderCard(b, true))}
+              </section>
+            )}
+            {past.length > 0 && (
+              <section className="space-y-4">
+                <h2 className="text-smoke text-xs tracking-[0.3em] uppercase">Past</h2>
+                {past.map((b) => renderCard(b, false))}
+              </section>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default Bookings;

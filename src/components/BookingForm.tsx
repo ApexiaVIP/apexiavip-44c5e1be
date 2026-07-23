@@ -54,6 +54,9 @@ const bookingSchema = z.object({
   email: z.string().trim().email("Invalid email address").max(255),
   phone: z.string().trim().min(1, "Phone number is required").max(30),
   travelDate: z.date({ required_error: "Please select a travel date" }),
+  collectionTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Please select a pickup time"),
   vehicle: z.string().min(1, "Please select a vehicle"),
   passengers: z.number().min(1, "At least 1 passenger").max(20),
   bags: z.number().min(0).max(30),
@@ -76,6 +79,7 @@ const BookingForm = () => {
       name: "",
       email: "",
       phone: "",
+      collectionTime: "",
       vehicle: "",
       passengers: 1,
       bags: 1,
@@ -125,6 +129,10 @@ const BookingForm = () => {
   const onSubmit = async (data: BookingFormValues) => {
     setIsSubmitting(true);
     try {
+      const [hours, minutes] = data.collectionTime.split(":").map(Number);
+      const collectionAt = new Date(data.travelDate);
+      collectionAt.setHours(hours, minutes, 0, 0);
+
       const { data: result, error } = await supabase.functions.invoke(
         "send-booking",
         {
@@ -132,8 +140,9 @@ const BookingForm = () => {
             name: data.name,
             email: data.email,
             phone: `${countryCode} ${data.phone}`,
-            travelDate: format(data.travelDate, "PPP"),
-            travelDateRaw: format(data.travelDate, "dd-MMM-yyyy"),
+            travelDate: `${format(data.travelDate, "PPP")} at ${data.collectionTime}`,
+            travelDateRaw: `${format(data.travelDate, "dd-MMM-yyyy")} ${data.collectionTime}`,
+            collectionAt: collectionAt.toISOString(),
             vehicle: data.vehicle,
             passengers: data.passengers,
             bags: data.bags,
@@ -365,6 +374,26 @@ const BookingForm = () => {
                     />
                   </PopoverContent>
                 </Popover>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="collectionTime"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                  Pickup Time
+                </FormLabel>
+                <FormControl>
+                  <Input
+                    {...field}
+                    type="time"
+                    className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm"
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}
