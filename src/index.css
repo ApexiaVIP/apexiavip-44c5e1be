@@ -147,3 +147,20 @@
     @apply h-px bg-gradient-to-r from-transparent via-border to-transparent;
   }
 }
+
+/* Live driver map: mute OpenStreetMap tiles into the dark brand world */
+.dark-map .leaflet-tile {
+  filter: grayscale(1) invert(1) brightness(0.85) contrast(0.95);
+}
+.dark-map.leaflet-container {
+  background: #0b0a08;
+  font-family: inherit;
+}
+.dark-map .leaflet-control-attribution {
+  background: rgba(10, 10, 8, 0.7);
+  color: #6b6355;
+  font-size: 9px;
+}
+.dark-map .leaflet-control-attribution a {
+  color: #8a8070;
+}

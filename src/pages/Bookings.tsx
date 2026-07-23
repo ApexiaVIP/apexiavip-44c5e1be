@@ -2,6 +2,7 @@ import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
 import MemberLayout from "@/components/MemberLayout";
+import TrackMap from "@/components/TrackMap";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
@@ -144,7 +145,14 @@ const Bookings = () => {
     queryKey: ["booking-statuses", checkRefs.join(",")],
     queryFn: () => checkBookingStatuses(checkRefs.slice(0, 10)),
     enabled: !!user && mfaVerified && checkRefs.length > 0,
-    refetchInterval: liveRefs.length > 0 ? 60_000 : false,
+    // Every 30s while a driver is actively on a job, every 60s near pickup
+    refetchInterval: (query) => {
+      const anyActive = (query.state.data ?? []).some(
+        (s) => s.bookingStatus && ACTIVE_STATUSES.includes(s.bookingStatus)
+      );
+      if (anyActive) return 30_000;
+      return liveRefs.length > 0 ? 60_000 : false;
+    },
   });
 
   const liveFor = (reference: string | null): LiveBookingStatus | undefined =>
@@ -167,6 +175,14 @@ const Bookings = () => {
     const driverVisible = isUpcoming && live && (live.driver?.name || live.vehicle?.description);
     const isOwn = b.user_id === user.id;
     const familyName = !isOwn && b.user_id ? familyNames?.get(b.user_id) : undefined;
+    const driverLat = live?.latitude ? parseFloat(live.latitude) : NaN;
+    const driverLng = live?.longitude ? parseFloat(live.longitude) : NaN;
+    const mapVisible =
+      isUpcoming &&
+      live?.bookingStatus &&
+      ACTIVE_STATUSES.includes(live.bookingStatus) &&
+      Number.isFinite(driverLat) &&
+      Number.isFinite(driverLng);
     return (
       <div key={b.id} className="border border-border p-6 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -278,6 +294,21 @@ const Bookings = () => {
                 </a>
               )}
             </div>
+          </div>
+        )}
+
+        {mapVisible && (
+          <div className="space-y-2">
+            <TrackMap
+              lat={driverLat}
+              lng={driverLng}
+              pickupPostcode={b.pickup?.postcode}
+            />
+            <p className="text-smoke/70 text-xs tracking-[0.1em]">
+              Live driver location
+              {live?.locationDateTime ? ` · updated ${live.locationDateTime}` : ""}
+              {" · refreshes automatically"}
+            </p>
           </div>
         )}
       </div>
