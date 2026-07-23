@@ -1,6 +1,7 @@
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
+import { ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
+import MemberLayout from "@/components/MemberLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
@@ -284,16 +285,8 @@ const Bookings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-8 py-12 max-w-3xl">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-2 text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase mb-12"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Site
-        </Link>
-
+    <MemberLayout>
+      <div className="container mx-auto px-8 pb-16 max-w-3xl">
         <div className="flex items-end justify-between mb-10 gap-4 flex-wrap">
           <div>
             <p className="text-champagne text-xs tracking-[0.4em] uppercase mb-3">My Account</p>
@@ -354,7 +347,7 @@ const Bookings = () => {
           </div>
         )}
       </div>
-    </div>
+    </MemberLayout>
   );
 };
 

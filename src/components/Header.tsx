@@ -8,9 +8,9 @@ const Header = () => {
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md">
       <div className="container mx-auto px-8 py-6">
         <nav className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+          <Link to="/" className="flex items-center space-x-3">
             <img src={apexiaLogo} alt="Apexia VIP" className="h-24 w-auto" />
-          </div>
+          </Link>
           
           <div className="flex items-center space-x-6 md:space-x-12">
             <a
