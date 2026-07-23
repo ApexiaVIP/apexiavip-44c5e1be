@@ -152,6 +152,26 @@ serve(async (req) => {
 
     const { name, email, phone, travelDate, travelDateRaw, vehicle, passengers, bags, pickupAddress, dropoffAddress } = body;
 
+    // Journey type: to a destination (default) or by-the-hour at the
+    // passenger's direction
+    const journeyType = body.journeyType === "hourly" ? "hourly" : "destination";
+    const asDirectedHours =
+      journeyType === "hourly" ? parseInt(String(body.asDirectedHours), 10) : null;
+    if (journeyType === "hourly" && (!Number.isFinite(asDirectedHours) || asDirectedHours! < 4 || asDirectedHours! > 24)) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid hire duration (minimum 4 hours)" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const isValidStop = (s: unknown): s is Record<string, string> =>
+      !!s && typeof s === "object" &&
+      !!(s as Record<string, unknown>).line1 &&
+      !!(s as Record<string, unknown>).town &&
+      !!(s as Record<string, unknown>).postcode;
+    const viaStops: Record<string, string>[] =
+      journeyType === "destination" && Array.isArray(body.viaStops)
+        ? body.viaStops.slice(0, 5).filter(isValidStop)
+        : [];
+
     // Basic server-side validation
     if (!name || typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
       return new Response(JSON.stringify({ success: false, error: "Invalid name" }), {
@@ -184,7 +204,10 @@ serve(async (req) => {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (!dropoffAddress || !dropoffAddress.line1 || !dropoffAddress.town || !dropoffAddress.postcode) {
+    if (
+      journeyType === "destination" &&
+      (!dropoffAddress || !dropoffAddress.line1 || !dropoffAddress.town || !dropoffAddress.postcode)
+    ) {
       return new Response(JSON.stringify({ success: false, error: "Invalid dropoff address" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -254,7 +277,10 @@ serve(async (req) => {
       bags: bags ?? 0,
       collection_at: collectionAt,
       pickup: pickupAddress,
-      dropoff: dropoffAddress,
+      dropoff: journeyType === "destination" ? dropoffAddress : null,
+      journey_type: journeyType,
+      as_directed_hours: asDirectedHours,
+      via: viaStops.length > 0 ? viaStops : null,
     };
     if (!amendReference) {
       const { error: dbError } = await supabase.from("bookings").insert({
@@ -283,7 +309,14 @@ serve(async (req) => {
       BookingClass: bookingClass,
       NumSuitcases: bags ?? 0,
       BookedBy: "Website",
-      BookingNotes: `Vehicle: ${vehicle}`,
+      BookingNotes:
+        journeyType === "hourly"
+          ? `Vehicle: ${vehicle}. As directed hire: ${asDirectedHours} hours.`
+          : `Vehicle: ${vehicle}`,
+      AsDirected: journeyType === "hourly" ? "T" : "F",
+      ...(journeyType === "hourly"
+        ? { AsDirectedTime: asDirectedHours! * 60, AsDirectedMileage: 0 }
+        : {}),
       PickUpAddress: {
         Line1: pickupAddress.line1?.trim() || "",
         Line2: pickupAddress.line2?.trim() || "",
@@ -291,13 +324,30 @@ serve(async (req) => {
         Postcode: pickupAddress.postcode?.trim() || "",
         Country: pickupAddress.country?.trim() || "United Kingdom",
       },
-      DropOffAddress: {
-        Line1: dropoffAddress.line1?.trim() || "",
-        Line2: dropoffAddress.line2?.trim() || "",
-        Town: dropoffAddress.town?.trim() || "",
-        Postcode: dropoffAddress.postcode?.trim() || "",
-        Country: dropoffAddress.country?.trim() || "United Kingdom",
-      },
+      ...(journeyType === "destination"
+        ? {
+            DropOffAddress: {
+              Line1: dropoffAddress.line1?.trim() || "",
+              Line2: dropoffAddress.line2?.trim() || "",
+              Town: dropoffAddress.town?.trim() || "",
+              Postcode: dropoffAddress.postcode?.trim() || "",
+              Country: dropoffAddress.country?.trim() || "United Kingdom",
+            },
+          }
+        : {}),
+      // Stops en route map to Dispatch via addresses
+      ...Object.fromEntries(
+        viaStops.map((stop, i) => [
+          `ViaAddress${i + 1}`,
+          {
+            Line1: stop.line1?.trim() || "",
+            Line2: stop.line2?.trim() || "",
+            Town: stop.town?.trim() || "",
+            Postcode: stop.postcode?.trim() || "",
+            Country: stop.country?.trim() || "United Kingdom",
+          },
+        ])
+      ),
     };
 
     const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
@@ -365,7 +415,16 @@ serve(async (req) => {
 
     // --- Send email notification ---
     const safePickup = `${sanitize(pickupAddress.line1 || "")}, ${sanitize(pickupAddress.town || "")}, ${sanitize(pickupAddress.postcode || "")}`;
-    const safeDropoff = `${sanitize(dropoffAddress.line1 || "")}, ${sanitize(dropoffAddress.town || "")}, ${sanitize(dropoffAddress.postcode || "")}`;
+    const safeDropoff =
+      journeyType === "hourly"
+        ? `As directed (${asDirectedHours} hour hire)`
+        : `${sanitize(dropoffAddress.line1 || "")}, ${sanitize(dropoffAddress.town || "")}, ${sanitize(dropoffAddress.postcode || "")}`;
+    const stopsRows = viaStops
+      .map(
+        (stop, i) =>
+          `<tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Stop ${i + 1}</td><td style="padding: 12px 0;">${sanitize(stop.line1 || "")}, ${sanitize(stop.town || "")}, ${sanitize(stop.postcode || "")}</td></tr>`
+      )
+      .join("");
 
     const htmlBody = `
       <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
@@ -381,6 +440,7 @@ serve(async (req) => {
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Passengers</td><td style="padding: 12px 0;">${passengers ?? 'N/A'}</td></tr>
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Luggage</td><td style="padding: 12px 0;">${bags ?? 0}</td></tr>
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Pickup</td><td style="padding: 12px 0;">${safePickup}</td></tr>
+          ${stopsRows}
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Dropoff</td><td style="padding: 12px 0;">${safeDropoff}</td></tr>
         </table>
       </div>

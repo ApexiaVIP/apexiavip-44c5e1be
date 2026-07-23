@@ -2,9 +2,9 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { format } from "date-fns";
-import { CalendarIcon, Check, Users, Luggage, Minus, Plus } from "lucide-react";
+import { CalendarIcon, Check, Users, Luggage, Minus, Plus, X } from "lucide-react";
 import { z } from "zod";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -49,20 +49,63 @@ const addressSchema = z.object({
   country: z.string().trim().max(100).optional().default("United Kingdom"),
 });
 
-const bookingSchema = z.object({
-  name: z.string().trim().min(1, "Name is required").max(100),
-  email: z.string().trim().email("Invalid email address").max(255),
-  phone: z.string().trim().min(1, "Phone number is required").max(30),
-  travelDate: z.date({ required_error: "Please select a travel date" }),
-  collectionTime: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Please select a pickup time"),
-  vehicle: z.string().min(1, "Please select a vehicle"),
-  passengers: z.number().min(1, "At least 1 passenger").max(20),
-  bags: z.number().min(0).max(30),
-  pickupAddress: addressSchema,
-  dropoffAddress: addressSchema,
+// Dropoff and stops share this shape; requiredness depends on journey type
+const looseAddressSchema = z.object({
+  line1: z.string().trim().max(200).default(""),
+  line2: z.string().trim().max(200).default(""),
+  town: z.string().trim().max(100).default(""),
+  postcode: z.string().trim().max(20).default(""),
+  country: z.string().trim().max(100).default("United Kingdom"),
 });
+
+export const MIN_HIRE_HOURS = 4;
+export const MAX_HIRE_HOURS = 12;
+const MAX_STOPS = 5;
+
+const bookingSchema = z
+  .object({
+    name: z.string().trim().min(1, "Name is required").max(100),
+    email: z.string().trim().email("Invalid email address").max(255),
+    phone: z.string().trim().min(1, "Phone number is required").max(30),
+    travelDate: z.date({ required_error: "Please select a travel date" }),
+    collectionTime: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Please select a pickup time"),
+    vehicle: z.string().min(1, "Please select a vehicle"),
+    passengers: z.number().min(1, "At least 1 passenger").max(20),
+    bags: z.number().min(0).max(30),
+    journeyType: z.enum(["destination", "hourly"]),
+    asDirectedHours: z.string().default(""),
+    pickupAddress: addressSchema,
+    dropoffAddress: looseAddressSchema,
+    viaStops: z.array(looseAddressSchema).max(MAX_STOPS),
+  })
+  .superRefine((v, ctx) => {
+    const requireAddress = (
+      addr: { line1?: string; town?: string; postcode?: string },
+      path: (string | number)[]
+    ) => {
+      if (!addr.line1)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, "line1"], message: "Address line 1 is required" });
+      if (!addr.town)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, "town"], message: "Town/City is required" });
+      if (!addr.postcode)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, "postcode"], message: "Postcode is required" });
+    };
+    if (v.journeyType === "destination") {
+      requireAddress(v.dropoffAddress, ["dropoffAddress"]);
+      v.viaStops.forEach((s, i) => requireAddress(s, ["viaStops", i]));
+    } else {
+      const hours = parseInt(v.asDirectedHours, 10);
+      if (!Number.isFinite(hours) || hours < MIN_HIRE_HOURS || hours > MAX_HIRE_HOURS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["asDirectedHours"],
+          message: `Please choose a hire duration (minimum ${MIN_HIRE_HOURS} hours)`,
+        });
+      }
+    }
+  });
 
 type BookingFormValues = z.infer<typeof bookingSchema>;
 
@@ -83,10 +126,20 @@ const BookingForm = () => {
       vehicle: "",
       passengers: 1,
       bags: 1,
+      journeyType: "destination",
+      asDirectedHours: "",
       pickupAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
       dropoffAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
+      viaStops: [],
     },
   });
+
+  const {
+    fields: stopFields,
+    append: appendStop,
+    remove: removeStop,
+  } = useFieldArray({ control: form.control, name: "viaStops" });
+  const journeyType = form.watch("journeyType");
 
   const { profile } = useAuth();
 
@@ -156,6 +209,17 @@ const BookingForm = () => {
         vehicle: data.vehicle,
         passengers: data.passengers ?? 1,
         bags: data.bags ?? 0,
+        journeyType: data.journey_type === "hourly" ? "hourly" : "destination",
+        asDirectedHours: data.as_directed_hours ? String(data.as_directed_hours) : "",
+        viaStops: Array.isArray(data.via)
+          ? (data.via as Record<string, string>[]).map((s) => ({
+              line1: s.line1 ?? "",
+              line2: s.line2 ?? "",
+              town: s.town ?? "",
+              postcode: s.postcode ?? "",
+              country: s.country ?? "United Kingdom",
+            }))
+          : [],
         pickupAddress: {
           line1: pickup.line1 ?? "",
           line2: pickup.line2 ?? "",
@@ -174,12 +238,17 @@ const BookingForm = () => {
     })();
   }, [editRef]);
 
-  const applyPlace = (prefix: "pickupAddress" | "dropoffAddress") => (s: PlaceSuggestion) => {
-    form.setValue(`${prefix}.line1`, s.line1, { shouldValidate: true });
-    form.setValue(`${prefix}.line2`, s.line2);
-    form.setValue(`${prefix}.town`, s.town, { shouldValidate: true });
-    form.setValue(`${prefix}.postcode`, s.postcode, { shouldValidate: true });
-    form.setValue(`${prefix}.country`, s.country || "United Kingdom");
+  type AddressPath = "pickupAddress" | "dropoffAddress" | `viaStops.${number}`;
+  const applyPlace = (prefix: AddressPath) => (s: PlaceSuggestion) => {
+    const set = (key: string, value: string, validate = false) =>
+      form.setValue(key as Parameters<typeof form.setValue>[0], value, {
+        shouldValidate: validate,
+      });
+    set(`${prefix}.line1`, s.line1, true);
+    set(`${prefix}.line2`, s.line2);
+    set(`${prefix}.town`, s.town, true);
+    set(`${prefix}.postcode`, s.postcode, true);
+    set(`${prefix}.country`, s.country || "United Kingdom");
   };
 
   const onSubmit = async (data: BookingFormValues) => {
@@ -203,8 +272,12 @@ const BookingForm = () => {
             vehicle: data.vehicle,
             passengers: data.passengers,
             bags: data.bags,
+            journeyType: data.journeyType,
+            asDirectedHours:
+              data.journeyType === "hourly" ? parseInt(data.asDirectedHours, 10) : undefined,
             pickupAddress: data.pickupAddress,
-            dropoffAddress: data.dropoffAddress,
+            dropoffAddress: data.journeyType === "destination" ? data.dropoffAddress : undefined,
+            viaStops: data.journeyType === "destination" ? data.viaStops : [],
             website: honeypot,
           },
         }
@@ -466,6 +539,86 @@ const BookingForm = () => {
           />
         </div>
 
+        {/* Journey Type */}
+        <FormField
+          control={form.control}
+          name="journeyType"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                Journey Type
+              </FormLabel>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                <button
+                  type="button"
+                  onClick={() => field.onChange("destination")}
+                  className={cn(
+                    "border p-4 text-left transition-all duration-500",
+                    field.value === "destination"
+                      ? "border-champagne"
+                      : "border-border hover:border-champagne-muted"
+                  )}
+                >
+                  <p className="text-foreground text-sm tracking-wide">To a Destination</p>
+                  <p className="text-smoke text-xs font-light mt-1">
+                    Pickup to dropoff, with optional stops en route.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => field.onChange("hourly")}
+                  className={cn(
+                    "border p-4 text-left transition-all duration-500",
+                    field.value === "hourly"
+                      ? "border-champagne"
+                      : "border-border hover:border-champagne-muted"
+                  )}
+                >
+                  <p className="text-foreground text-sm tracking-wide">By the Hour</p>
+                  <p className="text-smoke text-xs font-light mt-1">
+                    Your chauffeur at your direction. Minimum {MIN_HIRE_HOURS} hours.
+                  </p>
+                </button>
+              </div>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {journeyType === "hourly" && (
+          <FormField
+            control={form.control}
+            name="asDirectedHours"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                  Hire Duration
+                </FormLabel>
+                <div className="grid grid-cols-3 md:grid-cols-5 gap-3 mt-3">
+                  {Array.from(
+                    { length: MAX_HIRE_HOURS - MIN_HIRE_HOURS + 1 },
+                    (_, i) => MIN_HIRE_HOURS + i
+                  ).map((h) => (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => field.onChange(String(h))}
+                      className={cn(
+                        "border py-3 text-sm transition-all duration-500",
+                        field.value === String(h)
+                          ? "border-champagne text-foreground"
+                          : "border-border text-smoke hover:border-champagne-muted"
+                      )}
+                    >
+                      {h} hrs
+                    </button>
+                  ))}
+                </div>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
         {/* Pickup Address */}
         <div className="space-y-4">
@@ -510,6 +663,65 @@ const BookingForm = () => {
           </div>
         </div>
 
+        {journeyType === "destination" && (
+          <>
+            {/* Stops en route */}
+            {stopFields.map((stopField, i) => (
+              <div key={stopField.id} className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">
+                    Stop {i + 1}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => removeStop(i)}
+                    aria-label={`Remove stop ${i + 1}`}
+                    className="text-smoke hover:text-foreground transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <LocationSearch
+                  placeholder="Search stop: place, restaurant or postcode"
+                  onSelect={applyPlace(`viaStops.${i}`)}
+                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField control={form.control} name={`viaStops.${i}.line1`} render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Input {...field} placeholder="Address Line 1" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name={`viaStops.${i}.line2`} render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Input {...field} placeholder="Address Line 2 (optional)" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name={`viaStops.${i}.town`} render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Input {...field} placeholder="Town / City" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name={`viaStops.${i}.postcode`} render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Input {...field} placeholder="Postcode" className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+              </div>
+            ))}
+
         {/* Dropoff Address */}
         <div className="space-y-4">
           <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Dropoff Location</h3>
@@ -552,6 +764,26 @@ const BookingForm = () => {
             )} />
           </div>
         </div>
+
+            {stopFields.length < MAX_STOPS && (
+              <button
+                type="button"
+                onClick={() =>
+                  appendStop({
+                    line1: "",
+                    line2: "",
+                    town: "",
+                    postcode: "",
+                    country: "United Kingdom",
+                  })
+                }
+                className="w-full border border-dashed border-border hover:border-champagne-muted text-smoke hover:text-foreground transition-colors text-xs tracking-[0.2em] uppercase py-3"
+              >
+                + Add Another Stop
+              </button>
+            )}
+          </>
+        )}
 
         <div className="grid grid-cols-2 gap-6">
           <FormField

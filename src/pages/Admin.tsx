@@ -151,6 +151,20 @@ const Admin = () => {
     },
   });
 
+  const deleteMember = useMutation({
+    mutationFn: (userId: string) => invokeAdmin({ action: "delete_member", user_id: userId }),
+    onSuccess: () => {
+      toast({
+        title: "Account deleted",
+        description: "The member's account and access have been permanently removed.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Delete failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const setAccess = useMutation({
     mutationFn: ({ userId, action }: { userId: string; action: "revoke" | "restore" }) =>
       invokeAdmin({ action, user_id: userId }),
@@ -386,6 +400,42 @@ const Admin = () => {
                                 onClick={() => setAccess.mutate({ userId: m.id, action: "revoke" })}
                               >
                                 Revoke Access
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
+                      {!pending && !memberIsAdmin && m.id !== user.id && (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={deleteMember.isPending}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              Delete
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>
+                                Permanently delete {m.full_name || m.phone}?
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Their account, profile and access are removed
+                                immediately and this cannot be undone. Booking
+                                history is kept for your records. To block
+                                access temporarily, use Revoke instead.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Keep Account</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => deleteMember.mutate(m.id)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                Delete Permanently
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>

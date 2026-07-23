@@ -280,6 +280,36 @@ serve(async (req) => {
       return json(200, { success: true });
     }
 
+    if (action === "delete_member") {
+      const userId = body?.user_id;
+      if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });
+      if (userId === caller.id) return json(400, { error: "You cannot delete your own account" });
+
+      const { data: targetIsAdmin } = await admin.rpc("has_role", {
+        _user_id: userId,
+        _role: "admin",
+      });
+      if (targetIsAdmin) return json(400, { error: "Admin accounts cannot be deleted here" });
+
+      // A primary member's family must be dealt with first, otherwise their
+      // family members would be left orphaned but still active
+      const { count: familyCount } = await admin
+        .from("profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("primary_member_id", userId);
+      if ((familyCount ?? 0) > 0) {
+        return json(400, {
+          error: "This member has family members. Delete or reassign their family first.",
+        });
+      }
+
+      // Account, profile, roles and sessions cascade; booking history is kept
+      const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
+      if (deleteError) throw deleteError;
+
+      return json(200, { success: true });
+    }
+
     if (action === "reset_2fa") {
       const userId = body?.user_id;
       if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });

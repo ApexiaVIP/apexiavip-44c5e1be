@@ -38,6 +38,9 @@ interface BookingRow {
   bags: number | null;
   pickup: StoredAddress | null;
   dropoff: StoredAddress | null;
+  journey_type: string;
+  as_directed_hours: number | null;
+  via: StoredAddress[] | null;
   status: string;
 }
 
@@ -97,7 +100,7 @@ const Bookings = () => {
       const { data, error } = await supabase
         .from("bookings")
         .select(
-          "id, user_id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, status"
+          "id, user_id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, journey_type, as_directed_hours, via, status"
         )
         .order("collection_at", { ascending: false, nullsFirst: false });
       if (error) throw error;
@@ -212,8 +215,22 @@ const Bookings = () => {
             <MapPin className="w-3.5 h-3.5 text-champagne" />
             {addressLine(b.pickup) || "Pickup"}
           </span>
-          <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
-          <span>{addressLine(b.dropoff) || "Dropoff"}</span>
+          {b.journey_type === "hourly" ? (
+            <span className="text-champagne">
+              At your direction &#183; {b.as_directed_hours ?? "?"} hours
+            </span>
+          ) : (
+            <>
+              {(b.via ?? []).map((stop, i) => (
+                <span key={i} className="inline-flex items-center gap-3">
+                  <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{addressLine(stop)}</span>
+                </span>
+              ))}
+              <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
+              <span>{addressLine(b.dropoff) || "Dropoff"}</span>
+            </>
+          )}
         </div>
 
         {isUpcoming && isOwn && b.reference && b.status !== "Failed" && (
