@@ -140,14 +140,22 @@ serve(async (req) => {
     }
     await admin.from("rate_limits").insert({ ip_address: user.id, endpoint: "booking-status" });
 
-    // Only the caller's own bookings may be checked
-    const { data: ownBookings, error: ownError } = await admin
+    // The caller's own bookings, plus (view-only) their family members' bookings
+    const { data: matchedBookings, error: ownError } = await admin
       .from("bookings")
-      .select("reference")
-      .eq("user_id", user.id)
+      .select("reference, user_id")
       .in("reference", references);
     if (ownError) throw ownError;
-    const ownRefs = (ownBookings ?? []).map((b) => b.reference as string);
+
+    const { data: familyProfiles } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("primary_member_id", user.id);
+    const familyIds = new Set((familyProfiles ?? []).map((p) => p.id as string));
+
+    const ownRefs = (matchedBookings ?? [])
+      .filter((b) => b.user_id === user.id || (b.user_id && familyIds.has(b.user_id as string)))
+      .map((b) => b.reference as string);
     if (ownRefs.length === 0) return json(200, { statuses: [] });
 
     // Ask Dispatch for current status of these bookings
@@ -208,8 +216,7 @@ serve(async (req) => {
         await admin
           .from("bookings")
           .update({ status: bookingStatus, status_checked_at: new Date().toISOString() })
-          .eq("reference", reference)
-          .eq("user_id", user.id);
+          .eq("reference", reference);
       }
     }
 

@@ -27,6 +27,7 @@ interface StoredAddress {
 
 interface BookingRow {
   id: string;
+  user_id: string | null;
   reference: string | null;
   vehicle: string;
   travel_date: string;
@@ -94,11 +95,25 @@ const Bookings = () => {
       const { data, error } = await supabase
         .from("bookings")
         .select(
-          "id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, status"
+          "id, user_id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, status"
         )
         .order("collection_at", { ascending: false, nullsFirst: false });
       if (error) throw error;
       return data as unknown as BookingRow[];
+    },
+    enabled: !!user && mfaVerified,
+  });
+
+  // Names for family members' bookings (visible to the primary account holder)
+  const { data: familyNames } = useQuery({
+    queryKey: ["family-names"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, phone")
+        .eq("primary_member_id", user!.id);
+      if (error) throw error;
+      return new Map((data ?? []).map((p) => [p.id, p.full_name || p.phone]));
     },
     enabled: !!user && mfaVerified,
   });
@@ -149,12 +164,19 @@ const Bookings = () => {
     const live = isUpcoming ? liveFor(b.reference) : undefined;
     const effectiveStatus = live?.bookingStatus ?? b.status;
     const driverVisible = isUpcoming && live && (live.driver?.name || live.vehicle?.description);
+    const isOwn = b.user_id === user.id;
+    const familyName = !isOwn && b.user_id ? familyNames?.get(b.user_id) : undefined;
     return (
       <div key={b.id} className="border border-border p-6 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <p className="text-foreground text-lg font-light tracking-wide">{b.vehicle}</p>
             <p className="text-smoke text-sm">{formatWhen(b)}</p>
+            {familyName && (
+              <p className="text-champagne text-xs tracking-[0.15em] uppercase mt-1">
+                For {familyName}
+              </p>
+            )}
           </div>
           <Badge
             variant={statusVariant(effectiveStatus)}
@@ -177,7 +199,7 @@ const Bookings = () => {
           <span>{addressLine(b.dropoff) || "Dropoff"}</span>
         </div>
 
-        {isUpcoming && b.reference && b.status !== "Failed" && (
+        {isUpcoming && isOwn && b.reference && b.status !== "Failed" && (
           <div className="flex items-center gap-3 flex-wrap">
             <Link to={`/?edit=${encodeURIComponent(b.reference)}#contact`}>
               <Button variant="outline" size="sm" className="tracking-[0.15em] uppercase">
