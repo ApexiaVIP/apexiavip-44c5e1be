@@ -200,9 +200,21 @@ serve(async (req) => {
       // Code is good: burn it, mint a one-time sign-in token and a claim token
       await admin.from("mfa_codes").delete().eq("user_id", userId);
 
+      // Use the auth account's email, never profiles.email: members invited by
+      // mobile only (and family members) have an empty profile email and their
+      // account runs on a synthetic address
+      const { data: authUserData, error: authUserError } = await admin.auth.admin.getUserById(
+        userId
+      );
+      const authEmail = authUserData?.user?.email;
+      if (authUserError || !authEmail) {
+        console.error("No auth email for user:", userId, authUserError);
+        return json(500, { error: "We could not sign you in. Please contact us." });
+      }
+
       const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
         type: "magiclink",
-        email: profile.email,
+        email: authEmail,
       });
       const tokenHash = linkData?.properties?.hashed_token;
       if (linkError || !tokenHash) {
