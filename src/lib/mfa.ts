@@ -38,6 +38,21 @@ const invoke2fa = (body: Record<string, unknown>) => invokeFn("sms-2fa", body);
 export const invokeMemberFamily = (body: Record<string, unknown>) =>
   invokeFn("member-family", body);
 
+export interface PlaceSuggestion {
+  label: string;
+  line1: string;
+  line2: string;
+  town: string;
+  postcode: string;
+  country: string;
+}
+
+/** Location autocomplete for the booking form (members only). */
+export const searchPlaces = async (query: string): Promise<PlaceSuggestion[]> => {
+  const data = await invokeFn("place-search", { query });
+  return Array.isArray(data?.suggestions) ? data.suggestions : [];
+};
+
 /**
  * Passwordless sign-in, step 1: send an access code to a registered mobile.
  * Unauthenticated; the number must belong to an active member.

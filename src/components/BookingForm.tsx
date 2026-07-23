@@ -26,6 +26,8 @@ import {
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import LocationSearch from "@/components/LocationSearch";
+import type { PlaceSuggestion } from "@/lib/mfa";
 
 import rangeRover from "@/assets/vehicle-range-rover.jpg";
 import sClass from "@/assets/vehicle-s-class.jpg";
@@ -111,6 +113,14 @@ const BookingForm = () => {
   }, []);
 
   const selectedVehicle = form.watch("vehicle");
+
+  const applyPlace = (prefix: "pickupAddress" | "dropoffAddress") => (s: PlaceSuggestion) => {
+    form.setValue(`${prefix}.line1`, s.line1, { shouldValidate: true });
+    form.setValue(`${prefix}.line2`, s.line2);
+    form.setValue(`${prefix}.town`, s.town, { shouldValidate: true });
+    form.setValue(`${prefix}.postcode`, s.postcode, { shouldValidate: true });
+    form.setValue(`${prefix}.country`, s.country || "United Kingdom");
+  };
 
   const onSubmit = async (data: BookingFormValues) => {
     setIsSubmitting(true);
@@ -364,7 +374,11 @@ const BookingForm = () => {
 
         {/* Pickup Address */}
         <div className="space-y-4">
-          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Pickup Address</h3>
+          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Pickup Location</h3>
+          <LocationSearch
+            placeholder="Search pickup: place, airport, restaurant or postcode"
+            onSelect={applyPlace("pickupAddress")}
+          />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField control={form.control} name="pickupAddress.line1" render={({ field }) => (
               <FormItem>
@@ -403,7 +417,11 @@ const BookingForm = () => {
 
         {/* Dropoff Address */}
         <div className="space-y-4">
-          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Dropoff Address</h3>
+          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Dropoff Location</h3>
+          <LocationSearch
+            placeholder="Search dropoff: place, airport, restaurant or postcode"
+            onSelect={applyPlace("dropoffAddress")}
+          />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField control={form.control} name="dropoffAddress.line1" render={({ field }) => (
               <FormItem>

@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.member-family]
 verify_jwt = false
+
+[functions.place-search]
+verify_jwt = false
