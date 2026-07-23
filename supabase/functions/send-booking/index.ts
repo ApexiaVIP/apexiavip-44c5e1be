@@ -222,13 +222,29 @@ serve(async (req) => {
     // Record this request for rate limiting
     await supabase.from("rate_limits").insert({ ip_address: ip, endpoint: "send-booking" });
 
+    // Amending? Reuse the original reference so Dispatch overwrites the booking
+    const amendReference =
+      typeof body.amendReference === "string" && body.amendReference ? body.amendReference : null;
+    if (amendReference) {
+      const { data: existing } = await supabase
+        .from("bookings")
+        .select("reference, user_id")
+        .eq("reference", amendReference)
+        .maybeSingle();
+      if (!existing || existing.user_id !== userData.user.id) {
+        return new Response(JSON.stringify({ success: false, error: "Booking not found" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Store the booking against the member so it appears in My Bookings
-    const bookingReference = `APEXIA-${Date.now()}`;
+    const bookingReference = amendReference ?? `APEXIA-${Date.now()}`;
     const collectionAt =
       typeof body.collectionAt === "string" && !Number.isNaN(Date.parse(body.collectionAt))
         ? new Date(body.collectionAt).toISOString()
         : null;
-    const { error: dbError } = await supabase.from("bookings").insert({
+    const bookingRow = {
       name: name.trim(),
       email: email.trim(),
       phone: phone.trim(),
@@ -236,16 +252,20 @@ serve(async (req) => {
       vehicle,
       passengers: passengers ?? 1,
       bags: bags ?? 0,
-      user_id: userData.user.id,
-      reference: bookingReference,
       collection_at: collectionAt,
       pickup: pickupAddress,
       dropoff: dropoffAddress,
-      status: "Requested",
-    });
-
-    if (dbError) {
-      console.error("DB insert error:", dbError);
+    };
+    if (!amendReference) {
+      const { error: dbError } = await supabase.from("bookings").insert({
+        ...bookingRow,
+        user_id: userData.user.id,
+        reference: bookingReference,
+        status: "Requested",
+      });
+      if (dbError) {
+        console.error("DB insert error:", dbError);
+      }
     }
 
     // --- Send to Dispatch Transfer API ---
@@ -312,6 +332,12 @@ serve(async (req) => {
 
       if (dispatchFailureMessage) {
         console.error("Dispatch transfer failed:", dispatchFailureMessage);
+      } else if (amendReference) {
+        // Amendment accepted: write the new details over our record
+        await supabase
+          .from("bookings")
+          .update({ ...bookingRow, status: "Confirmed" })
+          .eq("reference", bookingReference);
       } else {
         // Link our record to the booking created in Dispatch
         await supabase
@@ -328,7 +354,9 @@ serve(async (req) => {
       dispatchFailureMessage = "Dispatch API call failed";
     }
 
-    if (dispatchFailureMessage) {
+    // A failed amendment leaves the original booking standing, so only new
+    // bookings are marked Failed
+    if (dispatchFailureMessage && !amendReference) {
       await supabase
         .from("bookings")
         .update({ status: "Failed" })
@@ -342,7 +370,7 @@ serve(async (req) => {
     const htmlBody = `
       <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
         <h1 style="font-size: 24px; font-weight: 300; letter-spacing: 0.1em; border-bottom: 1px solid #2a2a2a; padding-bottom: 20px; color: #b89b5e;">
-          New Booking Enquiry
+          ${amendReference ? "Booking Amended" : "New Booking Enquiry"}
         </h1>
         <table style="width: 100%; margin-top: 24px; border-collapse: collapse;">
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Name</td><td style="padding: 12px 0;">${safeName}</td></tr>
@@ -367,7 +395,7 @@ serve(async (req) => {
       body: JSON.stringify({
         from: "Apexia VIP <info@apexiavip.com>",
         to: ["info@apexiavip.com"],
-        subject: `Booking Enquiry — ${safeName} — ${safeVehicle}`,
+        subject: `${amendReference ? "Booking AMENDED" : "Booking Enquiry"}: ${safeName} (${safeVehicle})`,
         html: htmlBody,
         reply_to: email.trim(),
       }),

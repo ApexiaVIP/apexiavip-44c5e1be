@@ -62,6 +62,11 @@ export const checkBookingStatuses = async (
   return Array.isArray(data?.statuses) ? data.statuses : [];
 };
 
+/** Cancel a booking (the business invoices regardless of timing). */
+export const cancelBooking = async (reference: string): Promise<void> => {
+  await invokeFn("booking-status", { action: "cancel", reference });
+};
+
 export interface PlaceSuggestion {
   label: string;
   line1: string;

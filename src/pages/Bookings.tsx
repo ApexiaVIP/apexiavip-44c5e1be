@@ -1,11 +1,23 @@
 import { Link, Navigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
+import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { toast } from "@/hooks/use-toast";
 
 interface StoredAddress {
   line1?: string;
@@ -60,6 +72,21 @@ const addressLine = (a: StoredAddress | null) =>
 
 const Bookings = () => {
   const { user, mfaVerified, loading } = useAuth();
+  const queryClient = useQueryClient();
+
+  const cancel = useMutation({
+    mutationFn: (reference: string) => cancelBooking(reference),
+    onSuccess: () => {
+      toast({
+        title: "Booking cancelled",
+        description: "Your booking has been cancelled. Charges may still apply.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["my-bookings"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Cancellation failed", description: err.message, variant: "destructive" });
+    },
+  });
 
   const { data: bookings, isLoading } = useQuery({
     queryKey: ["my-bookings"],
@@ -149,6 +176,43 @@ const Bookings = () => {
           <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
           <span>{addressLine(b.dropoff) || "Dropoff"}</span>
         </div>
+
+        {isUpcoming && b.reference && b.status !== "Failed" && (
+          <div className="flex items-center gap-3 flex-wrap">
+            <Link to={`/?edit=${encodeURIComponent(b.reference)}#contact`}>
+              <Button variant="outline" size="sm" className="tracking-[0.15em] uppercase">
+                Amend
+              </Button>
+            </Link>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={cancel.isPending}
+                  className="tracking-[0.15em] uppercase text-smoke"
+                >
+                  Cancel Booking
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Cancel this booking?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {b.vehicle} on {formatWhen(b)}. Depending on timing, the
+                    journey may still be chargeable.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Keep Booking</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => cancel.mutate(b.reference!)}>
+                    Cancel Booking
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        )}
 
         {driverVisible && (
           <div className="border-t border-border pt-4 flex items-center justify-between gap-4 flex-wrap">

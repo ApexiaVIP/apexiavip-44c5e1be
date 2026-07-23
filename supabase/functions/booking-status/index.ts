@@ -65,6 +65,63 @@ serve(async (req) => {
     }
 
     const body = await req.json();
+
+    // Cancel a booking: business rule is cancel any time, invoiced regardless
+    if (body?.action === "cancel") {
+      const reference = typeof body.reference === "string" ? body.reference : "";
+      if (!reference) return json(400, { error: "Invalid booking reference" });
+
+      const { data: booking } = await admin
+        .from("bookings")
+        .select("reference, user_id, status")
+        .eq("reference", reference)
+        .maybeSingle();
+      if (!booking || booking.user_id !== user.id) {
+        return json(404, { error: "Booking not found" });
+      }
+      if (booking.status === "Cancelled") {
+        return json(200, { success: true });
+      }
+
+      const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
+      const cancelRes = await fetch(
+        `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=` +
+          `${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${dispatchAuth}`,
+          },
+          body: JSON.stringify({ Bookings: [{ Reference: reference, Cancelled: "T" }] }),
+        }
+      );
+      if (!cancelRes.ok) {
+        console.error("Dispatch cancel HTTP", cancelRes.status, await cancelRes.text());
+        return json(502, { error: "We could not reach the booking system. Please try again." });
+      }
+      const cancelData = await cancelRes.json();
+      const cancelResult = Array.isArray(cancelData?.Result) ? cancelData.Result[0] : cancelData;
+      const cancelBooking = Array.isArray(cancelResult?.Bookings)
+        ? cancelResult.Bookings[0]
+        : undefined;
+      if (cancelResult?.TransferStatus === "Failed" || cancelBooking?.Status === "Failed") {
+        const msg = cancelBooking?.Message || cancelResult?.Message || "Cancellation failed";
+        console.error("Dispatch cancel failed:", msg);
+        return json(502, {
+          error: "The booking system rejected the cancellation. Please contact us.",
+        });
+      }
+
+      await admin
+        .from("bookings")
+        .update({ status: "Cancelled", status_checked_at: new Date().toISOString() })
+        .eq("reference", reference)
+        .eq("user_id", user.id);
+
+      return json(200, { success: true });
+    }
+
     const references: string[] = Array.isArray(body?.references)
       ? body.references.filter((r: unknown) => typeof r === "string").slice(0, MAX_REFERENCES)
       : [];

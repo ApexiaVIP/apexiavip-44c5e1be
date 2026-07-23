@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { format } from "date-fns";
@@ -118,6 +118,62 @@ const BookingForm = () => {
 
   const selectedVehicle = form.watch("vehicle");
 
+  // Amend mode: /?edit=<reference> pre-fills the form from the stored booking
+  const editRef = searchParams.get("edit");
+  const [editing, setEditing] = useState<string | null>(null);
+  const editLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!editRef || editLoadedRef.current) return;
+    editLoadedRef.current = true;
+    (async () => {
+      const { data } = await supabase
+        .from("bookings")
+        .select("*")
+        .eq("reference", editRef)
+        .maybeSingle();
+      if (!data) {
+        toast({
+          title: "Booking not found",
+          description: "We could not load that booking to amend.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setEditing(editRef);
+      const collection = data.collection_at ? new Date(data.collection_at) : undefined;
+      const phoneMatch = (data.phone ?? "").match(/^(\+\d{1,4})\s*(.*)$/);
+      if (phoneMatch) setCountryCode(phoneMatch[1]);
+      const pickup = (data.pickup ?? {}) as Record<string, string>;
+      const dropoff = (data.dropoff ?? {}) as Record<string, string>;
+      form.reset({
+        name: data.name,
+        email: data.email,
+        phone: phoneMatch ? phoneMatch[2] : data.phone,
+        travelDate: collection,
+        collectionTime: collection
+          ? `${String(collection.getHours()).padStart(2, "0")}:${String(collection.getMinutes()).padStart(2, "0")}`
+          : "",
+        vehicle: data.vehicle,
+        passengers: data.passengers ?? 1,
+        bags: data.bags ?? 0,
+        pickupAddress: {
+          line1: pickup.line1 ?? "",
+          line2: pickup.line2 ?? "",
+          town: pickup.town ?? "",
+          postcode: pickup.postcode ?? "",
+          country: pickup.country ?? "United Kingdom",
+        },
+        dropoffAddress: {
+          line1: dropoff.line1 ?? "",
+          line2: dropoff.line2 ?? "",
+          town: dropoff.town ?? "",
+          postcode: dropoff.postcode ?? "",
+          country: dropoff.country ?? "United Kingdom",
+        },
+      });
+    })();
+  }, [editRef]);
+
   const applyPlace = (prefix: "pickupAddress" | "dropoffAddress") => (s: PlaceSuggestion) => {
     form.setValue(`${prefix}.line1`, s.line1, { shouldValidate: true });
     form.setValue(`${prefix}.line2`, s.line2);
@@ -143,6 +199,7 @@ const BookingForm = () => {
             travelDate: `${format(data.travelDate, "PPP")} at ${data.collectionTime}`,
             travelDateRaw: `${format(data.travelDate, "dd-MMM-yyyy")} ${data.collectionTime}`,
             collectionAt: collectionAt.toISOString(),
+            amendReference: editing ?? undefined,
             vehicle: data.vehicle,
             passengers: data.passengers,
             bags: data.bags,
@@ -157,8 +214,10 @@ const BookingForm = () => {
 
       setSubmitted(true);
       toast({
-        title: "Enquiry Sent",
-        description: "We will be in touch shortly.",
+        title: editing ? "Booking Updated" : "Enquiry Sent",
+        description: editing
+          ? "Your changes have been sent to our team."
+          : "We will be in touch shortly.",
       });
     } catch (err) {
       console.error(err);
@@ -179,10 +238,12 @@ const BookingForm = () => {
           <Check className="w-5 h-5 text-champagne" />
         </div>
         <h3 className="font-display text-2xl tracking-wider text-foreground mb-3">
-          Enquiry Received
+          {editing ? "Booking Updated" : "Enquiry Received"}
         </h3>
         <p className="text-smoke text-sm font-light">
-          We will respond within 24 hours.
+          {editing
+            ? "Your booking has been updated. You can review it in My Bookings."
+            : "We will respond within 24 hours."}
         </p>
       </div>
     );
@@ -191,6 +252,11 @@ const BookingForm = () => {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        {editing && (
+          <div className="border border-champagne-muted px-4 py-3 text-smoke text-sm font-light">
+            Amending your existing booking. Update the details below and resubmit.
+          </div>
+        )}
         {/* Honeypot field - hidden from real users, bots will fill it */}
         <div className="absolute opacity-0 -z-10" aria-hidden="true" tabIndex={-1}>
           <label htmlFor="website">Website</label>
@@ -559,7 +625,7 @@ const BookingForm = () => {
             disabled={isSubmitting}
             className="w-full md:w-auto"
           >
-            {isSubmitting ? "Sending..." : "Submit Enquiry"}
+            {isSubmitting ? "Sending..." : editing ? "Update Booking" : "Submit Enquiry"}
           </Button>
         </div>
       </form>
