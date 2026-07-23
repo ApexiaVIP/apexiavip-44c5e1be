@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       bookings: {
         Row: {
+          as_directed_hours: number | null
           assigned_booking_id: number | null
           assigned_reference: string | null
           bags: number | null
@@ -24,6 +25,7 @@ export type Database = {
           dropoff: Json | null
           email: string
           id: string
+          journey_type: string
           name: string
           passengers: number | null
           phone: string
@@ -34,8 +36,10 @@ export type Database = {
           travel_date: string
           user_id: string | null
           vehicle: string
+          via: Json | null
         }
         Insert: {
+          as_directed_hours?: number | null
           assigned_booking_id?: number | null
           assigned_reference?: string | null
           bags?: number | null
@@ -44,6 +48,7 @@ export type Database = {
           dropoff?: Json | null
           email: string
           id?: string
+          journey_type?: string
           name: string
           passengers?: number | null
           phone: string
@@ -54,8 +59,10 @@ export type Database = {
           travel_date: string
           user_id?: string | null
           vehicle: string
+          via?: Json | null
         }
         Update: {
+          as_directed_hours?: number | null
           assigned_booking_id?: number | null
           assigned_reference?: string | null
           bags?: number | null
@@ -64,6 +71,7 @@ export type Database = {
           dropoff?: Json | null
           email?: string
           id?: string
+          journey_type?: string
           name?: string
           passengers?: number | null
           phone?: string
@@ -74,6 +82,7 @@ export type Database = {
           travel_date?: string
           user_id?: string | null
           vehicle?: string
+          via?: Json | null
         }
         Relationships: []
       }
