@@ -81,6 +81,11 @@ serve(async (req) => {
     }
     const userId = profile.id;
 
+    // App-store review account: fixed code, no SMS is actually sent
+    const REVIEW_PHONE = Deno.env.get("REVIEW_PHONE");
+    const REVIEW_CODE = Deno.env.get("REVIEW_CODE");
+    const isReviewAccount = !!REVIEW_PHONE && !!REVIEW_CODE && phone === REVIEW_PHONE;
+
     if (action === "start") {
       const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
       const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
@@ -106,7 +111,7 @@ serve(async (req) => {
       const bytes = new Uint8Array(4);
       crypto.getRandomValues(bytes);
       const randomInt = (((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0);
-      const code = (randomInt % 1000000).toString().padStart(6, "0");
+      const code = isReviewAccount ? REVIEW_CODE! : (randomInt % 1000000).toString().padStart(6, "0");
 
       await admin.from("mfa_codes").delete().eq("user_id", userId);
       const { error: insertError } = await admin.from("mfa_codes").insert({
@@ -115,6 +120,11 @@ serve(async (req) => {
         expires_at: new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000).toISOString(),
       });
       if (insertError) throw insertError;
+
+      if (isReviewAccount) {
+        // No SMS goes out; the reviewer uses the fixed code
+        return json(200, { success: true, channel: "sms", sent_to: maskPhone(phone) });
+      }
 
       if (smsConfigured) {
         const params = new URLSearchParams({
