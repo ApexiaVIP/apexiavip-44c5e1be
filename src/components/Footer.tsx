@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import apexiaLogo from "@/assets/apexia-logo.jpg";
 
 const Footer = () => {
@@ -11,6 +12,10 @@ const Footer = () => {
           
           <p className="text-smoke text-xs tracking-wider">
             Apexia VIP Ltd. All enquiries confidential.
+            {" "}
+            <Link to="/privacy" className="hover:text-foreground transition-colors underline underline-offset-4">
+              Privacy
+            </Link>
           </p>
         </div>
       </div>
