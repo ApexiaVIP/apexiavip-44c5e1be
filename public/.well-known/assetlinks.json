@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.apexiavip.app",
+      "sha256_cert_fingerprints": [
+        "11:4F:0A:AA:2E:EF:9B:CB:7A:66:16:4B:F5:65:F7:45:F9:85:A0:11:DA:D8:42:7E:08:11:D5:3C:96:DA:3A:C1"
+      ]
+    }
+  }
+]
