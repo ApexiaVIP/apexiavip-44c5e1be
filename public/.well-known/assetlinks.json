@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "com.apexiavip.app",
       "sha256_cert_fingerprints": [
-        "11:4F:0A:AA:2E:EF:9B:CB:7A:66:16:4B:F5:65:F7:45:F9:85:A0:11:DA:D8:42:7E:08:11:D5:3C:96:DA:3A:C1"
+        "11:4F:0A:AA:2E:EF:9B:CB:7A:66:16:4B:F5:65:F7:45:F9:85:A0:11:DA:D8:42:7E:08:11:D5:3C:96:DA:3A:C1",
+        "94:28:A2:99:F1:F0:46:8B:A1:B2:8E:7C:37:FA:E2:39:EB:CA:87:9F:CF:5C:17:2E:DD:77:E0:6A:56:FF:FD:9A"
       ]
     }
   }
