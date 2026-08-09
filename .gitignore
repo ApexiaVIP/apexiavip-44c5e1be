@@ -23,6 +23,4 @@ dist-ssr
 *.sln
 *.sw?
 
-# local tooling
-.claude/
 ios/App/build/
