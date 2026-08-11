@@ -14,6 +14,7 @@ import Profile from "./pages/Profile";
 import Bookings from "./pages/Bookings";
 import Admin from "./pages/Admin";
 import Privacy from "./pages/Privacy";
+import McfcPortal from "./pages/McfcPortal";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -54,6 +55,7 @@ const App = () => (
             <Route path="/bookings" element={<Bookings />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/mcfc" element={<McfcPortal />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
