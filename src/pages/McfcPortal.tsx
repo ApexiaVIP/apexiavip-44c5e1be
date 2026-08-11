@@ -55,6 +55,14 @@ const PASSENGERS: { group: string; names: string[] }[] = [
 
 const VEHICLES = ["S-Class", "Range Rover", "Viano", "JetClass"];
 
+/** Passenger seats per vehicle (chauffeur excluded) */
+const CAPACITY: Record<string, number> = {
+  "S-Class": 3,
+  "Range Rover": 4,
+  Viano: 7,
+  JetClass: 6,
+};
+
 interface CarRequest {
   passengers: string[];
   pickup: string;
@@ -97,16 +105,15 @@ const McfcPortal = () => {
 
   const togglePassenger = (i: number, name: string) =>
     setCars((prev) =>
-      prev.map((c, idx) =>
-        idx === i
-          ? {
-              ...c,
-              passengers: c.passengers.includes(name)
-                ? c.passengers.filter((p) => p !== name)
-                : [...c.passengers, name],
-            }
-          : c
-      )
+      prev.map((c, idx) => {
+        if (idx !== i) return c;
+        if (c.passengers.includes(name)) {
+          return { ...c, passengers: c.passengers.filter((p) => p !== name) };
+        }
+        // Never seat more passengers than the vehicle holds
+        if (c.passengers.length >= (CAPACITY[c.vehicle] ?? 3)) return c;
+        return { ...c, passengers: [...c.passengers, name] };
+      })
     );
 
   const copyDestinationToAll = () => {
@@ -114,10 +121,14 @@ const McfcPortal = () => {
     setCars((prev) => prev.map((c) => ({ ...c, destination: dest })));
   };
 
+  const overCapacity = (c: CarRequest) => c.passengers.length > (CAPACITY[c.vehicle] ?? 3);
+
   const canSubmit =
     travelDate &&
     cars.length > 0 &&
-    cars.every((c) => c.passengers.length > 0 && c.pickup && c.destination && c.time);
+    cars.every(
+      (c) => c.passengers.length > 0 && c.pickup && c.destination && c.time && !overCapacity(c)
+    );
 
   // ---------- Sign-in (no partner branding visible) ----------
   if (!authed) {
@@ -221,22 +232,26 @@ const McfcPortal = () => {
   // ---------- Travel desk (co-branded, behind sign-in) ----------
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border">
-        <div className="container mx-auto px-8 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-5">
-            <img src={apexiaLogo} alt="Apexia VIP" className="h-14 w-auto" />
-            <span className="text-smoke text-lg font-light">×</span>
+      <header className="border-b border-border" style={{ borderTop: `3px solid ${SKY}` }}>
+        <div className="container mx-auto px-8 py-6 flex items-center justify-between">
+          <div>
             <span
-              className="font-display text-2xl tracking-[0.25em]"
+              className="font-display text-4xl tracking-[0.3em] leading-none"
               style={{ color: SKY }}
             >
               MCFC
             </span>
-          </div>
-          <div className="flex items-center gap-6">
-            <span className="text-smoke text-xs tracking-[0.15em] uppercase hidden md:inline">
+            <p className="text-smoke text-[10px] tracking-[0.35em] uppercase mt-2">
               Team Travel Desk
-            </span>
+            </p>
+          </div>
+          <div className="flex items-center gap-8">
+            <div className="text-right hidden md:block">
+              <p className="text-smoke/50 text-[9px] tracking-[0.25em] uppercase mb-1">
+                Operated by
+              </p>
+              <img src={apexiaLogo} alt="Apexia VIP" className="h-9 w-auto ml-auto opacity-80" />
+            </div>
             <button
               type="button"
               onClick={() => setAuthed(false)}
@@ -286,8 +301,16 @@ const McfcPortal = () => {
           {cars.map((car, i) => (
             <section key={i} className="border border-border p-6">
               <div className="flex items-center justify-between mb-5">
-                <h2 className="text-foreground text-sm tracking-[0.2em] uppercase">
+                <h2 className="text-sm tracking-[0.2em] uppercase" style={{ color: SKY }}>
                   Car {i + 1}
+                  <span
+                    className={
+                      "ml-4 text-xs tracking-normal normal-case " +
+                      (overCapacity(car) ? "text-destructive" : "text-smoke")
+                    }
+                  >
+                    {car.passengers.length} of {CAPACITY[car.vehicle] ?? 3} seats
+                  </span>
                 </h2>
                 {cars.length > 1 && (
                   <button
@@ -333,6 +356,12 @@ const McfcPortal = () => {
 
                 {pickerOpen === i && (
                   <div className="mt-3 border border-border bg-charcoal p-4 max-h-72 overflow-y-auto">
+                    {car.passengers.length >= (CAPACITY[car.vehicle] ?? 3) && (
+                      <p className="text-xs mb-3" style={{ color: SKY }}>
+                        The {car.vehicle} seats {CAPACITY[car.vehicle] ?? 3}. Choose a larger
+                        vehicle or add another car for more passengers.
+                      </p>
+                    )}
                     {PASSENGERS.map((g) => (
                       <div key={g.group} className="mb-4 last:mb-0">
                         <p
@@ -344,12 +373,16 @@ const McfcPortal = () => {
                         <div className="flex flex-wrap gap-2">
                           {g.names.map((name) => {
                             const selected = car.passengers.includes(name);
+                            const atCapacity =
+                              !selected &&
+                              car.passengers.length >= (CAPACITY[car.vehicle] ?? 3);
                             return (
                               <button
                                 key={name}
                                 type="button"
                                 onClick={() => togglePassenger(i, name)}
-                                className="border px-3 py-1.5 text-sm transition-colors"
+                                disabled={atCapacity}
+                                className="border px-3 py-1.5 text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                 style={
                                   selected
                                     ? { borderColor: SKY, color: "#0b0a08", backgroundColor: SKY }
@@ -411,6 +444,13 @@ const McfcPortal = () => {
                 </div>
               </div>
 
+              {overCapacity(car) && (
+                <p className="text-destructive text-xs mt-3">
+                  Too many passengers for the {car.vehicle} ({CAPACITY[car.vehicle] ?? 3} seats).
+                  Choose a larger vehicle or move someone to another car.
+                </p>
+              )}
+
               <div className="mt-4">
                 <label className={label}>Notes for the chauffeur (optional)</label>
                 <Input
@@ -462,7 +502,8 @@ const McfcPortal = () => {
         </div>
 
         <p className="text-smoke/50 text-[11px] tracking-[0.1em] mt-14">
-          Preview build. Requests are not yet dispatched from this portal.
+          Operated by Apexia VIP. All activity confidential. Preview build:
+          requests are not yet dispatched from this portal.
         </p>
       </main>
     </div>
