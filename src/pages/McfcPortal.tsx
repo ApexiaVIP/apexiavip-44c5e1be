@@ -4,6 +4,7 @@ import { ArrowLeft, Car, Check, Copy, Plus, Users, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import apexiaLogo from "@/assets/apexia-logo.jpg";
+import mcfcBadge from "@/assets/mcfc-badge.svg";
 
 /**
  * Partner travel desk (preview build). Outside: unbranded sign-in in Apexia
@@ -82,26 +83,6 @@ const emptyCar = (): CarRequest => ({
   time: "",
   notes: "",
 });
-
-/* Club-lettered roundel; the official crest replaces this when rights land */
-const Roundel = ({ size = 64 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 100 100" aria-label="MCFC">
-    <circle cx="50" cy="50" r="48" fill="#ffffff" />
-    <circle cx="50" cy="50" r="46.5" fill="none" stroke={NAVY} strokeWidth="3" />
-    <circle cx="50" cy="50" r="37" fill="none" stroke={SKY} strokeWidth="2.5" />
-    <text
-      x="50"
-      y="56.5"
-      textAnchor="middle"
-      fontFamily="Georgia, 'Times New Roman', serif"
-      fontSize="23"
-      letterSpacing="1.5"
-      fill={NAVY}
-    >
-      MCFC
-    </text>
-  </svg>
-);
 
 const darkInput =
   "bg-transparent border-border focus:border-[#6CABDD] rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm";
@@ -231,7 +212,7 @@ const McfcPortal = () => {
       >
         <div className="bg-white max-w-lg w-full text-center px-10 py-14 shadow-xl">
           <div className="flex justify-center mb-6">
-            <Roundel size={72} />
+            <img src={mcfcBadge} alt="Manchester City FC" className="h-20 w-auto" />
           </div>
           <div
             className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-6"
@@ -270,30 +251,27 @@ const McfcPortal = () => {
   // ---------- Travel desk (fully club branded, behind sign-in) ----------
   return (
     <div className="min-h-screen" style={{ backgroundColor: SKY }}>
-      <header style={{ backgroundColor: NAVY }}>
+      <header style={{ backgroundColor: SKY }}>
         <div className="container mx-auto px-8 py-5 flex items-center justify-between">
           <div className="flex items-center gap-5">
-            <Roundel size={56} />
+            <img src={mcfcBadge} alt="Manchester City FC" className="h-16 w-auto" />
             <div>
-              <span className="font-display text-3xl tracking-[0.25em] leading-none text-white">
-                MCFC
+              <span className="font-display text-3xl tracking-[0.2em] leading-none text-white">
+                MANCHESTER CITY
               </span>
-              <p
-                className="text-[10px] tracking-[0.35em] uppercase mt-1.5"
-                style={{ color: SKY }}
-              >
+              <p className="text-[10px] tracking-[0.35em] uppercase mt-1.5 text-white/80">
                 Team Travel Desk
               </p>
             </div>
           </div>
           <div className="flex items-center gap-8">
-            <p className="text-white/40 text-[10px] tracking-[0.2em] uppercase hidden md:block">
+            <p className="text-white/60 text-[10px] tracking-[0.2em] uppercase hidden md:block">
               Operated by Apexia VIP
             </p>
             <button
               type="button"
               onClick={() => setAuthed(false)}
-              className="text-white/70 hover:text-white transition-colors text-xs tracking-[0.15em] uppercase"
+              className="text-white/80 hover:text-white transition-colors text-xs tracking-[0.15em] uppercase"
             >
               Sign Out
             </button>
