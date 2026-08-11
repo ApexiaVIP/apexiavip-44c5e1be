@@ -57,10 +57,10 @@ const VEHICLES = ["S-Class", "Range Rover", "Viano", "JetClass"];
 
 /** Passenger seats per vehicle (chauffeur excluded) */
 const CAPACITY: Record<string, number> = {
-  "S-Class": 3,
-  "Range Rover": 4,
-  Viano: 7,
-  JetClass: 6,
+  "S-Class": 2,
+  "Range Rover": 3,
+  Viano: 6,
+  JetClass: 5,
 };
 
 interface CarRequest {
