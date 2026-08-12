@@ -1,69 +1,27 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, Car, Check, Copy, Plus, Users, X } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate, Link } from "react-router-dom";
+import { ArrowLeft, Car, Check, Copy, Loader2, Plus, Users, X } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import apexiaLogo from "@/assets/apexia-logo.jpg";
 import mcfcBadge from "@/assets/mcfc-badge.svg";
 
 /**
- * Partner travel desk (preview build). Outside: unbranded sign-in in Apexia
- * dark. Inside: a fully club-branded travel desk (sky blue, navy, white) with
- * Apexia present only as a discreet operated-by credit.
+ * Partner travel desk. Outside: members' unbranded sign-in (SMS code).
+ * Inside, for accounts on the club's corporate desk: a fully club-branded
+ * travel desk (sky blue, navy, white) with Apexia present only as a discreet
+ * operated-by credit. Requests dispatch straight into the booking system.
  */
 
 const SKY = "#6CABDD";
 const NAVY = "#1C2C5B";
-const DEMO_CODE = "MCFC2026";
+const DESK = "mcfc";
 
-const PASSENGERS: { group: string; names: string[] }[] = [
-  {
-    group: "First Team",
-    names: [
-      "Gianluigi Donnarumma",
-      "Marcus Bettinelli",
-      "Rúben Dias",
-      "Marc Guéhi",
-      "Joško Gvardiol",
-      "Rayan Aït-Nouri",
-      "Abdukodir Khusanov",
-      "Vitor Reis",
-      "Rico Lewis",
-      "Max Alleyne",
-      "Joshua Wilson-Esbrand",
-      "Rodri",
-      "Elliot Anderson",
-      "Tijjani Reijnders",
-      "Mateo Kovačić",
-      "Kalvin Phillips",
-      "Nico González",
-      "Matheus Nunes",
-      "Phil Foden",
-      "Rayan Cherki",
-      "Claudio Echeverri",
-      "Nico O'Reilly",
-      "Jack Grealish",
-      "Jérémy Doku",
-      "Savinho",
-      "Antoine Semenyo",
-      "Jeremy Monga",
-      "Erling Haaland",
-      "Omar Marmoush",
-    ],
-  },
-  {
-    group: "Management",
-    names: ["Enzo Maresca", "Assistant Manager", "First Team Coach", "Head of Performance"],
-  },
-  {
-    group: "Executives",
-    names: ["Chief Executive", "Director of Football", "Club Secretary", "Executive Guest"],
-  },
-];
+const GROUP_ORDER = ["First Team", "Management", "Executives"];
 
 const VEHICLES = ["S-Class", "Range Rover", "Viano", "JetClass"];
 
-/** Passenger seats per vehicle (chauffeur excluded) */
+/** Passenger seats per vehicle (chauffeur excluded); must match the server */
 const CAPACITY: Record<string, number> = {
   "S-Class": 2,
   "Range Rover": 3,
@@ -80,6 +38,14 @@ interface CarRequest {
   notes: string;
 }
 
+interface RecentBooking {
+  reference: string | null;
+  travel_date: string;
+  vehicle: string;
+  name: string;
+  status: string;
+}
+
 const emptyCar = (): CarRequest => ({
   passengers: [],
   pickup: "",
@@ -88,9 +54,6 @@ const emptyCar = (): CarRequest => ({
   time: "",
   notes: "",
 });
-
-const darkInput =
-  "bg-transparent border-border focus:border-[#6CABDD] rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm";
 
 const lightLabel = "block text-[11px] tracking-[0.18em] uppercase mb-2";
 const lightInput =
@@ -101,14 +64,62 @@ const lightInputStyle = {
 } as const;
 
 const McfcPortal = () => {
-  const [authed, setAuthed] = useState(false);
-  const [code, setCode] = useState("");
-  const [codeError, setCodeError] = useState(false);
+  const { user, profile, loading, mfaVerified, mfaResolved, signOut } = useAuth();
 
+  const [passengerGroups, setPassengerGroups] = useState<{ group: string; names: string[] }[]>([]);
   const [travelDate, setTravelDate] = useState("");
   const [cars, setCars] = useState<CarRequest[]>([emptyCar()]);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState<{ cars: number; passengers: number; date: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState<number | null>(null);
+  const [recent, setRecent] = useState<RecentBooking[]>([]);
+
+  const hasDeskAccess = profile?.corporate === DESK;
+
+  // Approved passenger list, maintained by the operations team
+  useEffect(() => {
+    if (!hasDeskAccess || !mfaVerified) return;
+    let cancelled = false;
+    supabase
+      .from("corporate_passengers")
+      .select("name, grp, sort")
+      .eq("corporate", DESK)
+      .eq("active", true)
+      .order("sort")
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        const groups = [...new Set(data.map((r) => r.grp))].sort(
+          (a, b) =>
+            (GROUP_ORDER.indexOf(a) + 1 || 99) - (GROUP_ORDER.indexOf(b) + 1 || 99)
+        );
+        setPassengerGroups(
+          groups.map((g) => ({
+            group: g,
+            names: data.filter((r) => r.grp === g).map((r) => r.name),
+          }))
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasDeskAccess, mfaVerified]);
+
+  const loadRecent = useCallback(() => {
+    if (!user || !hasDeskAccess || !mfaVerified) return;
+    supabase
+      .from("bookings")
+      .select("reference, travel_date, vehicle, name, status")
+      .eq("corporate", DESK)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(10)
+      .then(({ data }) => setRecent(data ?? []));
+  }, [user, hasDeskAccess, mfaVerified]);
+
+  useEffect(() => {
+    loadRecent();
+  }, [loadRecent]);
 
   const totalPassengers = useMemo(
     () => cars.reduce((n, c) => n + c.passengers.length, 0),
@@ -139,14 +150,71 @@ const McfcPortal = () => {
   const overCapacity = (c: CarRequest) => c.passengers.length > (CAPACITY[c.vehicle] ?? 2);
 
   const canSubmit =
+    !submitting &&
     travelDate &&
     cars.length > 0 &&
     cars.every(
       (c) => c.passengers.length > 0 && c.pickup && c.destination && c.time && !overCapacity(c)
     );
 
-  // ---------- Sign-in (no partner branding visible) ----------
-  if (!authed) {
+  const submitRequest = async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("corporate-booking", {
+        body: {
+          travelDate,
+          cars: cars.map((c) => ({
+            passengers: c.passengers,
+            pickup: c.pickup.trim(),
+            destination: c.destination.trim(),
+            vehicle: c.vehicle,
+            time: c.time,
+            notes: c.notes.trim(),
+          })),
+        },
+      });
+      let message: string | null = null;
+      if (error) {
+        try {
+          const parsed = await (error as { context?: Response }).context?.json();
+          message = parsed?.error ?? null;
+        } catch {
+          message = null;
+        }
+        if (!message) message = "We couldn't send this request. Please try again.";
+      } else if (!data?.success) {
+        message = data?.error ?? "We couldn't send this request. Please try again.";
+      }
+      if (message) {
+        setSubmitError(message);
+      } else {
+        setSubmitted({ cars: cars.length, passengers: totalPassengers, date: travelDate });
+        setCars([emptyCar()]);
+        setPickerOpen(null);
+        loadRecent();
+      }
+    } catch {
+      setSubmitError("We couldn't send this request. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ---------- Access gates (no partner branding visible outside) ----------
+  if (loading || (user && (!mfaResolved || !profile))) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-smoke" />
+      </div>
+    );
+  }
+
+  if (!user || (mfaResolved && !mfaVerified)) {
+    return <Navigate to="/login" state={{ from: "/mcfc" }} replace />;
+  }
+
+  if (!hasDeskAccess) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-8">
         <Link
@@ -164,44 +232,10 @@ const McfcPortal = () => {
           <h1 className="font-display text-3xl font-light tracking-wider text-foreground mb-4">
             Team Travel Desk
           </h1>
-          <p className="text-smoke text-sm font-light leading-relaxed mb-10">
-            Restricted access for authorised operations staff. Enter your access
-            code to continue.
-          </p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (code.trim().toUpperCase() === DEMO_CODE) {
-                setAuthed(true);
-              } else {
-                setCodeError(true);
-              }
-            }}
-            className="space-y-4"
-          >
-            <Input
-              type="password"
-              placeholder="Access code"
-              value={code}
-              onChange={(e) => {
-                setCode(e.target.value);
-                setCodeError(false);
-              }}
-              className={darkInput + " text-center tracking-[0.3em]"}
-            />
-            {codeError && (
-              <p className="text-destructive text-sm">That code is not recognised.</p>
-            )}
-            <Button
-              type="submit"
-              className="w-full tracking-[0.2em] uppercase"
-              style={{ backgroundColor: SKY, color: "#0b0a08" }}
-            >
-              Enter
-            </Button>
-          </form>
-          <p className="text-smoke/60 text-xs font-light mt-12">
-            Access is provisioned by Apexia VIP. All activity is confidential.
+          <p className="text-smoke text-sm font-light leading-relaxed">
+            This desk is restricted to authorised operations staff. Your account
+            does not have access. If you believe it should, please contact your
+            Apexia VIP account manager.
           </p>
         </div>
       </div>
@@ -229,24 +263,22 @@ const McfcPortal = () => {
             className="font-display text-3xl font-light tracking-wider mb-4"
             style={{ color: NAVY }}
           >
-            Request Received
+            Request Confirmed
           </h2>
           <p className="text-sm leading-relaxed mb-2" style={{ color: `${NAVY}B3` }}>
-            {cars.length} {cars.length === 1 ? "car" : "cars"} for {totalPassengers}{" "}
-            {totalPassengers === 1 ? "passenger" : "passengers"} on {travelDate}.
+            {submitted.cars} {submitted.cars === 1 ? "car" : "cars"} for {submitted.passengers}{" "}
+            {submitted.passengers === 1 ? "passenger" : "passengers"} on {submitted.date}.
           </p>
           <p className="text-sm leading-relaxed mb-10" style={{ color: `${NAVY}B3` }}>
-            Your travel team will confirm each chauffeur and vehicle shortly.
+            Each car is now with your travel team, who will assign chauffeurs
+            and vehicles. You can follow every request from this desk.
           </p>
           <button
-            onClick={() => {
-              setCars([emptyCar()]);
-              setSubmitted(false);
-            }}
+            onClick={() => setSubmitted(null)}
             className="tracking-[0.2em] uppercase text-xs px-8 py-4 text-white transition-opacity hover:opacity-90"
             style={{ backgroundColor: NAVY }}
           >
-            New Request
+            Back to the Desk
           </button>
         </div>
       </div>
@@ -275,7 +307,7 @@ const McfcPortal = () => {
             </p>
             <button
               type="button"
-              onClick={() => setAuthed(false)}
+              onClick={() => signOut()}
               className="text-white/80 hover:text-white transition-colors text-xs tracking-[0.15em] uppercase"
             >
               Sign Out
@@ -398,7 +430,12 @@ const McfcPortal = () => {
                         vehicle or add another car for more passengers.
                       </p>
                     )}
-                    {PASSENGERS.map((g) => (
+                    {passengerGroups.length === 0 && (
+                      <p className="text-xs" style={{ color: `${NAVY}99` }}>
+                        Loading the passenger list…
+                      </p>
+                    )}
+                    {passengerGroups.map((g) => (
                       <div key={g.group} className="mb-4 last:mb-0">
                         <p
                           className="text-[11px] tracking-[0.25em] uppercase mb-2 font-semibold"
@@ -541,22 +578,69 @@ const McfcPortal = () => {
         <div className="mt-10 flex items-center gap-6 flex-wrap">
           <button
             disabled={!canSubmit}
-            onClick={() => setSubmitted(true)}
-            className="tracking-[0.2em] uppercase text-xs px-10 py-4 text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={submitRequest}
+            className="tracking-[0.2em] uppercase text-xs px-10 py-4 text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-3"
             style={{ backgroundColor: NAVY }}
           >
-            Submit Request
+            {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            {submitting ? "Sending" : "Submit Request"}
           </button>
-          {!canSubmit && (
+          {!canSubmit && !submitting && (
             <p className="text-xs" style={{ color: `${NAVY}B3` }}>
               Each car needs at least one passenger, a pickup, a destination and a time.
             </p>
           )}
+          {submitError && <p className="text-xs font-medium text-red-700">{submitError}</p>}
         </div>
 
+        {recent.length > 0 && (
+          <section className="mt-14">
+            <h2 className="text-sm tracking-[0.2em] uppercase font-semibold mb-4" style={{ color: NAVY }}>
+              Recent Requests
+            </h2>
+            <div className="bg-white shadow-md overflow-x-auto">
+              <table className="w-full text-sm" style={{ color: NAVY }}>
+                <thead>
+                  <tr
+                    className="text-[11px] tracking-[0.18em] uppercase text-left"
+                    style={{ color: `${NAVY}99` }}
+                  >
+                    <th className="px-4 py-3 font-medium">Travel Date</th>
+                    <th className="px-4 py-3 font-medium">Vehicle</th>
+                    <th className="px-4 py-3 font-medium">Passengers</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recent.map((b, idx) => (
+                    <tr
+                      key={b.reference ?? idx}
+                      className="border-t"
+                      style={{ borderColor: "rgba(28,44,91,0.12)" }}
+                    >
+                      <td className="px-4 py-3 whitespace-nowrap">{b.travel_date}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{b.vehicle}</td>
+                      <td className="px-4 py-3">{b.name}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span
+                          className="inline-block px-2.5 py-1 text-[11px] tracking-[0.12em] uppercase text-white"
+                          style={{
+                            backgroundColor: b.status === "Failed" ? "#b91c1c" : NAVY,
+                          }}
+                        >
+                          {b.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
         <p className="text-[11px] tracking-[0.1em] mt-14" style={{ color: `${NAVY}80` }}>
-          Operated by Apexia VIP. All activity confidential. Preview build:
-          requests are not yet dispatched from this portal.
+          Operated by Apexia VIP. All activity confidential.
         </p>
       </main>
     </div>

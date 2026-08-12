@@ -24,6 +24,8 @@ interface Profile {
   avatar_url: string;
   profile_completed: boolean;
   primary_member_id: string | null;
+  /** Corporate travel desk this member belongs to (e.g. "mcfc"), if any */
+  corporate: string | null;
 }
 
 interface AuthContextValue {

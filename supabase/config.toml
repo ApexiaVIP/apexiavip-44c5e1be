@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.booking-status]
 verify_jwt = false
+
+[functions.corporate-booking]
+verify_jwt = false

@@ -19,6 +19,10 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+// mcfc.apexiavip.com serves the partner travel desk at the root
+const isMcfcHost =
+  typeof window !== "undefined" && window.location.hostname.startsWith("mcfc.");
+
 // Invite/recovery email links land on the site root (Lovable Cloud manages the
 // redirect allowlist); route them to the right screen based on the link type.
 const AuthLinkRedirect = () => {
@@ -45,7 +49,7 @@ const App = () => (
         <AuthProvider>
           <AuthLinkRedirect />
           <Routes>
-            <Route path="/" element={<Index />} />
+            <Route path="/" element={isMcfcHost ? <McfcPortal /> : <Index />} />
             <Route path="/fleet/:slug" element={<VehicleDetail />} />
             <Route path="/login" element={<Login />} />
             <Route path="/welcome" element={<Welcome />} />

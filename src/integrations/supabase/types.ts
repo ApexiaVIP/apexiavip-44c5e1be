@@ -21,6 +21,7 @@ export type Database = {
           assigned_reference: string | null
           bags: number | null
           collection_at: string | null
+          corporate: string | null
           created_at: string
           dropoff: Json | null
           email: string
@@ -44,6 +45,7 @@ export type Database = {
           assigned_reference?: string | null
           bags?: number | null
           collection_at?: string | null
+          corporate?: string | null
           created_at?: string
           dropoff?: Json | null
           email: string
@@ -67,6 +69,7 @@ export type Database = {
           assigned_reference?: string | null
           bags?: number | null
           collection_at?: string | null
+          corporate?: string | null
           created_at?: string
           dropoff?: Json | null
           email?: string
@@ -83,6 +86,36 @@ export type Database = {
           user_id?: string | null
           vehicle?: string
           via?: Json | null
+        }
+        Relationships: []
+      }
+      corporate_passengers: {
+        Row: {
+          active: boolean
+          corporate: string
+          created_at: string
+          grp: string
+          id: string
+          name: string
+          sort: number
+        }
+        Insert: {
+          active?: boolean
+          corporate: string
+          created_at?: string
+          grp: string
+          id?: string
+          name: string
+          sort?: number
+        }
+        Update: {
+          active?: boolean
+          corporate?: string
+          created_at?: string
+          grp?: string
+          id?: string
+          name?: string
+          sort?: number
         }
         Relationships: []
       }
@@ -226,6 +259,7 @@ export type Database = {
           address_line1: string
           address_line2: string
           avatar_url: string
+          corporate: string | null
           country: string
           created_at: string
           email: string
@@ -243,6 +277,7 @@ export type Database = {
           address_line1?: string
           address_line2?: string
           avatar_url?: string
+          corporate?: string | null
           country?: string
           created_at?: string
           email?: string
@@ -260,6 +295,7 @@ export type Database = {
           address_line1?: string
           address_line2?: string
           avatar_url?: string
+          corporate?: string | null
           country?: string
           created_at?: string
           email?: string
