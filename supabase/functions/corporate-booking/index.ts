@@ -134,6 +134,27 @@ serve(async (req) => {
       return json(400, { success: false, error: `Requests must contain 1 to ${MAX_CARS} cars` });
     }
 
+    // Amending? Reuse the original reference so Dispatch overwrites the
+    // booking. Amendments are per car: exactly one car, owned by the caller.
+    const amendReference =
+      typeof body.amendReference === "string" && body.amendReference ? body.amendReference : null;
+    if (amendReference) {
+      if (cars.length !== 1) {
+        return json(400, { success: false, error: "Amendments cover one car at a time" });
+      }
+      const { data: existing } = await supabase
+        .from("bookings")
+        .select("reference, user_id, corporate, status")
+        .eq("reference", amendReference)
+        .maybeSingle();
+      if (!existing || existing.user_id !== userData.user.id || existing.corporate !== corporate) {
+        return json(403, { success: false, error: "Booking not found" });
+      }
+      if (existing.status === "Cancelled") {
+        return json(400, { success: false, error: "This booking is cancelled. Please request a new car." });
+      }
+    }
+
     // Passenger names must come from this desk's approved list
     const { data: allowedRows } = await supabase
       .from("corporate_passengers")
@@ -184,7 +205,7 @@ serve(async (req) => {
 
     // --- Build one Dispatch transfer carrying every car ---
     const dispatchBookings = cars.map((car, i) => {
-      const reference = `APEXIA-${deskName}-${requestId}-C${i + 1}`;
+      const reference = amendReference ?? `APEXIA-${deskName}-${requestId}-C${i + 1}`;
       const manifest = car.passengers.join(", ");
       return {
         Reference: reference,
@@ -221,10 +242,7 @@ serve(async (req) => {
     });
 
     // Store each car against the booker so it shows in the portal history
-    const bookingRows = cars.map((car, i) => ({
-      user_id: userData.user.id,
-      reference: dispatchBookings[i].Reference,
-      corporate,
+    const carRowValues = cars.map((car, i) => ({
       name: car.passengers.join(", "),
       email: bookerEmail,
       phone: bookerPhone,
@@ -236,11 +254,20 @@ serve(async (req) => {
       pickup: { line1: car.pickup.trim(), town: "", postcode: "" },
       dropoff: { line1: car.destination.trim(), town: "", postcode: "" },
       journey_type: "destination",
-      status: "Requested",
     }));
-    const { error: dbError } = await supabase.from("bookings").insert(bookingRows);
-    if (dbError) {
-      console.error("DB insert error:", dbError);
+    if (!amendReference) {
+      const { error: dbError } = await supabase.from("bookings").insert(
+        carRowValues.map((values, i) => ({
+          ...values,
+          user_id: userData.user.id,
+          reference: dispatchBookings[i].Reference,
+          corporate,
+          status: "Requested",
+        }))
+      );
+      if (dbError) {
+        console.error("DB insert error:", dbError);
+      }
     }
 
     const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
@@ -280,11 +307,18 @@ serve(async (req) => {
             failedReferences.push(dispatchBooking.Reference);
           } else {
             confirmedReferences.push(dispatchBooking.Reference);
+            const carIndex = dispatchBookings.indexOf(dispatchBooking);
             await supabase
               .from("bookings")
               .update({
-                assigned_booking_id: (match?.AssignedBookingID as string | undefined) ?? null,
-                assigned_reference: (match?.AssignedBookingReference as string | undefined) ?? null,
+                // An accepted amendment writes the new details over our record
+                ...(amendReference ? carRowValues[carIndex] : {}),
+                ...(match?.AssignedBookingID != null
+                  ? {
+                      assigned_booking_id: match.AssignedBookingID as number,
+                      assigned_reference: (match?.AssignedBookingReference as string | undefined) ?? null,
+                    }
+                  : {}),
                 status: "Confirmed",
               })
               .eq("reference", dispatchBooking.Reference);
@@ -299,7 +333,8 @@ serve(async (req) => {
     if (transferFailureMessage) {
       failedReferences.push(...dispatchBookings.map((b) => b.Reference));
     }
-    if (failedReferences.length > 0) {
+    // A failed amendment leaves the original booking standing untouched
+    if (failedReferences.length > 0 && !amendReference) {
       await supabase.from("bookings").update({ status: "Failed" }).in("reference", failedReferences);
     }
 
@@ -318,7 +353,11 @@ serve(async (req) => {
     const htmlBody = `
       <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 720px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
         <h1 style="font-size: 22px; font-weight: 300; letter-spacing: 0.1em; border-bottom: 1px solid #2a2a2a; padding-bottom: 20px; color: #b89b5e;">
-          ${deskName} Travel Desk: ${cars.length} car${cars.length === 1 ? "" : "s"} requested
+          ${deskName} Travel Desk: ${
+            amendReference
+              ? `booking AMENDED (${sanitize(amendReference)})`
+              : `${cars.length} car${cars.length === 1 ? "" : "s"} requested`
+          }
         </h1>
         <p style="color: #8a8070; font-size: 13px;">
           Travel date: <strong style="color: #e0d5c4;">${day}-${monthName}-${year}</strong>
@@ -346,7 +385,9 @@ serve(async (req) => {
         body: JSON.stringify({
           from: "Apexia VIP <info@apexiavip.com>",
           to: ["info@apexiavip.com"],
-          subject: `${deskName} Travel Desk: ${cars.length} car(s) for ${day}-${monthName}-${year}${failedReferences.length > 0 ? " (TRANSFER FAILED)" : ""}`,
+          subject: `${deskName} Travel Desk: ${
+            amendReference ? "booking AMENDED" : `${cars.length} car(s)`
+          } for ${day}-${monthName}-${year}${failedReferences.length > 0 ? " (TRANSFER FAILED)" : ""}`,
           html: htmlBody,
           ...(bookerEmail ? { reply_to: bookerEmail } : {}),
         }),

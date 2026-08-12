@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Link } from "react-router-dom";
 import { ArrowLeft, Car, Check, Copy, Loader2, Plus, Users, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { cancelBooking } from "@/lib/mfa";
 import { useAuth } from "@/hooks/useAuth";
 import apexiaLogo from "@/assets/apexia-logo.jpg";
 import mcfcBadge from "@/assets/mcfc-badge.svg";
@@ -44,6 +45,9 @@ interface RecentBooking {
   vehicle: string;
   name: string;
   status: string;
+  collection_at: string | null;
+  pickup: { line1?: string } | null;
+  dropoff: { line1?: string } | null;
 }
 
 const emptyCar = (): CarRequest => ({
@@ -69,11 +73,21 @@ const McfcPortal = () => {
   const [passengerGroups, setPassengerGroups] = useState<{ group: string; names: string[] }[]>([]);
   const [travelDate, setTravelDate] = useState("");
   const [cars, setCars] = useState<CarRequest[]>([emptyCar()]);
-  const [submitted, setSubmitted] = useState<{ cars: number; passengers: number; date: string } | null>(null);
+  const [submitted, setSubmitted] = useState<{
+    cars: number;
+    passengers: number;
+    date: string;
+    amended: boolean;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState<number | null>(null);
   const [recent, setRecent] = useState<RecentBooking[]>([]);
+  // Amending an existing car: its reference; Dispatch overwrites on resubmit
+  const [amendRef, setAmendRef] = useState<string | null>(null);
+  const [cancelConfirmRef, setCancelConfirmRef] = useState<string | null>(null);
+  const [cancellingRef, setCancellingRef] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const hasDeskAccess = profile?.corporate === DESK;
 
@@ -109,12 +123,12 @@ const McfcPortal = () => {
     if (!user || !hasDeskAccess || !mfaVerified) return;
     supabase
       .from("bookings")
-      .select("reference, travel_date, vehicle, name, status")
+      .select("reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff")
       .eq("corporate", DESK)
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(10)
-      .then(({ data }) => setRecent(data ?? []));
+      .then(({ data }) => setRecent((data as RecentBooking[] | null) ?? []));
   }, [user, hasDeskAccess, mfaVerified]);
 
   useEffect(() => {
@@ -149,6 +163,54 @@ const McfcPortal = () => {
 
   const overCapacity = (c: CarRequest) => c.passengers.length > (CAPACITY[c.vehicle] ?? 2);
 
+  // Load an existing car back into the form; resubmitting overwrites the
+  // booking because the reference is reused. Notes are not stored, so they
+  // start blank.
+  const beginAmend = (b: RecentBooking) => {
+    if (!b.reference) return;
+    setAmendRef(b.reference);
+    setTravelDate(b.collection_at ? b.collection_at.slice(0, 10) : "");
+    setCars([
+      {
+        passengers: b.name ? b.name.split(", ").filter(Boolean) : [],
+        pickup: b.pickup?.line1 ?? "",
+        destination: b.dropoff?.line1 ?? "",
+        vehicle: VEHICLES.includes(b.vehicle) ? b.vehicle : "S-Class",
+        time: b.collection_at ? b.collection_at.slice(11, 16) : "",
+        notes: "",
+      },
+    ]);
+    setPickerOpen(null);
+    setSubmitError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const discardAmend = () => {
+    setAmendRef(null);
+    setCars([emptyCar()]);
+    setTravelDate("");
+    setSubmitError(null);
+  };
+
+  const cancelRequest = async (reference: string) => {
+    setCancellingRef(reference);
+    setCancelError(null);
+    try {
+      await cancelBooking(reference);
+      if (amendRef === reference) discardAmend();
+      loadRecent();
+    } catch (err) {
+      setCancelError(
+        err instanceof Error && err.message !== "Something went wrong"
+          ? err.message
+          : "We couldn't cancel this booking. Please contact us."
+      );
+    } finally {
+      setCancellingRef(null);
+      setCancelConfirmRef(null);
+    }
+  };
+
   const canSubmit =
     !submitting &&
     travelDate &&
@@ -164,6 +226,7 @@ const McfcPortal = () => {
       const { data, error } = await supabase.functions.invoke("corporate-booking", {
         body: {
           travelDate,
+          ...(amendRef ? { amendReference: amendRef } : {}),
           cars: cars.map((c) => ({
             passengers: c.passengers,
             pickup: c.pickup.trim(),
@@ -189,8 +252,15 @@ const McfcPortal = () => {
       if (message) {
         setSubmitError(message);
       } else {
-        setSubmitted({ cars: cars.length, passengers: totalPassengers, date: travelDate });
+        setSubmitted({
+          cars: cars.length,
+          passengers: totalPassengers,
+          date: travelDate,
+          amended: !!amendRef,
+        });
         setCars([emptyCar()]);
+        setTravelDate("");
+        setAmendRef(null);
         setPickerOpen(null);
         loadRecent();
       }
@@ -263,15 +333,16 @@ const McfcPortal = () => {
             className="font-display text-3xl font-light tracking-wider mb-4"
             style={{ color: NAVY }}
           >
-            Request Confirmed
+            {submitted.amended ? "Booking Amended" : "Request Confirmed"}
           </h2>
           <p className="text-sm leading-relaxed mb-2" style={{ color: `${NAVY}B3` }}>
             {submitted.cars} {submitted.cars === 1 ? "car" : "cars"} for {submitted.passengers}{" "}
             {submitted.passengers === 1 ? "passenger" : "passengers"} on {submitted.date}.
           </p>
           <p className="text-sm leading-relaxed mb-10" style={{ color: `${NAVY}B3` }}>
-            Each car is now with your travel team, who will assign chauffeurs
-            and vehicles. You can follow every request from this desk.
+            {submitted.amended
+              ? "The booking has been updated and your travel team notified."
+              : "Each car is now with your travel team, who will assign chauffeurs and vehicles. You can follow every request from this desk."}
           </p>
           <button
             onClick={() => setSubmitted(null)}
@@ -323,7 +394,7 @@ const McfcPortal = () => {
               className="text-xs tracking-[0.4em] uppercase mb-2"
               style={{ color: NAVY }}
             >
-              New Request
+              {amendRef ? "Amend Booking" : "New Request"}
             </p>
             <h1
               className="font-display text-4xl font-light tracking-wider"
@@ -343,6 +414,25 @@ const McfcPortal = () => {
             </span>
           </div>
         </div>
+
+        {amendRef && (
+          <div
+            className="p-4 mb-6 flex items-center justify-between flex-wrap gap-3 text-sm"
+            style={{ backgroundColor: NAVY, color: "#ffffff" }}
+          >
+            <span>
+              Amending an existing booking. Submitting will update the car with
+              your travel team; nothing changes until you submit.
+            </span>
+            <button
+              type="button"
+              onClick={discardAmend}
+              className="underline underline-offset-4 text-white/80 hover:text-white text-xs tracking-[0.15em] uppercase"
+            >
+              Discard Changes
+            </button>
+          </div>
+        )}
 
         <div className="bg-white p-6 shadow-md mb-6 max-w-xl">
           <label className={lightLabel} style={{ color: `${NAVY}99` }}>
@@ -553,15 +643,17 @@ const McfcPortal = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-4 mt-6">
-          <button
-            type="button"
-            onClick={() => setCars((prev) => [...prev, emptyCar()])}
-            className="inline-flex items-center gap-2 border border-dashed bg-white/40 hover:bg-white px-5 py-3 text-xs tracking-[0.2em] uppercase transition-colors"
-            style={{ borderColor: NAVY, color: NAVY }}
-          >
-            <Plus className="w-4 h-4" />
-            Add Another Car
-          </button>
+          {!amendRef && (
+            <button
+              type="button"
+              onClick={() => setCars((prev) => [...prev, emptyCar()])}
+              className="inline-flex items-center gap-2 border border-dashed bg-white/40 hover:bg-white px-5 py-3 text-xs tracking-[0.2em] uppercase transition-colors"
+              style={{ borderColor: NAVY, color: NAVY }}
+            >
+              <Plus className="w-4 h-4" />
+              Add Another Car
+            </button>
+          )}
           {cars.length > 1 && (
             <button
               type="button"
@@ -583,7 +675,7 @@ const McfcPortal = () => {
             style={{ backgroundColor: NAVY }}
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-            {submitting ? "Sending" : "Submit Request"}
+            {submitting ? "Sending" : amendRef ? "Submit Amendment" : "Submit Request"}
           </button>
           {!canSubmit && !submitting && (
             <p className="text-xs" style={{ color: `${NAVY}B3` }}>
@@ -598,6 +690,9 @@ const McfcPortal = () => {
             <h2 className="text-sm tracking-[0.2em] uppercase font-semibold mb-4" style={{ color: NAVY }}>
               Recent Requests
             </h2>
+            {cancelError && (
+              <p className="text-xs font-medium text-red-700 mb-3">{cancelError}</p>
+            )}
             <div className="bg-white shadow-md overflow-x-auto">
               <table className="w-full text-sm" style={{ color: NAVY }}>
                 <thead>
@@ -609,30 +704,89 @@ const McfcPortal = () => {
                     <th className="px-4 py-3 font-medium">Vehicle</th>
                     <th className="px-4 py-3 font-medium">Passengers</th>
                     <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {recent.map((b, idx) => (
-                    <tr
-                      key={b.reference ?? idx}
-                      className="border-t"
-                      style={{ borderColor: "rgba(28,44,91,0.12)" }}
-                    >
-                      <td className="px-4 py-3 whitespace-nowrap">{b.travel_date}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">{b.vehicle}</td>
-                      <td className="px-4 py-3">{b.name}</td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span
-                          className="inline-block px-2.5 py-1 text-[11px] tracking-[0.12em] uppercase text-white"
-                          style={{
-                            backgroundColor: b.status === "Failed" ? "#b91c1c" : NAVY,
-                          }}
-                        >
-                          {b.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {recent.map((b, idx) => {
+                    const actionable =
+                      !!b.reference && b.status !== "Cancelled" && b.status !== "Failed";
+                    const confirming = cancelConfirmRef === b.reference;
+                    const cancelling = cancellingRef === b.reference;
+                    return (
+                      <tr
+                        key={b.reference ?? idx}
+                        className="border-t"
+                        style={{ borderColor: "rgba(28,44,91,0.12)" }}
+                      >
+                        <td className="px-4 py-3 whitespace-nowrap">{b.travel_date}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">{b.vehicle}</td>
+                        <td className="px-4 py-3">{b.name}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span
+                            className="inline-block px-2.5 py-1 text-[11px] tracking-[0.12em] uppercase text-white"
+                            style={{
+                              backgroundColor:
+                                b.status === "Failed" || b.status === "Cancelled"
+                                  ? "#b91c1c"
+                                  : NAVY,
+                            }}
+                          >
+                            {b.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-right">
+                          {actionable && (
+                            <span className="inline-flex items-center gap-4 text-[11px] tracking-[0.12em] uppercase">
+                              {!confirming && (
+                                <button
+                                  type="button"
+                                  onClick={() => beginAmend(b)}
+                                  className="underline underline-offset-4 hover:opacity-70 transition-opacity"
+                                  style={{ color: NAVY }}
+                                >
+                                  Amend
+                                </button>
+                              )}
+                              {confirming ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={cancelling}
+                                    onClick={() => cancelRequest(b.reference!)}
+                                    className="px-2.5 py-1 text-white disabled:opacity-50"
+                                    style={{ backgroundColor: "#b91c1c" }}
+                                  >
+                                    {cancelling ? "Cancelling…" : "Confirm Cancel"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={cancelling}
+                                    onClick={() => setCancelConfirmRef(null)}
+                                    className="underline underline-offset-4 hover:opacity-70 transition-opacity"
+                                    style={{ color: NAVY }}
+                                  >
+                                    Keep
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCancelError(null);
+                                    setCancelConfirmRef(b.reference);
+                                  }}
+                                  className="underline underline-offset-4 hover:opacity-70 transition-opacity text-red-700"
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
