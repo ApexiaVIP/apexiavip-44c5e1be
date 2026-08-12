@@ -96,12 +96,14 @@ const Admin = () => {
         action: "invite",
         full_name: fullName,
         email,
-        phone: `${countryCode}${phone.replace(/[\s\-()]/g, "").replace(/^0+/, "")}`,
+        phone: phone.trim()
+          ? `${countryCode}${phone.replace(/[\s\-()]/g, "").replace(/^0+/, "")}`
+          : "",
       }),
     onSuccess: () => {
       toast({
         title: "Member invited",
-        description: `${fullName || "The new member"} can now sign in with their mobile number.`,
+        description: `${fullName || "The new member"} can now sign in with their ${phone.trim() ? "mobile number" : "email address"}.`,
       });
       setInviteOpen(false);
       setFullName("");
@@ -214,9 +216,9 @@ const Admin = () => {
                   Invite a Member
                 </DialogTitle>
                 <DialogDescription>
-                  Access is immediate: they sign in with this mobile number and
-                  a one-time code sent by text. No password, no email link. A
-                  welcome email is sent as a courtesy.
+                  Access is immediate: they sign in with a one-time code sent
+                  to their mobile by text, or to their email if no mobile is
+                  given. No password. Provide at least one.
                 </DialogDescription>
               </DialogHeader>
               <form
@@ -243,16 +245,15 @@ const Admin = () => {
                   <CountryCodeSelect value={countryCode} onChange={setCountryCode} />
                   <Input
                     type="tel"
-                    placeholder="7700 900123"
+                    placeholder="7700 900123 (optional if email given)"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     className="flex-1"
-                    required
                   />
                 </div>
                 <Button
                   type="submit"
-                  disabled={invite.isPending}
+                  disabled={invite.isPending || (!phone.trim() && !email.trim())}
                   className="w-full tracking-[0.15em] uppercase"
                 >
                   {invite.isPending ? (

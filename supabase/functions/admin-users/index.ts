@@ -113,27 +113,30 @@ serve(async (req) => {
       const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
       const phone = typeof body.phone === "string" ? body.phone.replace(/[\s\-()]/g, "") : "";
 
-      // Only the mobile number is required; the member completes the rest
-      // of their profile after first sign-in
+      // A mobile OR an email is enough to invite; the member signs in with
+      // whichever they were given (code by SMS or by email) and completes the
+      // rest of their profile after first sign-in
       if (fullName.length > 100) return json(400, { error: "Invalid name" });
       if (email && (!email.includes("@") || email.length > 255)) {
         return json(400, { error: "Invalid email" });
       }
-      if (!isValidPhone(phone)) {
+      if (phone && !isValidPhone(phone)) {
         return json(400, { error: "Phone must be in international format, e.g. +447700900123" });
+      }
+      if (!phone && !email) {
+        return json(400, { error: "A mobile number or an email address is required" });
       }
 
       // Sign-in never uses this address; it only anchors the auth account
       // until the member provides their real email in their profile
       const authEmail = email || `member-${phone.replace(/\D/g, "")}@members.apexiavip.com`;
 
-      // Create the member directly: sign-in is passwordless (mobile + SMS code),
-      // so nothing in onboarding depends on an email being delivered
+      // Create the member directly: sign-in is passwordless (code by SMS or
+      // email), so nothing in onboarding depends on an email being delivered
       const { data: created, error: createError } = await admin.auth.admin.createUser({
         email: authEmail,
-        phone,
+        ...(phone ? { phone, phone_confirm: true } : {}),
         email_confirm: true,
-        phone_confirm: true,
         user_metadata: { full_name: fullName },
       });
       if (createError) {
@@ -159,12 +162,15 @@ serve(async (req) => {
         .insert({ user_id: userId, role: "member" });
       if (roleError) throw roleError;
 
-      // Tell the new member they're in: welcome SMS, plus a courtesy email
-      // when we have an address. Sign-in never depends on either.
-      await trySendSms(
-        phone,
-        "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed."
-      );
+      // Tell the new member they're in: welcome SMS when we have a mobile,
+      // plus a welcome email when we have an address. Sign-in never depends
+      // on either arriving.
+      if (phone) {
+        await trySendSms(
+          phone,
+          "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed."
+        );
+      }
 
       const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
       if (RESEND_API_KEY && email) {
@@ -183,7 +189,11 @@ serve(async (req) => {
                 <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 520px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 48px 40px; text-align: center;">
                   <p style="color: #b89b5e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3em; margin-bottom: 28px;">Apexia VIP</p>
                   <p style="font-size: 20px; font-weight: 300; letter-spacing: 0.05em; margin-bottom: 20px;">Welcome, ${fullName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
-                  <p style="font-size: 14px; color: #8a8070; line-height: 1.7;">Your membership is now active. To sign in, simply visit the site, choose Members, and enter this mobile number ending ${phone.slice(-3)}. We will text you a secure access code. There is no password to remember.</p>
+                  <p style="font-size: 14px; color: #8a8070; line-height: 1.7;">${
+                    phone
+                      ? `Your membership is now active. To sign in, simply visit the site, choose Members, and enter this mobile number ending ${phone.slice(-3)}. We will text you a secure access code. There is no password to remember.`
+                      : `Your membership is now active. To sign in, simply visit the site, choose Members, select email sign-in and enter this email address. We will email you a secure access code. There is no password to remember.`
+                  }</p>
                   <p style="margin: 32px 0;"><a href="https://apexiavip.com/login" style="color: #b89b5e; border: 1px solid #b89b5e; padding: 14px 36px; text-decoration: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.2em;">Member Sign In</a></p>
                   <p style="font-size: 11px; color: #8a8070;">All enquiries are handled with complete discretion.</p>
                 </div>

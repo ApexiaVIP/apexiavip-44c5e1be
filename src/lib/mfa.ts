@@ -95,12 +95,18 @@ export const startPhoneLogin = async (phone: string): Promise<PhoneChallenge> =>
 };
 
 /**
- * Passwordless sign-in, step 2: verify the code, establish the session, and
- * mark it code-verified server-side.
+ * Passwordless sign-in, step 1 (email variant): send an access code to a
+ * registered email address. Unauthenticated; must belong to an active member.
  */
-export const finishPhoneLogin = async (phone: string, code: string): Promise<void> => {
-  const data = await invokeFn("phone-login", { action: "finish", phone, code });
+export const startEmailLogin = async (email: string): Promise<PhoneChallenge> => {
+  const data = await invokeFn("phone-login", { action: "start", email });
+  return {
+    channel: "email",
+    destination: data.sent_to ?? "your email address",
+  };
+};
 
+const completeLogin = async (data: { token_hash: string; claim_token: string }) => {
   const { error } = await supabase.auth.verifyOtp({
     type: "magiclink",
     token_hash: data.token_hash,
@@ -108,6 +114,21 @@ export const finishPhoneLogin = async (phone: string, code: string): Promise<voi
   if (error) throw new Error("We could not sign you in. Please try again.");
 
   await invoke2fa({ action: "claim", token: data.claim_token });
+};
+
+/**
+ * Passwordless sign-in, step 2: verify the code, establish the session, and
+ * mark it code-verified server-side.
+ */
+export const finishPhoneLogin = async (phone: string, code: string): Promise<void> => {
+  const data = await invokeFn("phone-login", { action: "finish", phone, code });
+  await completeLogin(data);
+};
+
+/** Step 2 for the email variant. */
+export const finishEmailLogin = async (email: string, code: string): Promise<void> => {
+  const data = await invokeFn("phone-login", { action: "finish", email, code });
+  await completeLogin(data);
 };
 
 /** Send a security code to the signed-in member (SMS, or email as interim). */

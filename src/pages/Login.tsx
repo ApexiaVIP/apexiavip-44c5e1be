@@ -7,6 +7,8 @@ import {
   startPhoneChallenge,
   startPhoneLogin,
   finishPhoneLogin,
+  startEmailLogin,
+  finishEmailLogin,
   describeChallenge,
   type PhoneChallenge,
 } from "@/lib/mfa";
@@ -41,8 +43,11 @@ const Login = () => {
   // session that just needs code re-verification (e.g. after an admin 2FA reset).
   const [mode, setMode] = useState<"fresh" | "session">("fresh");
   const [step, setStep] = useState<"phone" | "code">("phone");
+  // Members sign in with a mobile (code by SMS) or an email (code by email)
+  const [method, setMethod] = useState<"mobile" | "email">("mobile");
   const [countryCode, setCountryCode] = useState("+44");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [challenge, setChallenge] = useState<PhoneChallenge | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -101,14 +106,22 @@ const Login = () => {
 
   const sendCode = async () => {
     setError(null);
-    if (!/^\+[1-9]\d{7,14}$/.test(fullPhone)) {
+    if (method === "email") {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+        setError("Please enter a valid email address.");
+        return;
+      }
+    } else if (!/^\+[1-9]\d{7,14}$/.test(fullPhone)) {
       setError("Please enter a valid phone number.");
       return;
     }
     setSubmitting(true);
     startedRef.current = true;
     try {
-      const fresh = await startPhoneLogin(fullPhone);
+      const fresh =
+        method === "email"
+          ? await startEmailLogin(email.trim())
+          : await startPhoneLogin(fullPhone);
       setChallenge(fresh);
       setStep("code");
       setCode("");
@@ -124,7 +137,11 @@ const Login = () => {
     setError(null);
     setSubmitting(true);
     try {
-      await finishPhoneLogin(fullPhone, token);
+      if (method === "email") {
+        await finishEmailLogin(email.trim(), token);
+      } else {
+        await finishPhoneLogin(fullPhone, token);
+      }
       await refreshMfa();
       navigate(await destinationAfterVerify(), { replace: true });
     } catch (err) {
@@ -140,7 +157,9 @@ const Login = () => {
       title={step === "phone" ? "Sign In" : "Enter Your Code"}
       subtitle={
         step === "phone"
-          ? "Enter the mobile number registered with your membership and we will send you a secure access code. No password needed."
+          ? method === "email"
+            ? "Enter the email address registered with your membership and we will email you a secure access code. No password needed."
+            : "Enter the mobile number registered with your membership and we will send you a secure access code. No password needed."
           : describeChallenge(challenge)
       }
     >
@@ -152,26 +171,47 @@ const Login = () => {
           }}
           className="space-y-6"
         >
-          <div className="flex gap-3">
-            <CountryCodeSelect value={countryCode} onChange={setCountryCode} />
+          {method === "email" ? (
             <Input
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="7700 900123"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="flex-1"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder="name@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
-          </div>
+          ) : (
+            <div className="flex gap-3">
+              <CountryCodeSelect value={countryCode} onChange={setCountryCode} />
+              <Input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="7700 900123"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="flex-1"
+              />
+            </div>
+          )}
           {error && <p className="text-destructive text-sm">{error}</p>}
           <Button
             type="submit"
-            disabled={submitting || !phone.trim()}
+            disabled={submitting || (method === "email" ? !email.trim() : !phone.trim())}
             className="w-full tracking-[0.2em] uppercase"
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send Code"}
           </Button>
+          <button
+            type="button"
+            onClick={() => {
+              setMethod(method === "email" ? "mobile" : "email");
+              setError(null);
+            }}
+            className="block mx-auto text-smoke hover:text-foreground transition-colors text-xs tracking-[0.15em] uppercase"
+          >
+            {method === "email" ? "Use mobile number instead" : "Use email instead"}
+          </button>
         </form>
       ) : mode === "session" && user && challenge ? (
         <SmsCodeStep
@@ -214,7 +254,7 @@ const Login = () => {
               }}
               className="text-smoke hover:text-foreground transition-colors"
             >
-              Change Number
+              {method === "email" ? "Change Email" : "Change Number"}
             </button>
             <button
               type="button"

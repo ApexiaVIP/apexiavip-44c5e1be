@@ -36,6 +36,7 @@ const maskEmail = (email: string) => {
 };
 
 const NOT_REGISTERED = "This number is not registered. Access is by invitation only.";
+const NOT_REGISTERED_EMAIL = "This email is not registered. Access is by invitation only.";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -51,8 +52,16 @@ serve(async (req) => {
 
     const body = await req.json();
     const action = body?.action;
+    // Members sign in with either their mobile (code by SMS) or their email
+    // (code by email); both run the same challenge
     const phone = typeof body?.phone === "string" ? body.phone.replace(/[\s\-()]/g, "") : "";
-    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+    const emailInput = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+    const byEmail = !phone && !!emailInput;
+    if (byEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput) || emailInput.length > 255) {
+        return json(400, { error: "Please enter a valid email address." });
+      }
+    } else if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
       return json(400, { error: "Please enter a valid phone number." });
     }
 
@@ -71,13 +80,31 @@ serve(async (req) => {
     }
     await admin.from("rate_limits").insert({ ip_address: ip, endpoint: "phone-login" });
 
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("id, phone, email, status")
-      .eq("phone", phone)
-      .maybeSingle();
+    let profile: { id: string; phone: string; email: string; status: string } | null = null;
+    if (byEmail) {
+      // Case-insensitive match; escape ilike wildcards so the input is literal
+      const pattern = emailInput.replace(/([\\%_])/g, "\\$1");
+      const { data: matches } = await admin
+        .from("profiles")
+        .select("id, phone, email, status")
+        .ilike("email", pattern)
+        .limit(2);
+      if ((matches?.length ?? 0) > 1) {
+        return json(400, {
+          error: "This email is linked to more than one membership. Please sign in with your mobile number.",
+        });
+      }
+      profile = matches?.[0] ?? null;
+    } else {
+      const { data } = await admin
+        .from("profiles")
+        .select("id, phone, email, status")
+        .eq("phone", phone)
+        .maybeSingle();
+      profile = data;
+    }
     if (!profile || profile.status !== "active") {
-      return json(400, { error: NOT_REGISTERED });
+      return json(400, { error: byEmail ? NOT_REGISTERED_EMAIL : NOT_REGISTERED });
     }
     const userId = profile.id;
 
@@ -92,7 +119,9 @@ serve(async (req) => {
       const TWILIO_FROM = Deno.env.get("TWILIO_FROM");
       const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
       const smsConfigured = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_FROM);
-      if (!smsConfigured && !RESEND_API_KEY) {
+      if (byEmail) {
+        if (!RESEND_API_KEY) throw new Error("No email delivery channel is configured");
+      } else if (!smsConfigured && !RESEND_API_KEY) {
         throw new Error("No code delivery channel is configured");
       }
 
@@ -126,7 +155,7 @@ serve(async (req) => {
         return json(200, { success: true, channel: "sms", sent_to: maskPhone(phone) });
       }
 
-      if (smsConfigured) {
+      if (!byEmail && smsConfigured) {
         const params = new URLSearchParams({
           To: phone,
           Body: `Your Apexia VIP access code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,

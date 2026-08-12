@@ -95,14 +95,14 @@ serve(async (req) => {
       const TWILIO_FROM = Deno.env.get("TWILIO_FROM");
       const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
       const smsConfigured = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_FROM);
-      if (!smsConfigured && !RESEND_API_KEY) {
+      // Channel per member: SMS when they have a mobile on file, otherwise
+      // email (accounts provisioned for email sign-in have no mobile)
+      const useSms = smsConfigured && !!profile.phone;
+      if (!useSms && !RESEND_API_KEY) {
         throw new Error("No 2FA delivery channel is configured");
       }
-      if (smsConfigured && !profile.phone) {
-        return json(400, { error: "No mobile number is registered for your account" });
-      }
-      if (!smsConfigured && !profile.email) {
-        return json(400, { error: "No email address is registered for your account" });
+      if (!useSms && !profile.email) {
+        return json(400, { error: "No mobile number or email address is registered for your account" });
       }
 
       // Rate limit sends per user
@@ -144,7 +144,7 @@ serve(async (req) => {
         return json(200, { success: true, channel: "sms", sent_to: maskPhone(profile.phone) });
       }
 
-      if (smsConfigured) {
+      if (useSms) {
         // Send via Twilio (From may be a number, alphanumeric sender, or Messaging Service SID)
         const params = new URLSearchParams({
           To: profile.phone,
