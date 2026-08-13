@@ -39,16 +39,89 @@ const json = (status: number, body: Record<string, unknown>) =>
 const sanitize = (str: string) =>
   str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-interface CarRequest {
+/** Dispatch carries the first and last address plus up to 10 stops en route. */
+const MAX_STOPS = 12;
+
+interface Stop {
+  type: "pickup" | "dropoff";
+  address: string;
+  /** Who boards, or who alights; empty on a drop off means everyone aboard */
   passengers: string[];
-  pickup: string;
-  destination: string;
+  /** Match-day front-entrance drop-off */
+  greyTarmac: boolean;
+}
+
+interface CarRequest {
+  stops?: Stop[];
   vehicle: string;
   time: string;
   notes: string;
-  /** Match-day front-entrance drop-off */
+  // Legacy single-leg shape, still accepted
+  passengers?: string[];
+  pickup?: string;
+  destination?: string;
   greyTarmac?: boolean;
 }
+
+/** A car is an ordered run of stops; this walks it, checking it makes sense. */
+const walkStops = (
+  stops: Stop[],
+  capacity: number
+): { error: string } | { manifest: string[]; peak: number } => {
+  const aboard: string[] = [];
+  const manifest: string[] = [];
+  let peak = 0;
+
+  for (const [idx, stop] of stops.entries()) {
+    const at = `Stop ${idx + 1}`;
+    if (stop.type === "pickup") {
+      if (stop.passengers.length === 0) {
+        return { error: `${at}: choose who is being picked up` };
+      }
+      for (const p of stop.passengers) {
+        if (manifest.includes(p)) return { error: `${at}: ${p} is picked up twice` };
+        aboard.push(p);
+        manifest.push(p);
+      }
+      peak = Math.max(peak, aboard.length);
+      if (peak > capacity) {
+        return { error: `${at}: more passengers than the vehicle seats (${capacity})` };
+      }
+    } else {
+      const leaving = stop.passengers.length > 0 ? stop.passengers : [...aboard];
+      if (leaving.length === 0) {
+        return { error: `${at}: nobody is in the car to drop off` };
+      }
+      for (const p of leaving) {
+        const k = aboard.indexOf(p);
+        if (k === -1) return { error: `${at}: ${p} is not in this car` };
+        aboard.splice(k, 1);
+      }
+    }
+  }
+
+  if (aboard.length > 0) {
+    return {
+      error: `${aboard.join(", ")} ${aboard.length === 1 ? "is" : "are"} not dropped off anywhere`,
+    };
+  }
+  return { manifest, peak };
+};
+
+/** Human route line for the chauffeur and the ops team. */
+const describeRoute = (stops: Stop[]) =>
+  stops
+    .map((s, idx) => {
+      const who = s.passengers.length > 0
+        ? s.passengers.join(", ")
+        : s.type === "dropoff"
+          ? "all remaining"
+          : "";
+      return `${idx + 1}) ${s.type === "pickup" ? "PICK UP" : "DROP OFF"}${
+        who ? ` ${who}` : ""
+      } at ${s.address}${s.greyTarmac ? " [GREY TARMAC]" : ""}`;
+    })
+    .join("; ");
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -165,7 +238,9 @@ serve(async (req) => {
       const dayEnd = new Date(Date.parse(dayStart) + 24 * 3600 * 1000).toISOString();
       const { data: rows, error: schedError } = await supabase
         .from("bookings")
-        .select("reference, name, vehicle, passengers, collection_at, pickup, dropoff, status")
+        .select(
+          "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status"
+        )
         .eq("corporate", corporate)
         .gte("collection_at", dayStart)
         .lt("collection_at", dayEnd)
@@ -281,6 +356,10 @@ serve(async (req) => {
       .eq("active", true);
     const allowedNames = new Set((allowedRows ?? []).map((r: { name: string }) => r.name));
 
+    // Each car becomes an ordered stop list, whether the desk sent the
+    // multi-stop shape or the older single-leg one
+    const journeys: { stops: Stop[]; manifest: string[]; peak: number }[] = [];
+
     for (const [i, car] of cars.entries()) {
       const label = `Car ${i + 1}`;
       if (!car || typeof car !== "object") {
@@ -290,38 +369,82 @@ serve(async (req) => {
       if (!capacity) {
         return json(400, { success: false, error: `${label}: invalid vehicle` });
       }
-      if (!Array.isArray(car.passengers) || car.passengers.length < 1 || car.passengers.length > capacity) {
-        return json(400, { success: false, error: `${label}: needs 1 to ${capacity} passengers for the ${car.vehicle}` });
-      }
-      for (const p of car.passengers) {
-        if (typeof p !== "string" || !allowedNames.has(p)) {
-          return json(400, { success: false, error: `${label}: unrecognised passenger` });
-        }
-      }
-      if (new Set(car.passengers).size !== car.passengers.length) {
-        return json(400, { success: false, error: `${label}: duplicate passenger` });
-      }
-      if (typeof car.pickup !== "string" || !car.pickup.trim() || car.pickup.length > 200) {
-        return json(400, { success: false, error: `${label}: invalid pickup` });
-      }
-      if (typeof car.destination !== "string" || !car.destination.trim() || car.destination.length > 200) {
-        return json(400, { success: false, error: `${label}: invalid destination` });
-      }
       if (typeof car.time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(car.time)) {
         return json(400, { success: false, error: `${label}: invalid pickup time` });
       }
       if (car.notes != null && (typeof car.notes !== "string" || car.notes.length > 500)) {
         return json(400, { success: false, error: `${label}: notes too long` });
       }
-      if (car.greyTarmac != null && typeof car.greyTarmac !== "boolean") {
-        return json(400, { success: false, error: `${label}: invalid grey tarmac flag` });
+
+      const rawStops: unknown[] = Array.isArray(car.stops) && car.stops.length > 0
+        ? car.stops
+        : [
+            { type: "pickup", address: car.pickup, passengers: car.passengers, greyTarmac: false },
+            { type: "dropoff", address: car.destination, passengers: [], greyTarmac: car.greyTarmac === true },
+          ];
+
+      if (rawStops.length < 2 || rawStops.length > MAX_STOPS) {
+        return json(400, {
+          success: false,
+          error: `${label}: a journey needs 2 to ${MAX_STOPS} stops`,
+        });
       }
+
+      const stops: Stop[] = [];
+      for (const [s, raw] of rawStops.entries()) {
+        const at = `${label}, stop ${s + 1}`;
+        const r = raw as Record<string, unknown>;
+        if (!r || typeof r !== "object") {
+          return json(400, { success: false, error: `${at}: invalid` });
+        }
+        const address = typeof r.address === "string" ? r.address.trim() : "";
+        if (!address || address.length > 200) {
+          return json(400, { success: false, error: `${at}: enter an address` });
+        }
+        const passengers = Array.isArray(r.passengers) ? r.passengers : [];
+        for (const p of passengers) {
+          if (typeof p !== "string" || !allowedNames.has(p)) {
+            return json(400, { success: false, error: `${at}: unrecognised passenger` });
+          }
+        }
+        if (new Set(passengers as string[]).size !== passengers.length) {
+          return json(400, { success: false, error: `${at}: duplicate passenger` });
+        }
+        if (r.greyTarmac != null && typeof r.greyTarmac !== "boolean") {
+          return json(400, { success: false, error: `${at}: invalid grey tarmac flag` });
+        }
+        stops.push({
+          type: r.type === "dropoff" ? "dropoff" : "pickup",
+          address,
+          passengers: passengers as string[],
+          greyTarmac: r.greyTarmac === true,
+        });
+      }
+
+      if (stops[0].type !== "pickup") {
+        return json(400, { success: false, error: `${label}: the first stop must be a pick up` });
+      }
+      if (stops[stops.length - 1].type !== "dropoff") {
+        return json(400, { success: false, error: `${label}: the last stop must be a drop off` });
+      }
+      if (stops.some((s) => s.greyTarmac && s.type !== "dropoff")) {
+        return json(400, {
+          success: false,
+          error: `${label}: Grey Tarmac applies to a drop off, not a pick up`,
+        });
+      }
+
+      const walked = walkStops(stops, capacity);
+      if ("error" in walked) {
+        return json(400, { success: false, error: `${label}, ${walked.error}` });
+      }
+      journeys.push({ stops, manifest: walked.manifest, peak: walked.peak });
     }
 
     // Grey tarmac is a home match-day arrangement: the destination must be a
     // saved front-entrance address and the date must be a home fixture. Desks
     // with no fixture list yet are not held to the fixture half of the rule.
-    if (cars.some((c) => c.greyTarmac)) {
+    if (journeys.some((j) => j.stops.some((s) => s.greyTarmac))) {
       const { data: greyRows } = await supabase
         .from("corporate_addresses")
         .select("address")
@@ -344,19 +467,21 @@ serve(async (req) => {
           }) === travelDate
       );
 
-      for (const [i, car] of cars.entries()) {
-        if (!car.greyTarmac) continue;
-        if (!greyAddresses.has(car.destination.trim())) {
-          return json(400, {
-            success: false,
-            error: `Car ${i + 1}: Grey Tarmac is only available at a saved front-entrance address`,
-          });
-        }
-        if (hasFixtures && !isHomeMatchDay) {
-          return json(400, {
-            success: false,
-            error: "Grey Tarmac drop off applies on home match days only",
-          });
+      for (const [i, journey] of journeys.entries()) {
+        for (const stop of journey.stops) {
+          if (!stop.greyTarmac) continue;
+          if (!greyAddresses.has(stop.address)) {
+            return json(400, {
+              success: false,
+              error: `Car ${i + 1}: Grey Tarmac is only available at a saved front-entrance address`,
+            });
+          }
+          if (hasFixtures && !isHomeMatchDay) {
+            return json(400, {
+              success: false,
+              error: "Grey Tarmac drop off applies on home match days only",
+            });
+          }
         }
       }
     }
@@ -368,63 +493,78 @@ serve(async (req) => {
     const deskName = corporate.toUpperCase();
 
     // --- Build one Dispatch transfer carrying every car ---
+    const dispatchAddress = (line1: string) => ({
+      Line1: line1,
+      Line2: "",
+      Town: "",
+      Postcode: "",
+      Country: "United Kingdom",
+    });
+
     const dispatchBookings = cars.map((car, i) => {
+      const { stops, manifest, peak } = journeys[i];
       const reference = amendReference ?? `APEXIA-${deskName}-${requestId}-C${i + 1}`;
-      const manifest = car.passengers.join(", ");
+      const viaStops = stops.slice(1, -1);
+      const anyGrey = stops.some((s) => s.greyTarmac);
       return {
         Reference: reference,
         CollectionDateTime: `${day}-${monthName}-${year} ${car.time}`,
-        NumPassengers: car.passengers.length,
-        PassengerName: car.passengers[0],
+        NumPassengers: peak,
+        PassengerName: manifest[0],
         PassengerPhoneNumber: bookerPhone,
         PassengerMobileNumber: bookerPhone,
         ...(bookerEmail ? { PassengerEmailAddress: bookerEmail } : {}),
         BookingClass: vehicleToBookingClass[car.vehicle] || "Executive",
         BookedBy: `${deskName} Travel Desk`,
         BookingNotes: [
-          car.greyTarmac ? "GREY TARMAC DROP OFF (front entrance)." : "",
+          anyGrey ? "GREY TARMAC DROP OFF (front entrance)." : "",
           `${deskName} Travel Desk request (car ${i + 1} of ${cars.length}), booked by ${bookerName}.`,
           `Vehicle: ${car.vehicle}.`,
-          `Passengers: ${manifest}.`,
+          `Passengers: ${manifest.join(", ")}.`,
+          `Route: ${describeRoute(stops)}.`,
           car.notes?.trim() ? `Notes: ${car.notes.trim()}` : "",
         ].filter(Boolean).join(" "),
         AsDirected: "F",
-        PickUpAddress: {
-          Line1: car.pickup.trim(),
-          Line2: "",
-          Town: "",
-          Postcode: "",
-          Country: "United Kingdom",
-        },
-        DropOffAddress: {
-          Line1: car.destination.trim(),
-          Line2: "",
-          Town: "",
-          Postcode: "",
-          Country: "United Kingdom",
-        },
+        PickUpAddress: dispatchAddress(stops[0].address),
+        DropOffAddress: dispatchAddress(stops[stops.length - 1].address),
+        // Everything between the first and last stop rides as a via address
+        ...Object.fromEntries(
+          viaStops
+            .slice(0, 10)
+            .map((s, n) => [`ViaAddress${n + 1}`, dispatchAddress(s.address)])
+        ),
       };
     });
 
     // Store each car against the booker so it shows in the portal history
-    const carRowValues = cars.map((car, i) => ({
-      name: car.passengers.join(", "),
-      email: bookerEmail,
-      phone: bookerPhone,
-      travel_date: `${day}-${monthName}-${year} ${car.time}`,
-      vehicle: car.vehicle,
-      passengers: car.passengers.length,
-      bags: 0,
-      collection_at: new Date(`${travelDate}T${car.time}:00`).toISOString(),
-      pickup: { line1: car.pickup.trim(), town: "", postcode: "" },
-      dropoff: {
-        line1: car.destination.trim(),
-        town: "",
-        postcode: "",
-        ...(car.greyTarmac ? { grey_tarmac: true } : {}),
-      },
-      journey_type: "destination",
-    }));
+    const carRowValues = cars.map((car, i) => {
+      const { stops, manifest, peak } = journeys[i];
+      const viaStops = stops.slice(1, -1);
+      return {
+        name: manifest.join(", "),
+        email: bookerEmail,
+        phone: bookerPhone,
+        travel_date: `${day}-${monthName}-${year} ${car.time}`,
+        vehicle: car.vehicle,
+        passengers: peak,
+        bags: 0,
+        collection_at: new Date(`${travelDate}T${car.time}:00`).toISOString(),
+        pickup: { line1: stops[0].address, town: "", postcode: "" },
+        dropoff: {
+          line1: stops[stops.length - 1].address,
+          town: "",
+          postcode: "",
+          // Any front-entrance stop marks the car, so it stands out on the sheet
+          ...(stops.some((s) => s.greyTarmac) ? { grey_tarmac: true } : {}),
+        },
+        via:
+          viaStops.length > 0
+            ? viaStops.map((s) => ({ line1: s.address, town: "", postcode: "" }))
+            : null,
+        stops,
+        journey_type: "destination",
+      };
+    });
     if (!amendReference) {
       const { error: dbError } = await supabase.from("bookings").insert(
         carRowValues.map((values, i) => ({
@@ -509,16 +649,34 @@ serve(async (req) => {
     }
 
     // --- One ops summary email for the whole request ---
-    const carRows = cars.map((car, i) => `
+    const carRows = cars.map((car, i) => {
+      const { stops, manifest, peak } = journeys[i];
+      const routeHtml = stops
+        .map(
+          (s, n) =>
+            `<div style="margin-bottom: 3px;"><span style="color: #8a8070;">${n + 1}.</span> <strong>${
+              s.type === "pickup" ? "Pick up" : "Drop off"
+            }</strong> ${sanitize(
+              s.passengers.length > 0
+                ? s.passengers.join(", ")
+                : s.type === "dropoff"
+                  ? "all remaining"
+                  : ""
+            )} at ${sanitize(s.address)}${
+              s.greyTarmac ? ' <strong style="color: #e0c341;">[GREY TARMAC]</strong>' : ""
+            }</div>`
+        )
+        .join("");
+      return `
       <tr>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${i + 1}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.time)}</td>
-        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.vehicle)}</td>
-        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.passengers.join(", "))}</td>
-        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.pickup)}</td>
-        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.destination)}${car.greyTarmac ? ' <strong style="color: #e0c341;">[GREY TARMAC]</strong>' : ""}</td>
+        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.vehicle)} (${peak} up)</td>
+        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(manifest.join(", "))}</td>
+        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${routeHtml}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.notes?.trim() || "")}</td>
-      </tr>`).join("");
+      </tr>`;
+    }).join("");
 
     const htmlBody = `
       <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 720px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
@@ -538,7 +696,7 @@ serve(async (req) => {
         <table style="width: 100%; margin-top: 16px; border-collapse: collapse; font-size: 13px;">
           <tr style="color: #8a8070; font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; text-align: left;">
             <th style="padding: 8px;">#</th><th style="padding: 8px;">Time</th><th style="padding: 8px;">Vehicle</th>
-            <th style="padding: 8px;">Passengers</th><th style="padding: 8px;">Pickup</th><th style="padding: 8px;">Destination</th><th style="padding: 8px;">Notes</th>
+            <th style="padding: 8px;">Passengers</th><th style="padding: 8px;">Route</th><th style="padding: 8px;">Notes</th>
           </tr>
           ${carRows}
         </table>

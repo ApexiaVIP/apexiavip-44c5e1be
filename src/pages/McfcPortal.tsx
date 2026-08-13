@@ -43,16 +43,103 @@ const CAPACITY: Record<string, number> = {
   JetClass: 5,
 };
 
-interface CarRequest {
+type StopType = "pickup" | "dropoff";
+
+interface Stop {
+  type: StopType;
+  address: string;
+  /** Who boards, or who alights; empty on a drop off means everyone aboard */
   passengers: string[];
-  pickup: string;
-  destination: string;
-  vehicle: string;
-  time: string;
-  notes: string;
   /** Match-day front-entrance drop-off */
   greyTarmac: boolean;
 }
+
+interface CarRequest {
+  /** An ordered run: first stop collects, last stop sets down */
+  stops: Stop[];
+  vehicle: string;
+  time: string;
+  notes: string;
+}
+
+/** Everyone the car carries at some point, in boarding order. */
+const manifestOf = (car: CarRequest) => {
+  const seen: string[] = [];
+  car.stops.forEach((s) => {
+    if (s.type !== "pickup") return;
+    s.passengers.forEach((p) => {
+      if (!seen.includes(p)) seen.push(p);
+    });
+  });
+  return seen;
+};
+
+/** Who is in the car as it arrives at the given stop. */
+const aboardAt = (car: CarRequest, index: number) => {
+  let aboard: string[] = [];
+  car.stops.slice(0, index).forEach((s) => {
+    if (s.type === "pickup") {
+      s.passengers.forEach((p) => {
+        if (!aboard.includes(p)) aboard.push(p);
+      });
+    } else {
+      const leaving = s.passengers.length > 0 ? s.passengers : [...aboard];
+      aboard = aboard.filter((p) => !leaving.includes(p));
+    }
+  });
+  return aboard;
+};
+
+/** The most people in the car at once, which is what has to fit the seats. */
+const peakOf = (car: CarRequest) => {
+  let aboard: string[] = [];
+  let peak = 0;
+  car.stops.forEach((s) => {
+    if (s.type === "pickup") {
+      s.passengers.forEach((p) => {
+        if (!aboard.includes(p)) aboard.push(p);
+      });
+      peak = Math.max(peak, aboard.length);
+    } else {
+      const leaving = s.passengers.length > 0 ? s.passengers : [...aboard];
+      aboard = aboard.filter((p) => !leaving.includes(p));
+    }
+  });
+  return peak;
+};
+
+/** What still needs fixing before this car can be sent, in plain words. */
+const carIssues = (car: CarRequest): string[] => {
+  const issues: string[] = [];
+  const capacity = CAPACITY[car.vehicle] ?? 2;
+  if (car.stops.length < 2) issues.push("Add at least a pick up and a drop off.");
+  if (car.stops[0]?.type !== "pickup") issues.push("The first stop must be a pick up.");
+  if (car.stops[car.stops.length - 1]?.type !== "dropoff") {
+    issues.push("The last stop must be a drop off.");
+  }
+  if (car.stops.some((s) => !s.address.trim())) issues.push("Every stop needs an address.");
+  if (car.stops.some((s) => s.type === "pickup" && s.passengers.length === 0)) {
+    issues.push("Every pick up needs at least one passenger.");
+  }
+  if (manifestOf(car).length === 0) issues.push("Choose who is travelling.");
+  if (peakOf(car) > capacity) {
+    issues.push(`Too many passengers at once for the ${car.vehicle} (${capacity} seats).`);
+  }
+  car.stops.forEach((s, idx) => {
+    if (s.type !== "dropoff") return;
+    const aboard = aboardAt(car, idx);
+    const stranded = s.passengers.filter((p) => !aboard.includes(p));
+    if (stranded.length > 0) {
+      issues.push(`Stop ${idx + 1}: ${stranded.join(", ")} is not in the car yet.`);
+    }
+  });
+  const leftAboard = aboardAt(car, car.stops.length);
+  if (leftAboard.length > 0) {
+    issues.push(`${leftAboard.join(", ")} is not dropped off anywhere.`);
+  }
+  if (!car.time) issues.push("Set the first pick up time.");
+  return issues;
+};
 
 interface CorporateAddress {
   id: string;
@@ -90,6 +177,8 @@ interface ScheduleRow {
   collection_at: string | null;
   pickup: { line1?: string } | null;
   dropoff: { line1?: string; grey_tarmac?: boolean } | null;
+  via: { line1?: string }[] | null;
+  stops: Stop[] | null;
   status: string;
   live: {
     bookingStatus: string | null;
@@ -109,16 +198,22 @@ interface RecentBooking {
   collection_at: string | null;
   pickup: { line1?: string } | null;
   dropoff: { line1?: string; grey_tarmac?: boolean } | null;
+  via: { line1?: string }[] | null;
+  stops: Stop[] | null;
 }
 
-const emptyCar = (): CarRequest => ({
+const emptyStop = (type: StopType): Stop => ({
+  type,
+  address: "",
   passengers: [],
-  pickup: "",
-  destination: "",
+  greyTarmac: false,
+});
+
+const emptyCar = (): CarRequest => ({
+  stops: [emptyStop("pickup"), emptyStop("dropoff")],
   vehicle: "S-Class",
   time: "",
   notes: "",
-  greyTarmac: false,
 });
 
 /** Kickoffs are stored in UTC; the desk works in UK time. */
@@ -195,7 +290,7 @@ const McfcPortal = () => {
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState<number | null>(null);
+  const [pickerOpen, setPickerOpen] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentBooking[]>([]);
   // Amending an existing car: its reference; Dispatch overwrites on resubmit
   const [amendRef, setAmendRef] = useState<string | null>(null);
@@ -324,12 +419,14 @@ const McfcPortal = () => {
     if (!user || !hasDeskAccess || !mfaVerified) return;
     supabase
       .from("bookings")
-      .select("reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff")
+      .select(
+        "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops"
+      )
       .eq("corporate", DESK)
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(10)
-      .then(({ data }) => setRecent((data as RecentBooking[] | null) ?? []));
+      .then(({ data }) => setRecent((data as unknown as RecentBooking[] | null) ?? []));
   }, [user, hasDeskAccess, mfaVerified]);
 
   useEffect(() => {
@@ -337,32 +434,85 @@ const McfcPortal = () => {
   }, [loadRecent]);
 
   const totalPassengers = useMemo(
-    () => cars.reduce((n, c) => n + c.passengers.length, 0),
+    () => cars.reduce((n, c) => n + manifestOf(c).length, 0),
     [cars]
   );
 
   const updateCar = (i: number, patch: Partial<CarRequest>) =>
     setCars((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
-  const togglePassenger = (i: number, name: string) =>
+  const updateStop = (carIdx: number, stopIdx: number, patch: Partial<Stop>) =>
+    setCars((prev) =>
+      prev.map((c, idx) =>
+        idx !== carIdx
+          ? c
+          : { ...c, stops: c.stops.map((s, k) => (k === stopIdx ? { ...s, ...patch } : s)) }
+      )
+    );
+
+  /** New stops land before the final set down, which is where they belong. */
+  const addStop = (carIdx: number, type: StopType) =>
     setCars((prev) =>
       prev.map((c, idx) => {
-        if (idx !== i) return c;
-        if (c.passengers.includes(name)) {
-          return { ...c, passengers: c.passengers.filter((p) => p !== name) };
-        }
-        // Never seat more passengers than the vehicle holds
-        if (c.passengers.length >= (CAPACITY[c.vehicle] ?? 2)) return c;
-        return { ...c, passengers: [...c.passengers, name] };
+        if (idx !== carIdx) return c;
+        const next = [...c.stops];
+        next.splice(Math.max(next.length - 1, 1), 0, emptyStop(type));
+        return { ...c, stops: next };
       })
     );
 
-  const copyDestinationToAll = () => {
-    const dest = cars[0]?.destination ?? "";
-    setCars((prev) => prev.map((c) => ({ ...c, destination: dest })));
-  };
+  const removeStop = (carIdx: number, stopIdx: number) =>
+    setCars((prev) =>
+      prev.map((c, idx) =>
+        idx !== carIdx ? c : { ...c, stops: c.stops.filter((_, k) => k !== stopIdx) }
+      )
+    );
 
-  const overCapacity = (c: CarRequest) => c.passengers.length > (CAPACITY[c.vehicle] ?? 2);
+  const moveStop = (carIdx: number, stopIdx: number, delta: number) =>
+    setCars((prev) =>
+      prev.map((c, idx) => {
+        if (idx !== carIdx) return c;
+        const target = stopIdx + delta;
+        if (target < 0 || target >= c.stops.length) return c;
+        const next = [...c.stops];
+        [next[stopIdx], next[target]] = [next[target], next[stopIdx]];
+        return { ...c, stops: next };
+      })
+    );
+
+  const toggleStopPassenger = (carIdx: number, stopIdx: number, name: string) =>
+    setCars((prev) =>
+      prev.map((c, idx) => {
+        if (idx !== carIdx) return c;
+        const stop = c.stops[stopIdx];
+        const selected = stop.passengers.includes(name);
+        if (!selected && stop.type === "pickup") {
+          // Never seat more people at once than the vehicle holds
+          const aboard = aboardAt(c, stopIdx).length + stop.passengers.length;
+          if (aboard >= (CAPACITY[c.vehicle] ?? 2)) return c;
+        }
+        const passengers = selected
+          ? stop.passengers.filter((p) => p !== name)
+          : [...stop.passengers, name];
+        return {
+          ...c,
+          stops: c.stops.map((s, k) => (k === stopIdx ? { ...s, passengers } : s)),
+        };
+      })
+    );
+
+  /** Send every car to wherever the first one finishes. */
+  const copyDestinationToAll = () => {
+    const first = cars[0];
+    const dest = first?.stops[first.stops.length - 1]?.address ?? "";
+    if (!dest) return;
+    setCars((prev) =>
+      prev.map((c) => ({
+        ...c,
+        stops: c.stops.map((s, k) => (k === c.stops.length - 1 ? { ...s, address: dest } : s)),
+      }))
+    );
+  };
 
   const passengerIdByName = useMemo(() => {
     const m = new Map<string, string>();
@@ -377,7 +527,7 @@ const McfcPortal = () => {
   // of whoever is seated in it
   const addressChoicesFor = (car: CarRequest) => {
     const ids = new Set(
-      car.passengers.map((n) => passengerIdByName.get(n)).filter(Boolean) as string[]
+      manifestOf(car).map((n) => passengerIdByName.get(n)).filter(Boolean) as string[]
     );
     return addresses.filter((a) => !a.passenger_id || ids.has(a.passenger_id));
   };
@@ -385,16 +535,18 @@ const McfcPortal = () => {
   const homeFixtureOn = (date: string) =>
     fixtures.find((f) => f.is_home && ukDateKey(f.kickoff_utc) === date);
 
-  const greyAddressFor = (car: CarRequest) =>
-    addresses.find((a) => a.grey_tarmac && a.address === car.destination);
+  const greyAddressForStop = (stop: Stop) =>
+    addresses.find((a) => a.grey_tarmac && a.address === stop.address);
 
   /**
-   * Grey tarmac is a home match-day arrangement: the destination must be a
+   * Grey tarmac is a home match-day arrangement: the stop must set down at a
    * saved front-entrance address and the travel date must be a home fixture.
    * Before the fixture list is loaded we cannot tell, so the tick still shows.
    */
-  const greyAvailableFor = (car: CarRequest) =>
-    !!greyAddressFor(car) && (fixtures.length === 0 || !!homeFixtureOn(travelDate));
+  const greyAvailableForStop = (stop: Stop) =>
+    stop.type === "dropoff" &&
+    !!greyAddressForStop(stop) &&
+    (fixtures.length === 0 || !!homeFixtureOn(travelDate));
 
   /** Best saved address for a fixture's ground, else the ground's name. */
   const venueAddressFor = (f: Fixture) => {
@@ -421,10 +573,17 @@ const McfcPortal = () => {
     }
     const destination = venueAddressFor(f);
     setTravelDate(ukDateKey(f.kickoff_utc));
-    // Fill only the cars still without a destination, never overwrite one the
-    // desk has already set (some cars run from the ground, not to it)
+    // Fill only the final set down where it is still blank, never overwrite one
+    // the desk has already set (some cars run from the ground, not to it)
     setCars((prev) =>
-      prev.map((c) => (c.destination.trim() ? c : { ...c, destination }))
+      prev.map((c) => {
+        const last = c.stops.length - 1;
+        if (last < 0 || c.stops[last].address.trim()) return c;
+        return {
+          ...c,
+          stops: c.stops.map((s, k) => (k === last ? { ...s, address: destination } : s)),
+        };
+      })
     );
   };
 
@@ -466,8 +625,10 @@ const McfcPortal = () => {
 
   /** Start a booking for a fixture: date and destination prefilled. */
   const bookForFixture = (f: Fixture) => {
+    const car = emptyCar();
+    car.stops[car.stops.length - 1].address = venueAddressFor(f);
     setTravelDate(ukDateKey(f.kickoff_utc));
-    setCars([{ ...emptyCar(), destination: venueAddressFor(f) }]);
+    setCars([car]);
     setAmendRef(null);
     setSubmitError(null);
     setPickerOpen(null);
@@ -510,15 +671,39 @@ const McfcPortal = () => {
     if (!b.reference) return;
     setAmendRef(b.reference);
     setTravelDate(b.collection_at ? b.collection_at.slice(0, 10) : "");
+    const everyone = b.name ? b.name.split(", ").filter(Boolean) : [];
+    // Bookings made with the full journey keep it; older ones rebuild from the
+    // first and last address plus anything en route
+    const stops: Stop[] = Array.isArray(b.stops) && b.stops.length >= 2
+      ? b.stops.map((s) => ({
+          type: s?.type === "dropoff" ? "dropoff" : "pickup",
+          address: s?.address ?? "",
+          passengers: Array.isArray(s?.passengers) ? s.passengers : [],
+          greyTarmac: s?.greyTarmac === true,
+        }))
+      : [
+          { type: "pickup", address: b.pickup?.line1 ?? "", passengers: everyone, greyTarmac: false },
+          ...(Array.isArray(b.via)
+            ? b.via.map((v) => ({
+                type: "dropoff" as StopType,
+                address: v?.line1 ?? "",
+                passengers: [],
+                greyTarmac: false,
+              }))
+            : []),
+          {
+            type: "dropoff" as StopType,
+            address: b.dropoff?.line1 ?? "",
+            passengers: [],
+            greyTarmac: b.dropoff?.grey_tarmac === true,
+          },
+        ];
     setCars([
       {
-        passengers: b.name ? b.name.split(", ").filter(Boolean) : [],
-        pickup: b.pickup?.line1 ?? "",
-        destination: b.dropoff?.line1 ?? "",
+        stops,
         vehicle: VEHICLES.includes(b.vehicle) ? b.vehicle : "S-Class",
         time: b.collection_at ? b.collection_at.slice(11, 16) : "",
         notes: "",
-        greyTarmac: b.dropoff?.grey_tarmac === true,
       },
     ]);
     setView("desk");
@@ -555,11 +740,9 @@ const McfcPortal = () => {
 
   const canSubmit =
     !submitting &&
-    travelDate &&
+    !!travelDate &&
     cars.length > 0 &&
-    cars.every(
-      (c) => c.passengers.length > 0 && c.pickup && c.destination && c.time && !overCapacity(c)
-    );
+    cars.every((c) => carIssues(c).length === 0);
 
   const submitRequest = async () => {
     setSubmitting(true);
@@ -569,15 +752,26 @@ const McfcPortal = () => {
         body: {
           travelDate,
           ...(amendRef ? { amendReference: amendRef } : {}),
-          cars: cars.map((c) => ({
-            passengers: c.passengers,
-            pickup: c.pickup.trim(),
-            destination: c.destination.trim(),
-            vehicle: c.vehicle,
-            time: c.time,
-            notes: c.notes.trim(),
-            greyTarmac: c.greyTarmac && greyAvailableFor(c),
-          })),
+          cars: cars.map((c) => {
+            const stops = c.stops.map((s) => ({
+              type: s.type,
+              address: s.address.trim(),
+              passengers: s.passengers,
+              greyTarmac: s.greyTarmac && greyAvailableForStop(s),
+            }));
+            const lastDrop = [...stops].reverse().find((s) => s.type === "dropoff");
+            return {
+              stops,
+              vehicle: c.vehicle,
+              time: c.time,
+              notes: c.notes.trim(),
+              // Single-leg fields for older deployments of the booking function
+              passengers: manifestOf(c),
+              pickup: stops[0]?.address ?? "",
+              destination: lastDrop?.address ?? "",
+              greyTarmac: lastDrop?.greyTarmac ?? false,
+            };
+          }),
         },
       });
       let message: string | null = null;
@@ -856,7 +1050,12 @@ const McfcPortal = () => {
         </div>
 
         <div className="space-y-6">
-          {cars.map((car, i) => (
+          {cars.map((car, i) => {
+            const capacity = CAPACITY[car.vehicle] ?? 2;
+            const peak = peakOf(car);
+            const manifest = manifestOf(car);
+            const issues = carIssues(car);
+            return (
             <section key={i} className="bg-white p-6 shadow-md">
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-sm tracking-[0.2em] uppercase font-semibold" style={{ color: NAVY }}>
@@ -864,11 +1063,12 @@ const McfcPortal = () => {
                   <span
                     className={
                       "ml-4 text-xs tracking-normal normal-case font-normal " +
-                      (overCapacity(car) ? "text-red-600" : "")
+                      (peak > capacity ? "text-red-600" : "")
                     }
-                    style={overCapacity(car) ? undefined : { color: `${NAVY}80` }}
+                    style={peak > capacity ? undefined : { color: `${NAVY}80` }}
                   >
-                    {car.passengers.length} of {CAPACITY[car.vehicle] ?? 2} seats
+                    {peak} of {capacity} seats
+                    {manifest.length > peak ? `, ${manifest.length} carried in total` : ""}
                   </span>
                 </h2>
                 {cars.length > 1 && (
@@ -884,163 +1084,325 @@ const McfcPortal = () => {
                 )}
               </div>
 
-              <div className="mb-5">
-                <label className={lightLabel} style={{ color: `${NAVY}99` }}>
-                  Passengers
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  {car.passengers.map((p) => (
-                    <span
-                      key={p}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 text-sm text-white"
-                      style={{ backgroundColor: NAVY }}
+              <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                Journey
+              </label>
+              <div className="space-y-3">
+                {car.stops.map((stop, s) => {
+                  const isPickup = stop.type === "pickup";
+                  const aboard = aboardAt(car, s);
+                  const pickerKey = `${i}:${s}`;
+                  const seatsUsed = aboard.length + (isPickup ? stop.passengers.length : 0);
+                  return (
+                    <div
+                      key={s}
+                      className="border p-4"
+                      style={{
+                        borderColor: `${NAVY}26`,
+                        backgroundColor: isPickup ? "rgba(108,171,221,0.07)" : "rgba(28,44,91,0.03)",
+                      }}
                     >
-                      {p}
-                      <button
-                        type="button"
-                        aria-label={`Remove ${p}`}
-                        onClick={() => togglePassenger(i, p)}
-                        className="text-white/60 hover:text-white"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setPickerOpen(pickerOpen === i ? null : i)}
-                    className="inline-flex items-center gap-1.5 border border-dashed px-3 py-1.5 text-sm transition-colors hover:bg-[#6CABDD]/10"
-                    style={{ borderColor: `${NAVY}66`, color: NAVY }}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add passenger
-                  </button>
-                </div>
-
-                {pickerOpen === i && (
-                  <div
-                    className="mt-3 border bg-white p-4 max-h-72 overflow-y-auto"
-                    style={{ borderColor: `${NAVY}33` }}
-                  >
-                    {car.passengers.length >= (CAPACITY[car.vehicle] ?? 2) && (
-                      <p className="text-xs mb-3 font-medium" style={{ color: NAVY }}>
-                        The {car.vehicle} seats {CAPACITY[car.vehicle] ?? 2}. Choose a larger
-                        vehicle or add another car for more passengers.
-                      </p>
-                    )}
-                    {passengerGroups.length === 0 && (
-                      <p className="text-xs" style={{ color: `${NAVY}99` }}>
-                        Loading the passenger list…
-                      </p>
-                    )}
-                    {passengerGroups.map((g) => (
-                      <div key={g.group} className="mb-4 last:mb-0">
-                        <p
-                          className="text-[11px] tracking-[0.25em] uppercase mb-2 font-semibold"
-                          style={{ color: NAVY }}
+                      <div className="flex items-center gap-3 mb-3 flex-wrap">
+                        <span
+                          className="w-6 h-6 flex items-center justify-center text-[11px] font-semibold text-white"
+                          style={{ backgroundColor: NAVY }}
                         >
-                          {g.group}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {g.names.map((name) => {
-                            const selected = car.passengers.includes(name);
-                            const atCapacity =
-                              !selected &&
-                              car.passengers.length >= (CAPACITY[car.vehicle] ?? 2);
-                            return (
-                              <button
-                                key={name}
-                                type="button"
-                                onClick={() => togglePassenger(i, name)}
-                                disabled={atCapacity}
-                                className="border px-3 py-1.5 text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                style={
-                                  selected
-                                    ? { borderColor: NAVY, color: "#ffffff", backgroundColor: NAVY }
-                                    : { borderColor: `${NAVY}4D`, color: NAVY }
-                                }
-                              >
-                                {name}
-                              </button>
-                            );
-                          })}
-                        </div>
+                          {s + 1}
+                        </span>
+                        <select
+                          value={stop.type}
+                          aria-label={`Stop ${s + 1} type`}
+                          onChange={(e) =>
+                            updateStop(i, s, {
+                              type: e.target.value as StopType,
+                              passengers: [],
+                              greyTarmac: false,
+                            })
+                          }
+                          className="h-9 bg-white border rounded-none px-2 text-xs uppercase tracking-[0.12em] outline-none"
+                          style={lightInputStyle}
+                        >
+                          <option value="pickup">Pick up</option>
+                          <option value="dropoff">Drop off</option>
+                        </select>
+                        <span className="text-xs" style={{ color: `${NAVY}80` }}>
+                          {isPickup
+                            ? `${aboard.length} on board on arrival`
+                            : aboard.length > 0
+                              ? `${aboard.length} on board`
+                              : "nobody on board"}
+                        </span>
+                        <span className="ml-auto flex items-center gap-2">
+                          <button
+                            type="button"
+                            aria-label={`Move stop ${s + 1} earlier`}
+                            disabled={s === 0}
+                            onClick={() => moveStop(i, s, -1)}
+                            className="px-2 py-1 text-xs border disabled:opacity-25"
+                            style={{ borderColor: `${NAVY}40`, color: NAVY }}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Move stop ${s + 1} later`}
+                            disabled={s === car.stops.length - 1}
+                            onClick={() => moveStop(i, s, 1)}
+                            className="px-2 py-1 text-xs border disabled:opacity-25"
+                            style={{ borderColor: `${NAVY}40`, color: NAVY }}
+                          >
+                            ↓
+                          </button>
+                          {car.stops.length > 2 && (
+                            <button
+                              type="button"
+                              aria-label={`Remove stop ${s + 1}`}
+                              onClick={() => removeStop(i, s)}
+                              className="transition-colors hover:opacity-70"
+                              style={{ color: `${NAVY}80` }}
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                )}
+
+                      <input
+                        placeholder={
+                          isPickup ? "Collection address" : "Set down address"
+                        }
+                        value={stop.address}
+                        onChange={(e) =>
+                          updateStop(i, s, { address: e.target.value, greyTarmac: false })
+                        }
+                        className={lightInput}
+                        style={lightInputStyle}
+                      />
+                      {addressChoicesFor(car).length > 0 && (
+                        <select
+                          value=""
+                          aria-label={`Saved addresses for stop ${s + 1}`}
+                          onChange={(e) => {
+                            if (e.target.value)
+                              updateStop(i, s, { address: e.target.value, greyTarmac: false });
+                          }}
+                          className="w-full mt-2 h-9 bg-white border rounded-none px-2 text-xs outline-none"
+                          style={lightInputStyle}
+                        >
+                          <option value="">Saved addresses…</option>
+                          {addressChoicesFor(car).map((a) => (
+                            <option key={a.id} value={a.address}>
+                              {a.label}
+                              {a.passenger_id
+                                ? ` (${passengerNameById(a.passenger_id) ?? ""})`
+                                : ""}
+                              {a.grey_tarmac ? " - Grey Tarmac available" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      <div className="mt-3">
+                        <p
+                          className="text-[11px] tracking-[0.18em] uppercase mb-2"
+                          style={{ color: `${NAVY}99` }}
+                        >
+                          {isPickup ? "Picking up" : "Dropping off"}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {stop.passengers.map((p) => (
+                            <span
+                              key={p}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm text-white"
+                              style={{ backgroundColor: NAVY }}
+                            >
+                              {p}
+                              <button
+                                type="button"
+                                aria-label={`Remove ${p}`}
+                                onClick={() => toggleStopPassenger(i, s, p)}
+                                className="text-white/60 hover:text-white"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                          {!isPickup && stop.passengers.length === 0 && (
+                            <span className="text-sm" style={{ color: `${NAVY}99` }}>
+                              Everyone on board
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPickerOpen(pickerOpen === pickerKey ? null : pickerKey)
+                            }
+                            className="inline-flex items-center gap-1.5 border border-dashed px-3 py-1.5 text-sm transition-colors hover:bg-[#6CABDD]/10"
+                            style={{ borderColor: `${NAVY}66`, color: NAVY }}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            {isPickup ? "Add passenger" : "Choose who gets out"}
+                          </button>
+                        </div>
+
+                        {pickerOpen === pickerKey && (
+                          <div
+                            className="mt-3 border bg-white p-4 max-h-72 overflow-y-auto"
+                            style={{ borderColor: `${NAVY}33` }}
+                          >
+                            {isPickup ? (
+                              <>
+                                {seatsUsed >= capacity && (
+                                  <p className="text-xs mb-3 font-medium" style={{ color: NAVY }}>
+                                    The {car.vehicle} seats {capacity}. Drop someone off first,
+                                    choose a larger vehicle, or add another car.
+                                  </p>
+                                )}
+                                {passengerGroups.length === 0 && (
+                                  <p className="text-xs" style={{ color: `${NAVY}99` }}>
+                                    Loading the passenger list…
+                                  </p>
+                                )}
+                                {passengerGroups.map((g) => (
+                                  <div key={g.group} className="mb-4 last:mb-0">
+                                    <p
+                                      className="text-[11px] tracking-[0.25em] uppercase mb-2 font-semibold"
+                                      style={{ color: NAVY }}
+                                    >
+                                      {g.group}
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {g.names.map((name) => {
+                                        const selected = stop.passengers.includes(name);
+                                        const elsewhere =
+                                          !selected && manifest.includes(name);
+                                        const full = !selected && seatsUsed >= capacity;
+                                        return (
+                                          <button
+                                            key={name}
+                                            type="button"
+                                            onClick={() => toggleStopPassenger(i, s, name)}
+                                            disabled={elsewhere || full}
+                                            title={
+                                              elsewhere
+                                                ? "Already picked up at another stop"
+                                                : undefined
+                                            }
+                                            className="border px-3 py-1.5 text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                            style={
+                                              selected
+                                                ? {
+                                                    borderColor: NAVY,
+                                                    color: "#ffffff",
+                                                    backgroundColor: NAVY,
+                                                  }
+                                                : { borderColor: `${NAVY}4D`, color: NAVY }
+                                            }
+                                          >
+                                            {name}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
+                              </>
+                            ) : aboard.length === 0 ? (
+                              <p className="text-xs" style={{ color: `${NAVY}99` }}>
+                                Nobody is in the car at this point. Add a pick up first.
+                              </p>
+                            ) : (
+                              <>
+                                <p className="text-xs mb-3" style={{ color: `${NAVY}99` }}>
+                                  Leave all unselected to drop everyone who is on board.
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  {aboard.map((name) => {
+                                    const selected = stop.passengers.includes(name);
+                                    return (
+                                      <button
+                                        key={name}
+                                        type="button"
+                                        onClick={() => toggleStopPassenger(i, s, name)}
+                                        className="border px-3 py-1.5 text-sm transition-colors"
+                                        style={
+                                          selected
+                                            ? {
+                                                borderColor: NAVY,
+                                                color: "#ffffff",
+                                                backgroundColor: NAVY,
+                                              }
+                                            : { borderColor: `${NAVY}4D`, color: NAVY }
+                                        }
+                                      >
+                                        {name}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {greyAvailableForStop(stop) ? (
+                        <label
+                          className="mt-3 inline-flex items-center gap-3 text-sm cursor-pointer px-3 py-2"
+                          style={{
+                            backgroundColor: stop.greyTarmac ? "#FFF59D" : "rgba(28,44,91,0.06)",
+                            color: NAVY,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={stop.greyTarmac}
+                            onChange={(e) => updateStop(i, s, { greyTarmac: e.target.checked })}
+                            className="w-4 h-4 accent-[#1C2C5B]"
+                          />
+                          Grey Tarmac drop off (front entrance on match day)
+                        </label>
+                      ) : (
+                        !isPickup &&
+                        greyAddressForStop(stop) && (
+                          <p className="text-xs mt-3" style={{ color: `${NAVY}99` }}>
+                            Grey Tarmac drop off applies on home match days only.
+                            {travelDate
+                              ? " There is no home fixture on the selected date."
+                              : " Choose the fixture or travel date first."}
+                          </p>
+                        )
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="flex flex-wrap items-center gap-3 mt-3">
+                <button
+                  type="button"
+                  onClick={() => addStop(i, "pickup")}
+                  className="inline-flex items-center gap-1.5 border border-dashed px-4 py-2 text-xs tracking-[0.15em] uppercase transition-colors hover:bg-[#6CABDD]/10"
+                  style={{ borderColor: `${NAVY}66`, color: NAVY }}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Pick Up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => addStop(i, "dropoff")}
+                  className="inline-flex items-center gap-1.5 border border-dashed px-4 py-2 text-xs tracking-[0.15em] uppercase transition-colors hover:bg-[#6CABDD]/10"
+                  style={{ borderColor: `${NAVY}66`, color: NAVY }}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Drop Off
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
                 <div>
                   <label className={lightLabel} style={{ color: `${NAVY}99` }}>
-                    Pickup
-                  </label>
-                  <input
-                    placeholder="e.g. Etihad Campus"
-                    value={car.pickup}
-                    onChange={(e) => updateCar(i, { pickup: e.target.value })}
-                    className={lightInput}
-                    style={lightInputStyle}
-                  />
-                  {addressChoicesFor(car).length > 0 && (
-                    <select
-                      value=""
-                      aria-label="Saved pickup addresses"
-                      onChange={(e) => {
-                        if (e.target.value) updateCar(i, { pickup: e.target.value });
-                      }}
-                      className="w-full mt-2 h-9 bg-white border rounded-none px-2 text-xs outline-none"
-                      style={lightInputStyle}
-                    >
-                      <option value="">Saved addresses…</option>
-                      {addressChoicesFor(car).map((a) => (
-                        <option key={a.id} value={a.address}>
-                          {a.label}
-                          {a.passenger_id ? ` (${passengerNameById(a.passenger_id) ?? ""})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                <div>
-                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
-                    Destination
-                  </label>
-                  <input
-                    placeholder="e.g. Manchester Airport T3"
-                    value={car.destination}
-                    onChange={(e) =>
-                      updateCar(i, { destination: e.target.value, greyTarmac: false })
-                    }
-                    className={lightInput}
-                    style={lightInputStyle}
-                  />
-                  {addressChoicesFor(car).length > 0 && (
-                    <select
-                      value=""
-                      aria-label="Saved destination addresses"
-                      onChange={(e) => {
-                        if (e.target.value)
-                          updateCar(i, { destination: e.target.value, greyTarmac: false });
-                      }}
-                      className="w-full mt-2 h-9 bg-white border rounded-none px-2 text-xs outline-none"
-                      style={lightInputStyle}
-                    >
-                      <option value="">Saved addresses…</option>
-                      {addressChoicesFor(car).map((a) => (
-                        <option key={a.id} value={a.address}>
-                          {a.label}
-                          {a.passenger_id ? ` (${passengerNameById(a.passenger_id) ?? ""})` : ""}
-                          {a.grey_tarmac ? " - Grey Tarmac available" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                <div>
-                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
-                    Pickup Time
+                    First Pick Up Time
                   </label>
                   <input
                     type="time"
@@ -1069,37 +1431,6 @@ const McfcPortal = () => {
                 </div>
               </div>
 
-              {greyAvailableFor(car) ? (
-                <label
-                  className="mt-4 inline-flex items-center gap-3 text-sm cursor-pointer px-3 py-2"
-                  style={{ backgroundColor: car.greyTarmac ? "#FFF59D" : "rgba(28,44,91,0.06)", color: NAVY }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={car.greyTarmac}
-                    onChange={(e) => updateCar(i, { greyTarmac: e.target.checked })}
-                    className="w-4 h-4 accent-[#1C2C5B]"
-                  />
-                  Grey Tarmac drop off (front entrance on match day)
-                </label>
-              ) : (
-                greyAddressFor(car) && (
-                  <p className="text-xs mt-4" style={{ color: `${NAVY}99` }}>
-                    Grey Tarmac drop off applies on home match days only.
-                    {travelDate
-                      ? " There is no home fixture on the selected date."
-                      : " Choose the fixture or travel date first."}
-                  </p>
-                )
-              )}
-
-              {overCapacity(car) && (
-                <p className="text-red-600 text-xs mt-3">
-                  Too many passengers for the {car.vehicle} ({CAPACITY[car.vehicle] ?? 2} seats).
-                  Choose a larger vehicle or move someone to another car.
-                </p>
-              )}
-
               <div className="mt-4">
                 <label className={lightLabel} style={{ color: `${NAVY}99` }}>
                   Notes for the chauffeur (optional)
@@ -1112,8 +1443,19 @@ const McfcPortal = () => {
                   style={lightInputStyle}
                 />
               </div>
+
+              {issues.length > 0 && (
+                <ul className="mt-4 space-y-1">
+                  {issues.map((issue) => (
+                    <li key={issue} className="text-xs text-red-700">
+                      {issue}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
-          ))}
+            );
+          })}
         </div>
 
         <div className="flex flex-wrap items-center gap-4 mt-6">
@@ -1734,6 +2076,24 @@ const McfcPortal = () => {
                             <td className="px-3 py-2.5">
                               {r.dropoff?.line1 ?? ""}
                               {grey ? " (GREY TARMAC)" : ""}
+                              {/* Anything picked up or set down en route */}
+                              {Array.isArray(r.stops) && r.stops.length > 2 ? (
+                                <span className="block mt-1" style={{ color: `${NAVY}99` }}>
+                                  {r.stops
+                                    .slice(1, -1)
+                                    .map(
+                                      (s) =>
+                                        `${s.type === "pickup" ? "+ pick up" : "+ drop"}${
+                                          s.passengers?.length ? ` ${s.passengers.join(", ")}` : ""
+                                        } at ${s.address}`
+                                    )
+                                    .join("; ")}
+                                </span>
+                              ) : Array.isArray(r.via) && r.via.length > 0 ? (
+                                <span className="block mt-1" style={{ color: `${NAVY}99` }}>
+                                  via {r.via.map((v) => v?.line1 ?? "").filter(Boolean).join("; ")}
+                                </span>
+                              ) : null}
                             </td>
                             <td className="px-3 py-2.5 whitespace-nowrap">
                               {r.live?.driverName || "TBC"}
