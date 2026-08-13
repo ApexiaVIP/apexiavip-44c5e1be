@@ -244,6 +244,98 @@ export type Database = {
         }
         Relationships: []
       }
+      fixture_changes: {
+        Row: {
+          corporate: string
+          detected_at: string
+          field: string
+          fixture_id: string
+          id: string
+          new_value: string
+          old_value: string
+        }
+        Insert: {
+          corporate: string
+          detected_at?: string
+          field: string
+          fixture_id: string
+          id?: string
+          new_value?: string
+          old_value?: string
+        }
+        Update: {
+          corporate?: string
+          detected_at?: string
+          field?: string
+          fixture_id?: string
+          id?: string
+          new_value?: string
+          old_value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fixture_changes_fixture_id_fkey"
+            columns: ["fixture_id"]
+            isOneToOne: false
+            referencedRelation: "fixtures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fixtures: {
+        Row: {
+          away_team: string
+          club: string
+          competition: string
+          corporate: string
+          created_at: string
+          home_team: string
+          id: string
+          is_home: boolean
+          kickoff_utc: string
+          last_synced_at: string
+          match_number: number
+          opponent: string
+          round_number: number | null
+          season: string
+          venue: string
+        }
+        Insert: {
+          away_team: string
+          club: string
+          competition?: string
+          corporate: string
+          created_at?: string
+          home_team: string
+          id?: string
+          is_home: boolean
+          kickoff_utc: string
+          last_synced_at?: string
+          match_number: number
+          opponent: string
+          round_number?: number | null
+          season: string
+          venue?: string
+        }
+        Update: {
+          away_team?: string
+          club?: string
+          competition?: string
+          corporate?: string
+          created_at?: string
+          home_team?: string
+          id?: string
+          is_home?: boolean
+          kickoff_utc?: string
+          last_synced_at?: string
+          match_number?: number
+          opponent?: string
+          round_number?: number | null
+          season?: string
+          venue?: string
+        }
+        Relationships: []
+      }
       mfa_codes: {
         Row: {
           attempts: number
