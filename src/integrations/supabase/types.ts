@@ -89,44 +89,6 @@ export type Database = {
         }
         Relationships: []
       }
-      corporate_addresses: {
-        Row: {
-          address: string
-          corporate: string
-          created_at: string
-          grey_tarmac: boolean
-          id: string
-          label: string
-          passenger_id: string | null
-        }
-        Insert: {
-          address: string
-          corporate: string
-          created_at?: string
-          grey_tarmac?: boolean
-          id?: string
-          label: string
-          passenger_id?: string | null
-        }
-        Update: {
-          address?: string
-          corporate?: string
-          created_at?: string
-          grey_tarmac?: boolean
-          id?: string
-          label?: string
-          passenger_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "corporate_addresses_passenger_id_fkey"
-            columns: ["passenger_id"]
-            isOneToOne: false
-            referencedRelation: "corporate_passengers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       corporate_passengers: {
         Row: {
           active: boolean
