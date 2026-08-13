@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.corporate-booking]
 verify_jwt = false
+
+[functions.fixtures-sync]
+verify_jwt = false

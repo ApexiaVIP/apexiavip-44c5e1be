@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Link } from "react-router-dom";
-import { ArrowLeft, Car, Check, Copy, Loader2, MapPin, Plus, Printer, Users, X } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  Car,
+  Check,
+  Copy,
+  Loader2,
+  MapPin,
+  Plus,
+  Printer,
+  RefreshCw,
+  Users,
+  X,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking } from "@/lib/mfa";
 import { useAuth } from "@/hooks/useAuth";
@@ -49,6 +62,26 @@ interface CorporateAddress {
   grey_tarmac: boolean;
 }
 
+interface Fixture {
+  id: string;
+  kickoff_utc: string;
+  home_team: string;
+  away_team: string;
+  opponent: string;
+  is_home: boolean;
+  venue: string;
+  round_number: number | null;
+  competition: string;
+}
+
+interface FixtureChange {
+  id: string;
+  field: string;
+  old_value: string;
+  new_value: string;
+  detected_at: string;
+}
+
 interface ScheduleRow {
   reference: string | null;
   name: string;
@@ -88,6 +121,29 @@ const emptyCar = (): CarRequest => ({
   greyTarmac: false,
 });
 
+/** Kickoffs are stored in UTC; the desk works in UK time. */
+const ukDateKey = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+
+const ukTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+const ukDateLong = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-GB", {
+    timeZone: "Europe/London",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+
+const fixtureTitle = (f: Fixture) =>
+  `${f.home_team} v ${f.away_team} - KICK OFF ${ukTime(f.kickoff_utc)}`;
+
 const todayStr = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -123,7 +179,7 @@ const lightInputStyle = {
 const McfcPortal = () => {
   const { user, profile, loading, mfaVerified, mfaResolved, signOut } = useAuth();
 
-  const [view, setView] = useState<"desk" | "addresses" | "schedule">("desk");
+  const [view, setView] = useState<"desk" | "fixtures" | "addresses" | "schedule">("desk");
   const [passengerGroups, setPassengerGroups] = useState<{ group: string; names: string[] }[]>([]);
   const [passengerOptions, setPassengerOptions] = useState<
     { id: string; name: string; grp: string }[]
@@ -156,9 +212,16 @@ const McfcPortal = () => {
   const [addrError, setAddrError] = useState<string | null>(null);
   const [addrDeletingId, setAddrDeletingId] = useState<string | null>(null);
 
+  // Fixtures
+  const [fixtures, setFixtures] = useState<Fixture[]>([]);
+  const [fixtureChanges, setFixtureChanges] = useState<FixtureChange[]>([]);
+  const [fixturesSyncing, setFixturesSyncing] = useState(false);
+  const [fixturesError, setFixturesError] = useState<string | null>(null);
+
   // Match-day schedule
   const [scheduleDate, setScheduleDate] = useState(todayStr());
   const [scheduleTitle, setScheduleTitle] = useState("");
+  const [scheduleTitleTouched, setScheduleTitleTouched] = useState(false);
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>([]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -198,6 +261,50 @@ const McfcPortal = () => {
       cancelled = true;
     };
   }, [hasDeskAccess, mfaVerified]);
+
+  const loadFixtures = useCallback(() => {
+    if (!hasDeskAccess || !mfaVerified) return;
+    // Yesterday onwards: a fixture stays useful while its cars are running
+    const from = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    supabase
+      .from("fixtures")
+      .select(
+        "id, kickoff_utc, home_team, away_team, opponent, is_home, venue, round_number, competition"
+      )
+      .eq("corporate", DESK)
+      .gte("kickoff_utc", from)
+      .order("kickoff_utc")
+      .then(({ data }) => setFixtures(data ?? []));
+    supabase
+      .from("fixture_changes")
+      .select("id, field, old_value, new_value, detected_at")
+      .eq("corporate", DESK)
+      .gte("detected_at", new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString())
+      .order("detected_at", { ascending: false })
+      .limit(10)
+      .then(({ data }) => setFixtureChanges(data ?? []));
+  }, [hasDeskAccess, mfaVerified]);
+
+  useEffect(() => {
+    loadFixtures();
+  }, [loadFixtures]);
+
+  const syncFixtures = async () => {
+    setFixturesSyncing(true);
+    setFixturesError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("fixtures-sync", { body: {} });
+      if (error) throw new Error("We couldn't refresh the fixtures. Please try again.");
+      if (!data?.success) throw new Error(data?.error ?? "We couldn't refresh the fixtures.");
+      loadFixtures();
+    } catch (err) {
+      setFixturesError(
+        err instanceof Error ? err.message : "We couldn't refresh the fixtures. Please try again."
+      );
+    } finally {
+      setFixturesSyncing(false);
+    }
+  };
 
   const loadAddresses = useCallback(() => {
     if (!hasDeskAccess || !mfaVerified) return;
@@ -315,6 +422,33 @@ const McfcPortal = () => {
       setAddrDeletingId(null);
     }
   };
+
+  /** Start a booking for a fixture: date and destination prefilled. */
+  const bookForFixture = (f: Fixture) => {
+    const venue = f.venue.trim();
+    const matches = addresses.filter(
+      (a) =>
+        venue &&
+        (a.address.toLowerCase().includes(venue.toLowerCase()) ||
+          a.label.toLowerCase().includes(venue.toLowerCase()))
+    );
+    // On a match day the front-entrance address is the useful one
+    const saved = matches.find((a) => a.grey_tarmac) ?? matches[0];
+    setTravelDate(ukDateKey(f.kickoff_utc));
+    setCars([{ ...emptyCar(), destination: saved?.address ?? venue }]);
+    setAmendRef(null);
+    setSubmitError(null);
+    setPickerOpen(null);
+    setView("desk");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // The printed schedule names the fixture unless the desk has typed its own
+  useEffect(() => {
+    if (scheduleTitleTouched) return;
+    const f = fixtures.find((fx) => ukDateKey(fx.kickoff_utc) === scheduleDate);
+    setScheduleTitle(f ? fixtureTitle(f) : "");
+  }, [scheduleDate, fixtures, scheduleTitleTouched]);
 
   const loadSchedule = useCallback(async () => {
     setScheduleLoading(true);
@@ -568,6 +702,7 @@ const McfcPortal = () => {
         {(
           [
             { key: "desk", label: "Travel Desk", icon: Car },
+            { key: "fixtures", label: "Fixtures", icon: CalendarDays },
             { key: "addresses", label: "Address Book", icon: MapPin },
             { key: "schedule", label: "Match Day Schedule", icon: Printer },
           ] as const
@@ -1057,6 +1192,161 @@ const McfcPortal = () => {
           </>
         )}
 
+        {view === "fixtures" && (
+          <>
+            <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
+              <div>
+                <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
+                  Season Calendar
+                </p>
+                <h1 className="font-display text-4xl font-light tracking-wider text-white">
+                  Fixtures
+                </h1>
+              </div>
+              <div className="flex items-center gap-4 flex-wrap">
+                <button
+                  type="button"
+                  onClick={syncFixtures}
+                  disabled={fixturesSyncing}
+                  className="inline-flex items-center gap-2 px-5 py-3 text-xs tracking-[0.18em] uppercase transition-opacity hover:opacity-80 disabled:opacity-40 border bg-white/40"
+                  style={{ borderColor: NAVY, color: NAVY }}
+                >
+                  <RefreshCw
+                    className={"w-3.5 h-3.5" + (fixturesSyncing ? " animate-spin" : "")}
+                  />
+                  {fixturesSyncing ? "Checking" : "Check for changes"}
+                </button>
+              </div>
+            </div>
+
+            {fixturesError && (
+              <p className="text-xs font-medium text-red-700 mb-4">{fixturesError}</p>
+            )}
+
+            {fixtureChanges.length > 0 && (
+              <section className="bg-white p-5 shadow-md mb-6 border-l-4" style={{ borderColor: "#b91c1c" }}>
+                <h2
+                  className="text-sm tracking-[0.2em] uppercase font-semibold mb-3"
+                  style={{ color: NAVY }}
+                >
+                  Recent Changes
+                </h2>
+                <ul className="space-y-1.5 text-sm" style={{ color: NAVY }}>
+                  {fixtureChanges.map((c) => (
+                    <li key={c.id}>
+                      {c.field === "kickoff" ? (
+                        <>
+                          Kick off moved from <strong>{ukDateLong(c.old_value)} {ukTime(c.old_value)}</strong>{" "}
+                          to <strong>{ukDateLong(c.new_value)} {ukTime(c.new_value)}</strong>
+                        </>
+                      ) : c.field === "venue" ? (
+                        <>
+                          Venue changed from <strong>{c.old_value || "unset"}</strong> to{" "}
+                          <strong>{c.new_value || "unset"}</strong>
+                        </>
+                      ) : (
+                        <>Fixture added: <strong>{c.new_value}</strong></>
+                      )}
+                      <span className="text-xs" style={{ color: `${NAVY}80` }}>
+                        {" "}
+                        (spotted {ukDateLong(c.detected_at)})
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs mt-3" style={{ color: `${NAVY}99` }}>
+                  Check any cars already booked around these dates.
+                </p>
+              </section>
+            )}
+
+            <div className="bg-white shadow-md overflow-x-auto">
+              <table className="w-full text-sm" style={{ color: NAVY }}>
+                <thead>
+                  <tr
+                    className="text-[11px] tracking-[0.18em] uppercase text-left"
+                    style={{ color: `${NAVY}99` }}
+                  >
+                    <th className="px-4 py-3 font-medium">Date</th>
+                    <th className="px-4 py-3 font-medium">Kick Off</th>
+                    <th className="px-4 py-3 font-medium">Fixture</th>
+                    <th className="px-4 py-3 font-medium">Home / Away</th>
+                    <th className="px-4 py-3 font-medium">Venue</th>
+                    <th className="px-4 py-3 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fixtures.map((f) => (
+                    <tr
+                      key={f.id}
+                      className="border-t"
+                      style={{ borderColor: "rgba(28,44,91,0.12)" }}
+                    >
+                      <td className="px-4 py-3 whitespace-nowrap">{ukDateLong(f.kickoff_utc)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap font-medium">
+                        {ukTime(f.kickoff_utc)}
+                      </td>
+                      <td className="px-4 py-3">
+                        {f.home_team} v {f.away_team}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span
+                          className="inline-block px-2.5 py-1 text-[11px] tracking-[0.12em] uppercase font-semibold"
+                          style={
+                            f.is_home
+                              ? { backgroundColor: SKY, color: "#ffffff" }
+                              : { backgroundColor: "rgba(28,44,91,0.1)", color: NAVY }
+                          }
+                        >
+                          {f.is_home ? "Home" : "Away"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">{f.venue}</td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <span className="inline-flex items-center gap-4 text-[11px] tracking-[0.12em] uppercase">
+                          <button
+                            type="button"
+                            onClick={() => bookForFixture(f)}
+                            className="underline underline-offset-4 hover:opacity-70 transition-opacity"
+                            style={{ color: NAVY }}
+                          >
+                            Book Travel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setScheduleDate(ukDateKey(f.kickoff_utc));
+                              setScheduleTitle(fixtureTitle(f));
+                              setScheduleTitleTouched(false);
+                              setView("schedule");
+                            }}
+                            className="underline underline-offset-4 hover:opacity-70 transition-opacity"
+                            style={{ color: NAVY }}
+                          >
+                            Schedule
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {fixtures.length === 0 && (
+                    <tr>
+                      <td className="px-4 py-8 text-center" colSpan={6} style={{ color: `${NAVY}99` }}>
+                        No fixtures loaded yet. Use "Check for changes" to pull the published
+                        schedule.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] mt-4" style={{ color: `${NAVY}99` }}>
+              Times shown in UK time. The published schedule is checked automatically every Monday
+              and any moved fixture is flagged here and emailed to your travel team.
+            </p>
+          </>
+        )}
+
         {view === "addresses" && (
           <>
             <div className="mb-8">
@@ -1258,7 +1548,10 @@ const McfcPortal = () => {
                   <input
                     placeholder="e.g. MCFC vs Arsenal - KICK OFF 16:30"
                     value={scheduleTitle}
-                    onChange={(e) => setScheduleTitle(e.target.value)}
+                    onChange={(e) => {
+                      setScheduleTitle(e.target.value);
+                      setScheduleTitleTouched(true);
+                    }}
                     maxLength={80}
                     className={lightInput}
                     style={lightInputStyle}
