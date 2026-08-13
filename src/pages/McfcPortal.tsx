@@ -382,10 +382,51 @@ const McfcPortal = () => {
     return addresses.filter((a) => !a.passenger_id || ids.has(a.passenger_id));
   };
 
-  // Grey tarmac is offered when the destination is a saved address flagged
-  // for front-entrance drop-off
+  const homeFixtureOn = (date: string) =>
+    fixtures.find((f) => f.is_home && ukDateKey(f.kickoff_utc) === date);
+
+  const greyAddressFor = (car: CarRequest) =>
+    addresses.find((a) => a.grey_tarmac && a.address === car.destination);
+
+  /**
+   * Grey tarmac is a home match-day arrangement: the destination must be a
+   * saved front-entrance address and the travel date must be a home fixture.
+   * Before the fixture list is loaded we cannot tell, so the tick still shows.
+   */
   const greyAvailableFor = (car: CarRequest) =>
-    addresses.some((a) => a.grey_tarmac && a.address === car.destination);
+    !!greyAddressFor(car) && (fixtures.length === 0 || !!homeFixtureOn(travelDate));
+
+  /** Best saved address for a fixture's ground, else the ground's name. */
+  const venueAddressFor = (f: Fixture) => {
+    const venue = f.venue.trim();
+    const matches = addresses.filter(
+      (a) =>
+        venue &&
+        (a.address.toLowerCase().includes(venue.toLowerCase()) ||
+          a.label.toLowerCase().includes(venue.toLowerCase()))
+    );
+    // On a home match day the front-entrance address is the useful one
+    const saved = f.is_home ? matches.find((a) => a.grey_tarmac) ?? matches[0] : matches[0];
+    return saved?.address ?? venue;
+  };
+
+  /** The fixture the current travel date falls on, if any. */
+  const fixtureForDate = fixtures.find((f) => ukDateKey(f.kickoff_utc) === travelDate);
+
+  const selectFixture = (id: string) => {
+    const f = fixtures.find((fx) => fx.id === id);
+    if (!f) {
+      setTravelDate("");
+      return;
+    }
+    const destination = venueAddressFor(f);
+    setTravelDate(ukDateKey(f.kickoff_utc));
+    // Fill only the cars still without a destination, never overwrite one the
+    // desk has already set (some cars run from the ground, not to it)
+    setCars((prev) =>
+      prev.map((c) => (c.destination.trim() ? c : { ...c, destination }))
+    );
+  };
 
   const addAddress = async () => {
     setAddrSaving(true);
@@ -425,17 +466,8 @@ const McfcPortal = () => {
 
   /** Start a booking for a fixture: date and destination prefilled. */
   const bookForFixture = (f: Fixture) => {
-    const venue = f.venue.trim();
-    const matches = addresses.filter(
-      (a) =>
-        venue &&
-        (a.address.toLowerCase().includes(venue.toLowerCase()) ||
-          a.label.toLowerCase().includes(venue.toLowerCase()))
-    );
-    // On a match day the front-entrance address is the useful one
-    const saved = matches.find((a) => a.grey_tarmac) ?? matches[0];
     setTravelDate(ukDateKey(f.kickoff_utc));
-    setCars([{ ...emptyCar(), destination: saved?.address ?? venue }]);
+    setCars([{ ...emptyCar(), destination: venueAddressFor(f) }]);
     setAmendRef(null);
     setSubmitError(null);
     setPickerOpen(null);
@@ -773,17 +805,54 @@ const McfcPortal = () => {
           </div>
         )}
 
-        <div className="bg-white p-6 shadow-md mb-6 max-w-xl">
-          <label className={lightLabel} style={{ color: `${NAVY}99` }}>
-            Date of Travel
-          </label>
-          <input
-            type="date"
-            value={travelDate}
-            onChange={(e) => setTravelDate(e.target.value)}
-            className={lightInput}
-            style={lightInputStyle}
-          />
+        <div className="bg-white p-6 shadow-md mb-6 max-w-3xl">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {fixtures.length > 0 && (
+              <div>
+                <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                  Booking For
+                </label>
+                <select
+                  value={fixtureForDate?.id ?? ""}
+                  onChange={(e) => selectFixture(e.target.value)}
+                  className={lightInput}
+                  style={lightInputStyle}
+                >
+                  <option value="">No fixture (general travel)</option>
+                  {fixtures.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.home_team} v {f.away_team} ({f.is_home ? "H" : "A"}),{" "}
+                      {ukDateLong(f.kickoff_utc)}, KO {ukTime(f.kickoff_utc)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                Date of Travel
+              </label>
+              <input
+                type="date"
+                value={travelDate}
+                onChange={(e) => setTravelDate(e.target.value)}
+                className={lightInput}
+                style={lightInputStyle}
+              />
+            </div>
+          </div>
+          {fixtureForDate && (
+            <p className="text-xs mt-3" style={{ color: `${NAVY}99` }}>
+              <strong style={{ color: NAVY }}>
+                {fixtureForDate.is_home ? "Home" : "Away"} fixture:
+              </strong>{" "}
+              {fixtureForDate.home_team} v {fixtureForDate.away_team} at {fixtureForDate.venue},
+              kick off {ukTime(fixtureForDate.kickoff_utc)}.
+              {fixtureForDate.is_home
+                ? " Grey Tarmac drop off can be selected on cars going to the ground."
+                : ""}
+            </p>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -1000,7 +1069,7 @@ const McfcPortal = () => {
                 </div>
               </div>
 
-              {greyAvailableFor(car) && (
+              {greyAvailableFor(car) ? (
                 <label
                   className="mt-4 inline-flex items-center gap-3 text-sm cursor-pointer px-3 py-2"
                   style={{ backgroundColor: car.greyTarmac ? "#FFF59D" : "rgba(28,44,91,0.06)", color: NAVY }}
@@ -1013,6 +1082,15 @@ const McfcPortal = () => {
                   />
                   Grey Tarmac drop off (front entrance on match day)
                 </label>
+              ) : (
+                greyAddressFor(car) && (
+                  <p className="text-xs mt-4" style={{ color: `${NAVY}99` }}>
+                    Grey Tarmac drop off applies on home match days only.
+                    {travelDate
+                      ? " There is no home fixture on the selected date."
+                      : " Choose the fixture or travel date first."}
+                  </p>
+                )
               )}
 
               {overCapacity(car) && (

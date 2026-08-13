@@ -318,6 +318,49 @@ serve(async (req) => {
       }
     }
 
+    // Grey tarmac is a home match-day arrangement: the destination must be a
+    // saved front-entrance address and the date must be a home fixture. Desks
+    // with no fixture list yet are not held to the fixture half of the rule.
+    if (cars.some((c) => c.greyTarmac)) {
+      const { data: greyRows } = await supabase
+        .from("corporate_addresses")
+        .select("address")
+        .eq("corporate", corporate)
+        .eq("grey_tarmac", true);
+      const greyAddresses = new Set(
+        (greyRows ?? []).map((r) => (r.address as string).trim())
+      );
+
+      const { data: fixtureRows } = await supabase
+        .from("fixtures")
+        .select("is_home, kickoff_utc")
+        .eq("corporate", corporate);
+      const hasFixtures = (fixtureRows ?? []).length > 0;
+      const isHomeMatchDay = (fixtureRows ?? []).some(
+        (f) =>
+          f.is_home &&
+          new Date(f.kickoff_utc as string).toLocaleDateString("en-CA", {
+            timeZone: "Europe/London",
+          }) === travelDate
+      );
+
+      for (const [i, car] of cars.entries()) {
+        if (!car.greyTarmac) continue;
+        if (!greyAddresses.has(car.destination.trim())) {
+          return json(400, {
+            success: false,
+            error: `Car ${i + 1}: Grey Tarmac is only available at a saved front-entrance address`,
+          });
+        }
+        if (hasFixtures && !isHomeMatchDay) {
+          return json(400, {
+            success: false,
+            error: "Grey Tarmac drop off applies on home match days only",
+          });
+        }
+      }
+    }
+
     const bookerName = (profile.full_name || "Travel Desk").trim();
     const bookerPhone = (profile.phone || "").trim();
     const bookerEmail = (profile.email || "").trim() || userData.user.email || "";
