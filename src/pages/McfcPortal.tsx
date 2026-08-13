@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Link } from "react-router-dom";
-import { ArrowLeft, Car, Check, Copy, Loader2, Plus, Users, X } from "lucide-react";
+import { ArrowLeft, Car, Check, Copy, Loader2, MapPin, Plus, Printer, Users, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking } from "@/lib/mfa";
 import { useAuth } from "@/hooks/useAuth";
@@ -37,6 +37,34 @@ interface CarRequest {
   vehicle: string;
   time: string;
   notes: string;
+  /** Match-day front-entrance drop-off */
+  greyTarmac: boolean;
+}
+
+interface CorporateAddress {
+  id: string;
+  label: string;
+  address: string;
+  passenger_id: string | null;
+  grey_tarmac: boolean;
+}
+
+interface ScheduleRow {
+  reference: string | null;
+  name: string;
+  vehicle: string;
+  passengers: number | null;
+  collection_at: string | null;
+  pickup: { line1?: string } | null;
+  dropoff: { line1?: string; grey_tarmac?: boolean } | null;
+  status: string;
+  live: {
+    bookingStatus: string | null;
+    driverName: string;
+    driverMobile: string;
+    vehicleDescription: string;
+    vehicleRegistration: string;
+  } | null;
 }
 
 interface RecentBooking {
@@ -47,7 +75,7 @@ interface RecentBooking {
   status: string;
   collection_at: string | null;
   pickup: { line1?: string } | null;
-  dropoff: { line1?: string } | null;
+  dropoff: { line1?: string; grey_tarmac?: boolean } | null;
 }
 
 const emptyCar = (): CarRequest => ({
@@ -57,7 +85,32 @@ const emptyCar = (): CarRequest => ({
   vehicle: "S-Class",
   time: "",
   notes: "",
+  greyTarmac: false,
 });
+
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+};
+
+/** Invoke the desk's edge function, surfacing the server's error message. */
+const invokeDesk = async (body: Record<string, unknown>) => {
+  const { data, error } = await supabase.functions.invoke("corporate-booking", { body });
+  if (error) {
+    let message = "Something went wrong. Please try again.";
+    try {
+      const parsed = await (error as { context?: Response }).context?.json();
+      if (parsed?.error) message = parsed.error;
+    } catch {
+      // keep generic message
+    }
+    throw new Error(message);
+  }
+  if (!data?.success) throw new Error(data?.error ?? "Something went wrong. Please try again.");
+  return data;
+};
 
 const lightLabel = "block text-[11px] tracking-[0.18em] uppercase mb-2";
 const lightInput =
@@ -70,7 +123,12 @@ const lightInputStyle = {
 const McfcPortal = () => {
   const { user, profile, loading, mfaVerified, mfaResolved, signOut } = useAuth();
 
+  const [view, setView] = useState<"desk" | "addresses" | "schedule">("desk");
   const [passengerGroups, setPassengerGroups] = useState<{ group: string; names: string[] }[]>([]);
+  const [passengerOptions, setPassengerOptions] = useState<
+    { id: string; name: string; grp: string }[]
+  >([]);
+  const [addresses, setAddresses] = useState<CorporateAddress[]>([]);
   const [travelDate, setTravelDate] = useState("");
   const [cars, setCars] = useState<CarRequest[]>([emptyCar()]);
   const [submitted, setSubmitted] = useState<{
@@ -89,6 +147,23 @@ const McfcPortal = () => {
   const [cancellingRef, setCancellingRef] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
+  // Address book form
+  const [addrLabel, setAddrLabel] = useState("");
+  const [addrText, setAddrText] = useState("");
+  const [addrPersonId, setAddrPersonId] = useState("");
+  const [addrGrey, setAddrGrey] = useState(false);
+  const [addrSaving, setAddrSaving] = useState(false);
+  const [addrError, setAddrError] = useState<string | null>(null);
+  const [addrDeletingId, setAddrDeletingId] = useState<string | null>(null);
+
+  // Match-day schedule
+  const [scheduleDate, setScheduleDate] = useState(todayStr());
+  const [scheduleTitle, setScheduleTitle] = useState("");
+  const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>([]);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleLoaded, setScheduleLoaded] = useState(false);
+
   const hasDeskAccess = profile?.corporate === DESK;
 
   // Approved passenger list, maintained by the operations team
@@ -97,7 +172,7 @@ const McfcPortal = () => {
     let cancelled = false;
     supabase
       .from("corporate_passengers")
-      .select("name, grp, sort")
+      .select("id, name, grp, sort")
       .eq("corporate", DESK)
       .eq("active", true)
       .order("sort")
@@ -113,11 +188,30 @@ const McfcPortal = () => {
             names: data.filter((r) => r.grp === g).map((r) => r.name),
           }))
         );
+        setPassengerOptions(
+          groups.flatMap((g) =>
+            data.filter((r) => r.grp === g).map((r) => ({ id: r.id, name: r.name, grp: g }))
+          )
+        );
       });
     return () => {
       cancelled = true;
     };
   }, [hasDeskAccess, mfaVerified]);
+
+  const loadAddresses = useCallback(() => {
+    if (!hasDeskAccess || !mfaVerified) return;
+    supabase
+      .from("corporate_addresses")
+      .select("id, label, address, passenger_id, grey_tarmac")
+      .eq("corporate", DESK)
+      .order("label")
+      .then(({ data }) => setAddresses(data ?? []));
+  }, [hasDeskAccess, mfaVerified]);
+
+  useEffect(() => {
+    loadAddresses();
+  }, [loadAddresses]);
 
   const loadRecent = useCallback(() => {
     if (!user || !hasDeskAccess || !mfaVerified) return;
@@ -163,6 +257,86 @@ const McfcPortal = () => {
 
   const overCapacity = (c: CarRequest) => c.passengers.length > (CAPACITY[c.vehicle] ?? 2);
 
+  const passengerIdByName = useMemo(() => {
+    const m = new Map<string, string>();
+    passengerOptions.forEach((p) => m.set(p.name, p.id));
+    return m;
+  }, [passengerOptions]);
+
+  const passengerNameById = (id: string | null) =>
+    passengerOptions.find((p) => p.id === id)?.name ?? null;
+
+  // Saved addresses relevant to this car: globals plus the personal addresses
+  // of whoever is seated in it
+  const addressChoicesFor = (car: CarRequest) => {
+    const ids = new Set(
+      car.passengers.map((n) => passengerIdByName.get(n)).filter(Boolean) as string[]
+    );
+    return addresses.filter((a) => !a.passenger_id || ids.has(a.passenger_id));
+  };
+
+  // Grey tarmac is offered when the destination is a saved address flagged
+  // for front-entrance drop-off
+  const greyAvailableFor = (car: CarRequest) =>
+    addresses.some((a) => a.grey_tarmac && a.address === car.destination);
+
+  const addAddress = async () => {
+    setAddrSaving(true);
+    setAddrError(null);
+    try {
+      await invokeDesk({
+        action: "address_add",
+        label: addrLabel.trim(),
+        address: addrText.trim(),
+        ...(addrPersonId ? { passengerId: addrPersonId } : {}),
+        greyTarmac: addrGrey,
+      });
+      setAddrLabel("");
+      setAddrText("");
+      setAddrPersonId("");
+      setAddrGrey(false);
+      loadAddresses();
+    } catch (err) {
+      setAddrError(err instanceof Error ? err.message : "We couldn't save this address.");
+    } finally {
+      setAddrSaving(false);
+    }
+  };
+
+  const deleteAddress = async (id: string) => {
+    setAddrDeletingId(id);
+    setAddrError(null);
+    try {
+      await invokeDesk({ action: "address_delete", id });
+      loadAddresses();
+    } catch (err) {
+      setAddrError(err instanceof Error ? err.message : "We couldn't remove this address.");
+    } finally {
+      setAddrDeletingId(null);
+    }
+  };
+
+  const loadSchedule = useCallback(async () => {
+    setScheduleLoading(true);
+    setScheduleError(null);
+    try {
+      const data = await invokeDesk({ action: "schedule", date: scheduleDate });
+      setScheduleRows(Array.isArray(data.schedule) ? data.schedule : []);
+      setScheduleLoaded(true);
+    } catch (err) {
+      setScheduleError(
+        err instanceof Error ? err.message : "We couldn't load the schedule. Please try again."
+      );
+    } finally {
+      setScheduleLoading(false);
+    }
+  }, [scheduleDate]);
+
+  useEffect(() => {
+    if (view !== "schedule" || !hasDeskAccess || !mfaVerified) return;
+    loadSchedule();
+  }, [view, loadSchedule, hasDeskAccess, mfaVerified]);
+
   // Load an existing car back into the form; resubmitting overwrites the
   // booking because the reference is reused. Notes are not stored, so they
   // start blank.
@@ -178,8 +352,10 @@ const McfcPortal = () => {
         vehicle: VEHICLES.includes(b.vehicle) ? b.vehicle : "S-Class",
         time: b.collection_at ? b.collection_at.slice(11, 16) : "",
         notes: "",
+        greyTarmac: b.dropoff?.grey_tarmac === true,
       },
     ]);
+    setView("desk");
     setPickerOpen(null);
     setSubmitError(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -234,6 +410,7 @@ const McfcPortal = () => {
             vehicle: c.vehicle,
             time: c.time,
             notes: c.notes.trim(),
+            greyTarmac: c.greyTarmac && greyAvailableFor(c),
           })),
         },
       });
@@ -387,7 +564,34 @@ const McfcPortal = () => {
         </div>
       </header>
 
+      <nav className="container mx-auto px-8 pt-2 pb-0 flex items-center gap-2 no-print">
+        {(
+          [
+            { key: "desk", label: "Travel Desk", icon: Car },
+            { key: "addresses", label: "Address Book", icon: MapPin },
+            { key: "schedule", label: "Match Day Schedule", icon: Printer },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setView(t.key)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-xs tracking-[0.18em] uppercase transition-colors"
+            style={
+              view === t.key
+                ? { backgroundColor: NAVY, color: "#ffffff" }
+                : { color: NAVY, backgroundColor: "rgba(255,255,255,0.45)" }
+            }
+          >
+            <t.icon className="w-3.5 h-3.5" />
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
       <main className="container mx-auto px-8 py-10 max-w-6xl">
+        {view === "desk" && (
+          <>
         <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
           <div>
             <p
@@ -575,6 +779,25 @@ const McfcPortal = () => {
                     className={lightInput}
                     style={lightInputStyle}
                   />
+                  {addressChoicesFor(car).length > 0 && (
+                    <select
+                      value=""
+                      aria-label="Saved pickup addresses"
+                      onChange={(e) => {
+                        if (e.target.value) updateCar(i, { pickup: e.target.value });
+                      }}
+                      className="w-full mt-2 h-9 bg-white border rounded-none px-2 text-xs outline-none"
+                      style={lightInputStyle}
+                    >
+                      <option value="">Saved addresses…</option>
+                      {addressChoicesFor(car).map((a) => (
+                        <option key={a.id} value={a.address}>
+                          {a.label}
+                          {a.passenger_id ? ` (${passengerNameById(a.passenger_id) ?? ""})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className={lightLabel} style={{ color: `${NAVY}99` }}>
@@ -583,10 +806,33 @@ const McfcPortal = () => {
                   <input
                     placeholder="e.g. Manchester Airport T3"
                     value={car.destination}
-                    onChange={(e) => updateCar(i, { destination: e.target.value })}
+                    onChange={(e) =>
+                      updateCar(i, { destination: e.target.value, greyTarmac: false })
+                    }
                     className={lightInput}
                     style={lightInputStyle}
                   />
+                  {addressChoicesFor(car).length > 0 && (
+                    <select
+                      value=""
+                      aria-label="Saved destination addresses"
+                      onChange={(e) => {
+                        if (e.target.value)
+                          updateCar(i, { destination: e.target.value, greyTarmac: false });
+                      }}
+                      className="w-full mt-2 h-9 bg-white border rounded-none px-2 text-xs outline-none"
+                      style={lightInputStyle}
+                    >
+                      <option value="">Saved addresses…</option>
+                      {addressChoicesFor(car).map((a) => (
+                        <option key={a.id} value={a.address}>
+                          {a.label}
+                          {a.passenger_id ? ` (${passengerNameById(a.passenger_id) ?? ""})` : ""}
+                          {a.grey_tarmac ? " - Grey Tarmac available" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className={lightLabel} style={{ color: `${NAVY}99` }}>
@@ -618,6 +864,21 @@ const McfcPortal = () => {
                   </select>
                 </div>
               </div>
+
+              {greyAvailableFor(car) && (
+                <label
+                  className="mt-4 inline-flex items-center gap-3 text-sm cursor-pointer px-3 py-2"
+                  style={{ backgroundColor: car.greyTarmac ? "#FFF59D" : "rgba(28,44,91,0.06)", color: NAVY }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={car.greyTarmac}
+                    onChange={(e) => updateCar(i, { greyTarmac: e.target.checked })}
+                    className="w-4 h-4 accent-[#1C2C5B]"
+                  />
+                  Grey Tarmac drop off (front entrance on match day)
+                </label>
+              )}
 
               {overCapacity(car) && (
                 <p className="text-red-600 text-xs mt-3">
@@ -793,7 +1054,344 @@ const McfcPortal = () => {
           </section>
         )}
 
-        <p className="text-[11px] tracking-[0.1em] mt-14" style={{ color: `${NAVY}80` }}>
+          </>
+        )}
+
+        {view === "addresses" && (
+          <>
+            <div className="mb-8">
+              <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
+                Address Book
+              </p>
+              <h1 className="font-display text-4xl font-light tracking-wider text-white">
+                Saved Addresses
+              </h1>
+            </div>
+
+            <section className="bg-white p-6 shadow-md mb-8">
+              <h2
+                className="text-sm tracking-[0.2em] uppercase font-semibold mb-5"
+                style={{ color: NAVY }}
+              >
+                Add an Address
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                    Name
+                  </label>
+                  <input
+                    placeholder="e.g. Etihad Stadium - Match Day"
+                    value={addrLabel}
+                    onChange={(e) => setAddrLabel(e.target.value)}
+                    maxLength={80}
+                    className={lightInput}
+                    style={lightInputStyle}
+                  />
+                </div>
+                <div>
+                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                    Address
+                  </label>
+                  <input
+                    placeholder="Full address including postcode"
+                    value={addrText}
+                    onChange={(e) => setAddrText(e.target.value)}
+                    maxLength={240}
+                    className={lightInput}
+                    style={lightInputStyle}
+                  />
+                </div>
+                <div>
+                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                    Linked To
+                  </label>
+                  <select
+                    value={addrPersonId}
+                    onChange={(e) => setAddrPersonId(e.target.value)}
+                    className={lightInput}
+                    style={lightInputStyle}
+                  >
+                    <option value="">Everyone (global address)</option>
+                    {passengerOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.grp})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-end pb-2">
+                  <label
+                    className="flex items-center gap-3 text-sm cursor-pointer"
+                    style={{ color: NAVY }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={addrGrey}
+                      onChange={(e) => setAddrGrey(e.target.checked)}
+                      className="w-4 h-4 accent-[#1C2C5B]"
+                    />
+                    Grey Tarmac drop off available (match-day front entrance)
+                  </label>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center gap-4 flex-wrap">
+                <button
+                  type="button"
+                  disabled={addrSaving || !addrLabel.trim() || !addrText.trim()}
+                  onClick={addAddress}
+                  className="tracking-[0.2em] uppercase text-xs px-8 py-3.5 text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-3"
+                  style={{ backgroundColor: NAVY }}
+                >
+                  {addrSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Save Address
+                </button>
+                {addrError && <p className="text-xs font-medium text-red-700">{addrError}</p>}
+              </div>
+            </section>
+
+            <div className="bg-white shadow-md overflow-x-auto">
+              <table className="w-full text-sm" style={{ color: NAVY }}>
+                <thead>
+                  <tr
+                    className="text-[11px] tracking-[0.18em] uppercase text-left"
+                    style={{ color: `${NAVY}99` }}
+                  >
+                    <th className="px-4 py-3 font-medium">Name</th>
+                    <th className="px-4 py-3 font-medium">Address</th>
+                    <th className="px-4 py-3 font-medium">Linked To</th>
+                    <th className="px-4 py-3 font-medium">Grey Tarmac</th>
+                    <th className="px-4 py-3 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {addresses.map((a) => (
+                    <tr
+                      key={a.id}
+                      className="border-t"
+                      style={{ borderColor: "rgba(28,44,91,0.12)" }}
+                    >
+                      <td className="px-4 py-3 font-medium whitespace-nowrap">{a.label}</td>
+                      <td className="px-4 py-3">{a.address}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {a.passenger_id ? passengerNameById(a.passenger_id) ?? "…" : "Everyone"}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {a.grey_tarmac ? (
+                          <span
+                            className="inline-block px-2.5 py-1 text-[11px] tracking-[0.12em] uppercase font-semibold"
+                            style={{ backgroundColor: "#FFF59D", color: NAVY }}
+                          >
+                            Available
+                          </span>
+                        ) : (
+                          <span style={{ color: `${NAVY}66` }}>—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          disabled={addrDeletingId === a.id}
+                          onClick={() => deleteAddress(a.id)}
+                          className="underline underline-offset-4 hover:opacity-70 transition-opacity text-[11px] tracking-[0.12em] uppercase text-red-700 disabled:opacity-50"
+                        >
+                          {addrDeletingId === a.id ? "Removing…" : "Remove"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {addresses.length === 0 && (
+                    <tr>
+                      <td
+                        className="px-4 py-8 text-center"
+                        colSpan={5}
+                        style={{ color: `${NAVY}99` }}
+                      >
+                        No saved addresses yet. Add the first one above.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {view === "schedule" && (
+          <>
+            <style>{`
+              @media print {
+                body * { visibility: hidden; }
+                .print-area, .print-area * { visibility: visible; }
+                .print-area { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 16px; background: #ffffff; box-shadow: none; }
+                .no-print { display: none !important; }
+                .print-area * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              }
+            `}</style>
+            <div className="mb-8 no-print">
+              <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
+                Match Day
+              </p>
+              <h1 className="font-display text-4xl font-light tracking-wider text-white">
+                Travel Schedule
+              </h1>
+            </div>
+
+            <section className="bg-white p-6 shadow-md mb-6 no-print">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={scheduleDate}
+                    onChange={(e) => setScheduleDate(e.target.value)}
+                    className={lightInput}
+                    style={lightInputStyle}
+                  />
+                </div>
+                <div>
+                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                    Fixture / Title (shown on the printout)
+                  </label>
+                  <input
+                    placeholder="e.g. MCFC vs Arsenal - KICK OFF 16:30"
+                    value={scheduleTitle}
+                    onChange={(e) => setScheduleTitle(e.target.value)}
+                    maxLength={80}
+                    className={lightInput}
+                    style={lightInputStyle}
+                  />
+                </div>
+                <div className="flex items-end gap-3">
+                  <button
+                    type="button"
+                    onClick={loadSchedule}
+                    disabled={scheduleLoading}
+                    className="tracking-[0.2em] uppercase text-xs px-6 py-3.5 transition-opacity hover:opacity-80 disabled:opacity-40 border"
+                    style={{ borderColor: NAVY, color: NAVY }}
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    disabled={scheduleRows.length === 0}
+                    className="tracking-[0.2em] uppercase text-xs px-6 py-3.5 text-white transition-opacity hover:opacity-90 disabled:opacity-40 inline-flex items-center gap-2"
+                    style={{ backgroundColor: NAVY }}
+                  >
+                    <Printer className="w-4 h-4" />
+                    Print
+                  </button>
+                </div>
+              </div>
+              {scheduleError && (
+                <p className="text-xs font-medium text-red-700 mt-4">{scheduleError}</p>
+              )}
+            </section>
+
+            <section className="print-area bg-white p-6 shadow-md">
+              <div
+                className="flex items-center gap-4 pb-4 mb-4 border-b-2"
+                style={{ borderColor: SKY }}
+              >
+                <img src={mcfcBadge} alt="Manchester City FC" className="h-14 w-auto" />
+                <div>
+                  <p
+                    className="text-sm tracking-[0.2em] uppercase font-semibold"
+                    style={{ color: NAVY }}
+                  >
+                    {scheduleTitle.trim() || "Team Travel Schedule"}
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: `${NAVY}99` }}>
+                    {new Date(`${scheduleDate}T00:00:00`).toLocaleDateString("en-GB", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}
+                    {" - Operated by Apexia VIP"}
+                  </p>
+                </div>
+              </div>
+              {scheduleLoading ? (
+                <div className="py-10 flex justify-center">
+                  <Loader2 className="w-5 h-5 animate-spin" style={{ color: NAVY }} />
+                </div>
+              ) : scheduleRows.length === 0 ? (
+                <p className="py-8 text-center text-sm" style={{ color: `${NAVY}99` }}>
+                  {scheduleLoaded
+                    ? "No cars are booked for this date."
+                    : "Choose a date to load the schedule."}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs" style={{ color: NAVY }}>
+                    <thead>
+                      <tr
+                        className="text-[10px] tracking-[0.15em] uppercase text-left text-white"
+                        style={{ backgroundColor: NAVY }}
+                      >
+                        <th className="px-3 py-2.5 font-semibold">Guest Name</th>
+                        <th className="px-3 py-2.5 font-semibold">Pick Up Location</th>
+                        <th className="px-3 py-2.5 font-semibold">Pick Up Time</th>
+                        <th className="px-3 py-2.5 font-semibold">Destination</th>
+                        <th className="px-3 py-2.5 font-semibold">Driver Name</th>
+                        <th className="px-3 py-2.5 font-semibold">Driver Number</th>
+                        <th className="px-3 py-2.5 font-semibold">Vehicle</th>
+                        <th className="px-3 py-2.5 font-semibold">Reg</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scheduleRows.map((r, idx) => {
+                        const grey = r.dropoff?.grey_tarmac === true;
+                        return (
+                          <tr
+                            key={r.reference ?? idx}
+                            className="border-t"
+                            style={{
+                              borderColor: "rgba(28,44,91,0.15)",
+                              backgroundColor: grey ? "#FFF59D" : undefined,
+                            }}
+                          >
+                            <td className="px-3 py-2.5 font-medium">{r.name}</td>
+                            <td className="px-3 py-2.5">{r.pickup?.line1 ?? ""}</td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              {r.collection_at ? r.collection_at.slice(11, 16) : ""}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {r.dropoff?.line1 ?? ""}
+                              {grey ? " (GREY TARMAC)" : ""}
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              {r.live?.driverName || "TBC"}
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              {r.live?.driverMobile || ""}
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              {r.live?.vehicleDescription || r.vehicle}
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              {r.live?.vehicleRegistration || "TBC"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <p className="text-[10px] mt-3" style={{ color: `${NAVY}99` }}>
+                    Rows highlighted yellow are Grey Tarmac front-entrance drop-offs. Driver and
+                    vehicle details show TBC until allocated by the travel team.
+                  </p>
+                </div>
+              )}
+            </section>
+          </>
+        )}
+
+        <p className="text-[11px] tracking-[0.1em] mt-14 no-print" style={{ color: `${NAVY}80` }}>
           Operated by Apexia VIP. All activity confidential.
         </p>
       </main>

@@ -46,6 +46,8 @@ interface CarRequest {
   vehicle: string;
   time: string;
   notes: string;
+  /** Match-day front-entrance drop-off */
+  greyTarmac?: boolean;
 }
 
 serve(async (req) => {
@@ -100,7 +102,125 @@ serve(async (req) => {
     }
     const corporate = profile.corporate;
 
-    // Rate limiting
+    const body = await req.json();
+    const action = typeof body.action === "string" ? body.action : "submit";
+
+    // --- Address book management (personal and global addresses) ---
+    if (action === "address_add") {
+      const label = typeof body.label === "string" ? body.label.trim() : "";
+      const address = typeof body.address === "string" ? body.address.trim() : "";
+      const greyTarmac = body.greyTarmac === true;
+      const passengerId =
+        typeof body.passengerId === "string" && body.passengerId ? body.passengerId : null;
+      if (!label || label.length > 80) {
+        return json(400, { success: false, error: "Please give the address a short name" });
+      }
+      if (!address || address.length > 240) {
+        return json(400, { success: false, error: "Please enter the address" });
+      }
+      if (passengerId) {
+        const { data: p } = await supabase
+          .from("corporate_passengers")
+          .select("id")
+          .eq("id", passengerId)
+          .eq("corporate", corporate)
+          .maybeSingle();
+        if (!p) return json(400, { success: false, error: "Unknown passenger" });
+      }
+      const { data: row, error: addError } = await supabase
+        .from("corporate_addresses")
+        .insert({
+          corporate,
+          label,
+          address,
+          passenger_id: passengerId,
+          grey_tarmac: greyTarmac,
+        })
+        .select()
+        .single();
+      if (addError) throw addError;
+      return json(200, { success: true, address: row });
+    }
+
+    if (action === "address_delete") {
+      const id = typeof body.id === "string" && body.id ? body.id : "";
+      if (!id) return json(400, { success: false, error: "Invalid address" });
+      const { error: delError } = await supabase
+        .from("corporate_addresses")
+        .delete()
+        .eq("id", id)
+        .eq("corporate", corporate);
+      if (delError) throw delError;
+      return json(200, { success: true });
+    }
+
+    // --- Match-day schedule: every desk booking for a date, with live
+    // driver and vehicle details from Dispatch where allocated ---
+    if (action === "schedule") {
+      const d = typeof body.date === "string" ? body.date.trim() : "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        return json(400, { success: false, error: "Invalid date" });
+      }
+      const dayStart = `${d}T00:00:00.000Z`;
+      const dayEnd = new Date(Date.parse(dayStart) + 24 * 3600 * 1000).toISOString();
+      const { data: rows, error: schedError } = await supabase
+        .from("bookings")
+        .select("reference, name, vehicle, passengers, collection_at, pickup, dropoff, status")
+        .eq("corporate", corporate)
+        .gte("collection_at", dayStart)
+        .lt("collection_at", dayEnd)
+        .order("collection_at");
+      if (schedError) throw schedError;
+      const active = (rows ?? []).filter(
+        (r) => r.status !== "Failed" && r.status !== "Cancelled"
+      );
+
+      const live: Record<string, unknown> = {};
+      const refs = active.map((r) => r.reference as string).filter(Boolean);
+      if (refs.length > 0) {
+        try {
+          const statusAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
+          const statusRes = await fetch(
+            `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&CheckBookingStatus=true`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Basic ${statusAuth}`,
+              },
+              body: JSON.stringify({ Bookings: refs.map((reference) => ({ Reference: reference })) }),
+            }
+          );
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            const statusResult = Array.isArray(statusData?.Result) ? statusData.Result[0] : statusData;
+            for (const b of Array.isArray(statusResult?.Bookings) ? statusResult.Bookings : []) {
+              if (!b?.Reference) continue;
+              live[b.Reference] = {
+                bookingStatus: b?.BookingStatus ?? null,
+                driverName: b?.Driver?.Name ?? "",
+                driverMobile: b?.Driver?.Mobile ?? "",
+                vehicleDescription: b?.Vehicle?.Description ?? "",
+                vehicleRegistration: b?.Vehicle?.Registration ?? "",
+              };
+            }
+          }
+        } catch (statusErr) {
+          console.error("Schedule status enrich failed:", statusErr);
+        }
+      }
+
+      return json(200, {
+        success: true,
+        schedule: active.map((r) => ({ ...r, live: live[r.reference as string] ?? null })),
+      });
+    }
+
+    if (action !== "submit") {
+      return json(400, { success: false, error: "Unknown action" });
+    }
+
+    // Rate limiting (submissions only)
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
                req.headers.get("cf-connecting-ip") || "unknown";
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -114,8 +234,6 @@ serve(async (req) => {
       return json(429, { success: false, error: "Too many requests. Please try again later." });
     }
     await supabase.from("rate_limits").insert({ ip_address: ip, endpoint: "corporate-booking" });
-
-    const body = await req.json();
 
     // --- Validate the request ---
     const travelDate = typeof body.travelDate === "string" ? body.travelDate.trim() : "";
@@ -195,6 +313,9 @@ serve(async (req) => {
       if (car.notes != null && (typeof car.notes !== "string" || car.notes.length > 500)) {
         return json(400, { success: false, error: `${label}: notes too long` });
       }
+      if (car.greyTarmac != null && typeof car.greyTarmac !== "boolean") {
+        return json(400, { success: false, error: `${label}: invalid grey tarmac flag` });
+      }
     }
 
     const bookerName = (profile.full_name || "Travel Desk").trim();
@@ -218,6 +339,7 @@ serve(async (req) => {
         BookingClass: vehicleToBookingClass[car.vehicle] || "Executive",
         BookedBy: `${deskName} Travel Desk`,
         BookingNotes: [
+          car.greyTarmac ? "GREY TARMAC DROP OFF (front entrance)." : "",
           `${deskName} Travel Desk request (car ${i + 1} of ${cars.length}), booked by ${bookerName}.`,
           `Vehicle: ${car.vehicle}.`,
           `Passengers: ${manifest}.`,
@@ -252,7 +374,12 @@ serve(async (req) => {
       bags: 0,
       collection_at: new Date(`${travelDate}T${car.time}:00`).toISOString(),
       pickup: { line1: car.pickup.trim(), town: "", postcode: "" },
-      dropoff: { line1: car.destination.trim(), town: "", postcode: "" },
+      dropoff: {
+        line1: car.destination.trim(),
+        town: "",
+        postcode: "",
+        ...(car.greyTarmac ? { grey_tarmac: true } : {}),
+      },
       journey_type: "destination",
     }));
     if (!amendReference) {
@@ -346,7 +473,7 @@ serve(async (req) => {
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.vehicle)}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.passengers.join(", "))}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.pickup)}</td>
-        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.destination)}</td>
+        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.destination)}${car.greyTarmac ? ' <strong style="color: #e0c341;">[GREY TARMAC]</strong>' : ""}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.notes?.trim() || "")}</td>
       </tr>`).join("");
 
