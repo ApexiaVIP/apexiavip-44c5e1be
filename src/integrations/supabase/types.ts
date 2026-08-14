@@ -34,7 +34,6 @@ export type Database = {
           reference: string | null
           status: string
           status_checked_at: string | null
-          stops: Json | null
           travel_date: string
           user_id: string | null
           vehicle: string
@@ -59,7 +58,6 @@ export type Database = {
           reference?: string | null
           status?: string
           status_checked_at?: string | null
-          stops?: Json | null
           travel_date: string
           user_id?: string | null
           vehicle: string
@@ -84,7 +82,6 @@ export type Database = {
           reference?: string | null
           status?: string
           status_checked_at?: string | null
-          stops?: Json | null
           travel_date?: string
           user_id?: string | null
           vehicle?: string
