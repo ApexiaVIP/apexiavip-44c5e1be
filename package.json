@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:native": "VITE_NATIVE_BUILD=true vite build",
+    "ios:sync": "npm run build:native && npx cap sync ios"
   },
   "dependencies": {
     "@capacitor/cli": "^8.5.0",

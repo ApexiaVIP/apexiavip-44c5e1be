@@ -5,6 +5,10 @@ import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
 
 // https://vitejs.dev/config/
+// The partner travel desk is desktop only. Native builds swap it for a stub so
+// the portal, and the club artwork it imports, never enter the app bundle.
+const nativeBuild = process.env.VITE_NATIVE_BUILD === "true";
+
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
@@ -46,6 +50,11 @@ export default defineConfig(({ mode }) => ({
   ].filter(Boolean),
   resolve: {
     alias: {
+      ...(nativeBuild
+        ? {
+            "@/pages/McfcPortal": path.resolve(__dirname, "./src/pages/McfcPortalNative.tsx"),
+          }
+        : {}),
       "@": path.resolve(__dirname, "./src"),
     },
   },

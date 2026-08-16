@@ -14,7 +14,8 @@ import Profile from "./pages/Profile";
 import Bookings from "./pages/Bookings";
 import Admin from "./pages/Admin";
 import Privacy from "./pages/Privacy";
-import McfcPortal from "./pages/McfcPortal";
+// Aliased to a stub in native builds: the partner desk is desktop only
+import McfcPortal from "@/pages/McfcPortal";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
