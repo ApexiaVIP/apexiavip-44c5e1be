@@ -30,6 +30,32 @@ const dispatchMonthNames = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
+/**
+ * The instant London-local midnight falls on for a given date. Stored times are
+ * UTC, and in summer that is 23:00 the day before, so a schedule filtered on
+ * plain UTC days puts late-night cars on the wrong sheet.
+ */
+const londonMidnightUtc = (dateStr: string) => {
+  const naive = Date.parse(`${dateStr}T00:00:00Z`);
+  for (const offsetMinutes of [0, -60]) {
+    const guess = new Date(naive + offsetMinutes * 60000);
+    const day = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/London",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(guess);
+    const time = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(guess);
+    if (day === dateStr && time === "00:00") return guess.toISOString();
+  }
+  return new Date(naive).toISOString();
+};
+
 const json = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), {
     status,
@@ -209,12 +235,12 @@ serve(async (req) => {
       : null;
 
     /** Passengers this caller is allowed to see and book for. */
-    const scopedPassengers = async (columns: string) => {
+    const scopedPassengers = async (columns: string, includeRetired = false) => {
       let q = supabase
         .from("corporate_passengers")
         .select(columns)
-        .eq("corporate", corporate)
-        .eq("active", true);
+        .eq("corporate", corporate);
+      if (!includeRetired) q = q.eq("active", true);
       if (groupScope && groupScope.length > 0) q = q.in("grp", groupScope);
       const { data } = await q;
       return (data ?? []) as unknown as Record<string, unknown>[];
@@ -257,6 +283,74 @@ serve(async (req) => {
       return json(200, { success: true, address: row });
     }
 
+    if (action === "passenger_add") {
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      const grp = typeof body.grp === "string" ? body.grp.trim() : "";
+      if (!name || name.length > 80) {
+        return json(400, { success: false, error: "Enter a name" });
+      }
+      if (!grp) return json(400, { success: false, error: "Choose a group" });
+      // A limited assistant can only add into their own groups
+      if (groupScope && groupScope.length > 0 && !groupScope.includes(grp)) {
+        return json(403, { success: false, error: "You cannot add someone to that group" });
+      }
+      const { data: existing } = await supabase
+        .from("corporate_passengers")
+        .select("id, active")
+        .eq("corporate", corporate)
+        .eq("name", name)
+        .maybeSingle();
+      if (existing) {
+        if (existing.active) {
+          return json(400, { success: false, error: `${name} is already on the list` });
+        }
+        // Someone previously removed comes back rather than duplicating
+        const { error: reviveError } = await supabase
+          .from("corporate_passengers")
+          .update({ active: true, grp })
+          .eq("id", existing.id);
+        if (reviveError) throw reviveError;
+        return json(200, { success: true, id: existing.id, restored: true });
+      }
+      const { data: last } = await supabase
+        .from("corporate_passengers")
+        .select("sort")
+        .eq("corporate", corporate)
+        .eq("grp", grp)
+        .order("sort", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const { data: created, error: addError } = await supabase
+        .from("corporate_passengers")
+        .insert({
+          corporate,
+          name,
+          grp,
+          sort: ((last?.sort as number) ?? 0) + 1,
+          active: true,
+        })
+        .select("id")
+        .single();
+      if (addError) throw addError;
+      return json(200, { success: true, id: created?.id });
+    }
+
+    if (action === "passenger_remove") {
+      const id = typeof body.id === "string" && body.id ? body.id : "";
+      const visible = await scopedPassengers("id");
+      if (!id || !visible.some((r) => r.id === id)) {
+        return json(400, { success: false, error: "Unknown passenger" });
+      }
+      // Retire rather than delete, so past journeys keep their names
+      const { error: remError } = await supabase
+        .from("corporate_passengers")
+        .update({ active: false })
+        .eq("id", id)
+        .eq("corporate", corporate);
+      if (remError) throw remError;
+      return json(200, { success: true });
+    }
+
     if (action === "passenger_update") {
       const id = typeof body.id === "string" && body.id ? body.id : "";
       const visible = await scopedPassengers("id");
@@ -284,9 +378,29 @@ serve(async (req) => {
       if (notifyTarget === "passenger" && notifyEmail && !email) {
         return json(400, { success: false, error: "Add an email address to send confirmations by email" });
       }
+      const newName = typeof body.name === "string" ? body.name.trim() : "";
+      if (body.name != null && (!newName || newName.length > 80)) {
+        return json(400, { success: false, error: "Enter a name" });
+      }
+      const newGrp = typeof body.grp === "string" ? body.grp.trim() : "";
+      if (newGrp && groupScope && groupScope.length > 0 && !groupScope.includes(newGrp)) {
+        return json(403, { success: false, error: "You cannot move someone to that group" });
+      }
+      if (newName) {
+        const { data: clash } = await supabase
+          .from("corporate_passengers")
+          .select("id")
+          .eq("corporate", corporate)
+          .eq("name", newName)
+          .neq("id", id)
+          .maybeSingle();
+        if (clash) return json(400, { success: false, error: `${newName} is already on the list` });
+      }
       const { error: updError } = await supabase
         .from("corporate_passengers")
         .update({
+          ...(newName ? { name: newName } : {}),
+          ...(newGrp ? { grp: newGrp } : {}),
           phone,
           email,
           notify_sms: notifySms,
@@ -315,11 +429,21 @@ serve(async (req) => {
     // driver and vehicle details from Dispatch where allocated ---
     if (action === "schedule") {
       const d = typeof body.date === "string" ? body.date.trim() : "";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const dTo = typeof body.dateTo === "string" && body.dateTo.trim() ? body.dateTo.trim() : d;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{4}-\d{2}-\d{2}$/.test(dTo)) {
         return json(400, { success: false, error: "Invalid date" });
       }
-      const dayStart = `${d}T00:00:00.000Z`;
-      const dayEnd = new Date(Date.parse(dayStart) + 24 * 3600 * 1000).toISOString();
+      if (dTo < d) {
+        return json(400, { success: false, error: "The end date is before the start date" });
+      }
+      const spanDays = Math.round((Date.parse(dTo) - Date.parse(d)) / 86400000) + 1;
+      if (spanDays > 31) {
+        return json(400, { success: false, error: "Choose a range of 31 days or fewer" });
+      }
+      const dayStart = londonMidnightUtc(d);
+      const dayEnd = londonMidnightUtc(
+        new Date(Date.parse(dTo) + 86400000).toISOString().slice(0, 10)
+      );
       const { data: rows, error: schedError } = await supabase
         .from("bookings")
         .select(
@@ -337,7 +461,7 @@ serve(async (req) => {
       // A limited assistant sees only journeys made up of their own people
       if (groupScope && groupScope.length > 0) {
         const visible = new Set(
-          (await scopedPassengers("name")).map((r) => r.name as string)
+          (await scopedPassengers("name", true)).map((r) => r.name as string)
         );
         active = active.filter((r) => {
           const names = String(r.name ?? "")

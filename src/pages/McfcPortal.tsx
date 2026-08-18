@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -322,6 +322,12 @@ const McfcPortal = () => {
   const [personSaved, setPersonSaved] = useState(false);
   const [personAddrLabel, setPersonAddrLabel] = useState("");
   const [personAddrText, setPersonAddrText] = useState("");
+  const [personName, setPersonName] = useState("");
+  const [personRemoving, setPersonRemoving] = useState(false);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [newPersonGroup, setNewPersonGroup] = useState("");
+  const [newPersonError, setNewPersonError] = useState<string | null>(null);
+  const [addingPerson, setAddingPerson] = useState(false);
 
   // Address book form
   const [addrLabel, setAddrLabel] = useState("");
@@ -340,6 +346,7 @@ const McfcPortal = () => {
 
   // Match-day schedule
   const [scheduleDate, setScheduleDate] = useState(todayStr());
+  const [scheduleDateTo, setScheduleDateTo] = useState(todayStr());
   const [scheduleTitle, setScheduleTitle] = useState("");
   const [scheduleTitleTouched, setScheduleTitleTouched] = useState(false);
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>([]);
@@ -554,6 +561,28 @@ const McfcPortal = () => {
   const selectedPerson = passengerOptions.find((p) => p.id === personId) ?? null;
   const personAddresses = addresses.filter((a) => a.passenger_id === personId);
   // Assistants limited to one group see it named on the tab
+  const longDay = (d: string) =>
+    new Date(`${d}T12:00:00`).toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  const scheduleRangeLabel =
+    scheduleDate === scheduleDateTo
+      ? longDay(scheduleDate)
+      : `${longDay(scheduleDate)} to ${longDay(scheduleDateTo)}`;
+  // Over a multi-day operation the sheet is broken up day by day
+  const scheduleDays = [
+    ...new Set(
+      scheduleRows.map((r) => (r.collection_at ? ukDateKey(r.collection_at) : "")).filter(Boolean)
+    ),
+  ].sort();
+
+  const addableGroups =
+    profile?.corporate_groups && profile.corporate_groups.length > 0
+      ? profile.corporate_groups
+      : GROUP_ORDER;
   const peopleLabel =
     profile?.corporate_groups && profile.corporate_groups.length === 1
       ? profile.corporate_groups[0]
@@ -634,6 +663,7 @@ const McfcPortal = () => {
 
   const openPerson = (person: Passenger) => {
     setPersonId(person.id);
+    setPersonName(person.name);
     setPersonPhone(person.phone);
     setPersonEmail(person.email);
     setPersonSms(person.notify_sms);
@@ -654,6 +684,7 @@ const McfcPortal = () => {
       await invokeDesk({
         action: "passenger_update",
         id: personId,
+        name: personName.trim(),
         phone: personPhone.trim(),
         email: personEmail.trim(),
         notifySms: personSms,
@@ -666,6 +697,43 @@ const McfcPortal = () => {
       setPersonError(err instanceof Error ? err.message : "We couldn't save these details.");
     } finally {
       setPersonSaving(false);
+    }
+  };
+
+  const addPerson = async () => {
+    setAddingPerson(true);
+    setNewPersonError(null);
+    try {
+      const grp =
+        newPersonGroup ||
+        (profile?.corporate_groups?.length === 1 ? profile.corporate_groups[0] : "");
+      const data = await invokeDesk({
+        action: "passenger_add",
+        name: newPersonName.trim(),
+        grp,
+      });
+      setNewPersonName("");
+      loadPassengers();
+      if (typeof data.id === "string") setPersonId(data.id);
+    } catch (err) {
+      setNewPersonError(err instanceof Error ? err.message : "We couldn't add this person.");
+    } finally {
+      setAddingPerson(false);
+    }
+  };
+
+  const removePerson = async () => {
+    if (!personId) return;
+    setPersonRemoving(true);
+    setPersonError(null);
+    try {
+      await invokeDesk({ action: "passenger_remove", id: personId });
+      setPersonId(null);
+      loadPassengers();
+    } catch (err) {
+      setPersonError(err instanceof Error ? err.message : "We couldn't remove this person.");
+    } finally {
+      setPersonRemoving(false);
     }
   };
 
@@ -740,18 +808,29 @@ const McfcPortal = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  useEffect(() => {
+    if (scheduleDateTo < scheduleDate) setScheduleDateTo(scheduleDate);
+  }, [scheduleDate, scheduleDateTo]);
+
   // The printed schedule names the fixture unless the desk has typed its own
   useEffect(() => {
     if (scheduleTitleTouched) return;
-    const f = fixtures.find((fx) => ukDateKey(fx.kickoff_utc) === scheduleDate);
+    const f = fixtures.find((fx) => {
+      const d = ukDateKey(fx.kickoff_utc);
+      return d >= scheduleDate && d <= scheduleDateTo;
+    });
     setScheduleTitle(f ? fixtureTitle(f) : "");
-  }, [scheduleDate, fixtures, scheduleTitleTouched]);
+  }, [scheduleDate, scheduleDateTo, fixtures, scheduleTitleTouched]);
 
   const loadSchedule = useCallback(async () => {
     setScheduleLoading(true);
     setScheduleError(null);
     try {
-      const data = await invokeDesk({ action: "schedule", date: scheduleDate });
+      const data = await invokeDesk({
+        action: "schedule",
+        date: scheduleDate,
+        dateTo: scheduleDateTo,
+      });
       setScheduleRows(Array.isArray(data.schedule) ? data.schedule : []);
       setScheduleLoaded(true);
     } catch (err) {
@@ -761,7 +840,7 @@ const McfcPortal = () => {
     } finally {
       setScheduleLoading(false);
     }
-  }, [scheduleDate]);
+  }, [scheduleDate, scheduleDateTo]);
 
   useEffect(() => {
     if (view !== "schedule" || !hasDeskAccess || !mfaVerified) return;
@@ -1840,7 +1919,10 @@ const McfcPortal = () => {
                           <button
                             type="button"
                             onClick={() => {
-                              setScheduleDate(ukDateKey(f.kickoff_utc));
+                              // Movements around a big fixture start days out
+                              const day = Date.parse(ukDateKey(f.kickoff_utc));
+                              setScheduleDate(new Date(day - 2 * 86400000).toISOString().slice(0, 10));
+                              setScheduleDateTo(new Date(day + 86400000).toISOString().slice(0, 10));
                               setScheduleTitle(fixtureTitle(f));
                               setScheduleTitleTouched(false);
                               setView("schedule");
@@ -1929,6 +2011,50 @@ const McfcPortal = () => {
                     </p>
                   )}
                 </div>
+                <div className="border-t p-4" style={{ borderColor: "rgba(28,44,91,0.12)" }}>
+                  <p
+                    className="text-[11px] tracking-[0.18em] uppercase mb-2"
+                    style={{ color: `${NAVY}99` }}
+                  >
+                    Add someone
+                  </p>
+                  <input
+                    placeholder="Full name"
+                    value={newPersonName}
+                    onChange={(e) => setNewPersonName(e.target.value)}
+                    maxLength={80}
+                    className={lightInput}
+                    style={lightInputStyle}
+                  />
+                  {addableGroups.length > 1 && (
+                    <select
+                      value={newPersonGroup || addableGroups[0]}
+                      aria-label="Group"
+                      onChange={(e) => setNewPersonGroup(e.target.value)}
+                      className="w-full mt-2 h-10 bg-white border rounded-none px-2 text-sm outline-none"
+                      style={lightInputStyle}
+                    >
+                      {addableGroups.map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    disabled={addingPerson || !newPersonName.trim()}
+                    onClick={addPerson}
+                    className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs tracking-[0.15em] uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                    style={{ backgroundColor: NAVY }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add
+                  </button>
+                  {newPersonError && (
+                    <p className="text-xs font-medium text-red-700 mt-2">{newPersonError}</p>
+                  )}
+                </div>
               </div>
 
               <div className="lg:col-span-2">
@@ -1939,15 +2065,31 @@ const McfcPortal = () => {
                   </div>
                 ) : (
                   <div className="bg-white p-6 shadow-md">
-                    <h2
-                      className="text-sm tracking-[0.2em] uppercase font-semibold mb-1"
-                      style={{ color: NAVY }}
-                    >
-                      {selectedPerson.name}
-                    </h2>
-                    <p className="text-xs mb-6" style={{ color: `${NAVY}80` }}>
-                      {selectedPerson.grp}
-                    </p>
+                    <div className="flex items-start justify-between gap-4 mb-6">
+                      <div className="flex-1">
+                        <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                          Name
+                        </label>
+                        <input
+                          value={personName}
+                          onChange={(e) => setPersonName(e.target.value)}
+                          maxLength={80}
+                          className={lightInput}
+                          style={lightInputStyle}
+                        />
+                        <p className="text-xs mt-1.5" style={{ color: `${NAVY}80` }}>
+                          {selectedPerson.grp}. Renaming does not change journeys already booked.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={personRemoving}
+                        onClick={removePerson}
+                        className="mt-7 shrink-0 underline underline-offset-4 hover:opacity-70 text-[11px] tracking-[0.12em] uppercase text-red-700 disabled:opacity-50"
+                      >
+                        {personRemoving ? "Removing…" : "Remove"}
+                      </button>
+                    </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
@@ -2298,17 +2440,32 @@ const McfcPortal = () => {
 
             <section className="bg-white p-6 shadow-md mb-6 no-print">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
-                    Date
-                  </label>
-                  <input
-                    type="date"
-                    value={scheduleDate}
-                    onChange={(e) => setScheduleDate(e.target.value)}
-                    className={lightInput}
-                    style={lightInputStyle}
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                      From
+                    </label>
+                    <input
+                      type="date"
+                      value={scheduleDate}
+                      onChange={(e) => setScheduleDate(e.target.value)}
+                      className={lightInput}
+                      style={lightInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                      To
+                    </label>
+                    <input
+                      type="date"
+                      min={scheduleDate}
+                      value={scheduleDateTo}
+                      onChange={(e) => setScheduleDateTo(e.target.value)}
+                      className={lightInput}
+                      style={lightInputStyle}
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className={lightLabel} style={{ color: `${NAVY}99` }}>
@@ -2367,12 +2524,7 @@ const McfcPortal = () => {
                     {scheduleTitle.trim() || "Team Travel Schedule"}
                   </p>
                   <p className="text-xs mt-1" style={{ color: `${NAVY}99` }}>
-                    {new Date(`${scheduleDate}T00:00:00`).toLocaleDateString("en-GB", {
-                      weekday: "long",
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric",
-                    })}
+                    {scheduleRangeLabel}
                     {" - Operated by Apexia VIP"}
                   </p>
                 </div>
@@ -2384,8 +2536,8 @@ const McfcPortal = () => {
               ) : scheduleRows.length === 0 ? (
                 <p className="py-8 text-center text-sm" style={{ color: `${NAVY}99` }}>
                   {scheduleLoaded
-                    ? "No cars are booked for this date."
-                    : "Choose a date to load the schedule."}
+                    ? "No cars are booked in this period."
+                    : "Choose dates to load the schedule."}
                 </p>
               ) : (
                 <div className="overflow-x-auto">
@@ -2408,9 +2560,30 @@ const McfcPortal = () => {
                     <tbody>
                       {scheduleRows.map((r, idx) => {
                         const grey = r.dropoff?.grey_tarmac === true;
+                        const day = r.collection_at ? ukDateKey(r.collection_at) : "";
+                        const firstOfDay =
+                          scheduleDays.length > 1 &&
+                          scheduleRows.findIndex(
+                            (x) => (x.collection_at ? ukDateKey(x.collection_at) : "") === day
+                          ) === idx;
                         return (
+                          <Fragment key={r.reference ?? idx}>
+                          {firstOfDay && (
+                            <tr>
+                              <td
+                                colSpan={8}
+                                className="px-3 py-2 text-[11px] tracking-[0.18em] uppercase font-semibold"
+                                style={{
+                                  backgroundColor: "rgba(108,171,221,0.25)",
+                                  color: NAVY,
+                                  borderTop: "2px solid rgba(28,44,91,0.3)",
+                                }}
+                              >
+                                {longDay(day)}
+                              </td>
+                            </tr>
+                          )}
                           <tr
-                            key={r.reference ?? idx}
                             className="border-t"
                             style={{
                               borderColor: "rgba(28,44,91,0.15)",
@@ -2457,6 +2630,7 @@ const McfcPortal = () => {
                               {r.live?.vehicleRegistration || "TBC"}
                             </td>
                           </tr>
+                          </Fragment>
                         );
                       })}
                     </tbody>
