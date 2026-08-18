@@ -40,6 +40,17 @@ AS $$
   WHERE p.id = _user_id
 $$;
 
+-- The policies below call this as the signed-in user, so authenticated needs
+-- EXECUTE. Nobody signed out has any business calling it.
+REVOKE EXECUTE ON FUNCTION public.desk_group_allowed(uuid, text) FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.desk_group_allowed(uuid, text) FROM anon';
+  END IF;
+END $$;
+GRANT EXECUTE ON FUNCTION public.desk_group_allowed(uuid, text) TO authenticated;
+
 -- Readers only see the groups their profile allows
 DROP POLICY IF EXISTS "Corporate users read own passenger list" ON public.corporate_passengers;
 CREATE POLICY "Corporate users read own passenger list"
