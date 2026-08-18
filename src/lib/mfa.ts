@@ -62,9 +62,16 @@ export const checkBookingStatuses = async (
   return Array.isArray(data?.statuses) ? data.statuses : [];
 };
 
+export interface CancelOutcome {
+  /** True when the booking system refused and the ops team was asked instead */
+  handedToOps: boolean;
+  message?: string;
+}
+
 /** Cancel a booking (the business invoices regardless of timing). */
-export const cancelBooking = async (reference: string): Promise<void> => {
-  await invokeFn("booking-status", { action: "cancel", reference });
+export const cancelBooking = async (reference: string): Promise<CancelOutcome> => {
+  const data = await invokeFn("booking-status", { action: "cancel", reference });
+  return { handedToOps: data?.handedToOps === true, message: data?.message };
 };
 
 export interface PlaceSuggestion {

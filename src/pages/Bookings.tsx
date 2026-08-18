@@ -82,10 +82,12 @@ const Bookings = () => {
 
   const cancel = useMutation({
     mutationFn: (reference: string) => cancelBooking(reference),
-    onSuccess: () => {
+    onSuccess: (outcome) => {
       toast({
-        title: "Booking cancelled",
-        description: "Your booking has been cancelled. Charges may still apply.",
+        title: outcome.handedToOps ? "Cancellation requested" : "Booking cancelled",
+        description:
+          outcome.message ??
+          "Your booking has been cancelled. Charges may still apply.",
       });
       queryClient.invalidateQueries({ queryKey: ["my-bookings"] });
     },

@@ -921,8 +921,14 @@ const McfcPortal = () => {
     setCancellingRef(reference);
     setCancelError(null);
     try {
-      await cancelBooking(reference);
+      const outcome = await cancelBooking(reference);
       if (amendRef === reference) discardAmend();
+      if (outcome.handedToOps) {
+        setCancelError(
+          outcome.message ??
+            "Your travel team has been asked to cancel this journey and will confirm shortly."
+        );
+      }
       loadRecent();
     } catch (err) {
       setCancelError(
@@ -986,6 +992,14 @@ const McfcPortal = () => {
       }
       if (message) {
         setSubmitError(message);
+      } else if (data?.handedToOps) {
+        // The change is with the ops team rather than applied automatically
+        setSubmitError(
+          data.message ??
+            "Your travel team has been asked to make this change and will confirm shortly."
+        );
+        setAmendRef(null);
+        loadRecent();
       } else {
         setSubmitted({
           cars: cars.length,

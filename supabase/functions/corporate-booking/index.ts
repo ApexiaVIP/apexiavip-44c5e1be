@@ -931,9 +931,17 @@ serve(async (req) => {
         body: JSON.stringify({
           from: "Apexia VIP <info@apexiavip.com>",
           to: ["info@apexiavip.com"],
-          subject: `${deskName} Travel Desk: ${
+          subject: `${
+            amendReference && failedReferences.length > 0 ? "ACTION NEEDED - " : ""
+          }${deskName} Travel Desk: ${
             amendReference ? "booking AMENDED" : `${cars.length} car(s)`
-          } for ${day}-${monthName}-${year}${failedReferences.length > 0 ? " (TRANSFER FAILED)" : ""}`,
+          } for ${day}-${monthName}-${year}${
+            failedReferences.length > 0
+              ? amendReference
+                ? " (APPLY THIS CHANGE BY HAND)"
+                : " (TRANSFER FAILED)"
+              : ""
+          }`,
           html: htmlBody,
           ...(bookerEmail ? { reply_to: bookerEmail } : {}),
         }),
@@ -1025,6 +1033,19 @@ serve(async (req) => {
     }
 
     if (confirmedReferences.length === 0) {
+      // An amendment the booking system will not take is still a clear
+      // instruction from the desk, so pass it to the ops team by hand. The ops
+      // email above already carries the new details, marked AMENDED.
+      if (amendReference) {
+        return json(200, {
+          success: true,
+          handedToOps: true,
+          references: [amendReference],
+          failed: [],
+          message:
+            "Your travel team has been asked to make this change and will confirm shortly.",
+        });
+      }
       return json(502, {
         success: false,
         error: "We couldn't send this request to the booking system. Our team has been notified; please contact us directly.",

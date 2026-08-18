@@ -73,7 +73,9 @@ serve(async (req) => {
 
       const { data: booking } = await admin
         .from("bookings")
-        .select("reference, user_id, status")
+        .select(
+          "reference, user_id, status, name, phone, email, travel_date, vehicle, pickup, dropoff, corporate, assigned_reference"
+        )
         .eq("reference", reference)
         .maybeSingle();
       if (!booking || booking.user_id !== user.id) {
@@ -106,12 +108,73 @@ serve(async (req) => {
         ? cancelResult.Bookings[0]
         : undefined;
       if (cancelResult?.TransferStatus === "Failed" || cancelBooking?.Status === "Failed") {
-        const msg = cancelBooking?.Message || cancelResult?.Message || "Cancellation failed";
+        const msg = String(
+          cancelBooking?.Message || cancelResult?.Message || "Cancellation failed"
+        );
         console.error("Dispatch cancel failed:", reference, msg, JSON.stringify(cancelData));
-        // Show the reason rather than a dead end: it comes from our own
-        // dispatch system and tells the desk what to do next
-        return json(502, {
-          error: `The booking system rejected the cancellation: ${String(msg).slice(0, 160)}. Please contact us.`,
+
+        // The member has asked to cancel and is entitled to have that honoured.
+        // When the booking system will not take it directly, hand it to the ops
+        // team rather than leaving the member with a dead end.
+        const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+        const escape = (s: string) =>
+          s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const pickup = (booking.pickup as { line1?: string } | null)?.line1 ?? "";
+        const dropoff = (booking.dropoff as { line1?: string } | null)?.line1 ?? "";
+        if (RESEND_API_KEY) {
+          try {
+            await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${RESEND_API_KEY}`,
+              },
+              body: JSON.stringify({
+                from: "Apexia VIP <info@apexiavip.com>",
+                to: ["info@apexiavip.com"],
+                subject: `CANCEL THIS BOOKING: ${booking.reference}${
+                  booking.assigned_reference ? ` (Dispatch ${booking.assigned_reference})` : ""
+                }`,
+                html: `
+                  <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
+                    <h1 style="font-size: 20px; font-weight: 300; letter-spacing: 0.08em; color: #d06060;">Cancellation needs doing by hand</h1>
+                    <p style="font-size: 13px; color: #8a8070; line-height: 1.8;">
+                      A member cancelled in the app, but the booking system refused it:<br/>
+                      <em>${escape(msg)}</em>
+                    </p>
+                    <table style="width: 100%; margin-top: 16px; font-size: 13px;">
+                      <tr><td style="color:#8a8070; padding:6px 0;">Reference</td><td>${escape(String(booking.reference ?? ""))}</td></tr>
+                      <tr><td style="color:#8a8070; padding:6px 0;">Dispatch ref</td><td>${escape(String(booking.assigned_reference ?? "unknown"))}</td></tr>
+                      <tr><td style="color:#8a8070; padding:6px 0;">Passenger</td><td>${escape(String(booking.name ?? ""))}</td></tr>
+                      <tr><td style="color:#8a8070; padding:6px 0;">Travel</td><td>${escape(String(booking.travel_date ?? ""))}</td></tr>
+                      <tr><td style="color:#8a8070; padding:6px 0;">Vehicle</td><td>${escape(String(booking.vehicle ?? ""))}</td></tr>
+                      <tr><td style="color:#8a8070; padding:6px 0;">Route</td><td>${escape(pickup)} to ${escape(dropoff)}</td></tr>
+                      <tr><td style="color:#8a8070; padding:6px 0;">Requested by</td><td>${escape(String(booking.email ?? booking.phone ?? ""))}</td></tr>
+                    </table>
+                    <p style="font-size: 12px; color: #8a8070;">Please cancel it in Dispatch. The member has been told the team is handling it.</p>
+                  </div>
+                `,
+              }),
+            });
+          } catch (mailErr) {
+            console.error("Cancellation hand-off email failed:", mailErr);
+          }
+        }
+
+        await admin
+          .from("bookings")
+          .update({
+            status: "Cancellation requested",
+            status_checked_at: new Date().toISOString(),
+          })
+          .eq("reference", reference)
+          .eq("user_id", user.id);
+
+        return json(200, {
+          success: true,
+          handedToOps: true,
+          message:
+            "Your travel team has been asked to cancel this journey and will confirm shortly.",
         });
       }
 
