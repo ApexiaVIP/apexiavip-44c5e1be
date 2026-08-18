@@ -107,9 +107,11 @@ serve(async (req) => {
         : undefined;
       if (cancelResult?.TransferStatus === "Failed" || cancelBooking?.Status === "Failed") {
         const msg = cancelBooking?.Message || cancelResult?.Message || "Cancellation failed";
-        console.error("Dispatch cancel failed:", msg);
+        console.error("Dispatch cancel failed:", reference, msg, JSON.stringify(cancelData));
+        // Show the reason rather than a dead end: it comes from our own
+        // dispatch system and tells the desk what to do next
         return json(502, {
-          error: "The booking system rejected the cancellation. Please contact us.",
+          error: `The booking system rejected the cancellation: ${String(msg).slice(0, 160)}. Please contact us.`,
         });
       }
 
