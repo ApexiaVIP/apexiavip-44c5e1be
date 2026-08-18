@@ -355,6 +355,12 @@ const McfcPortal = () => {
   const [scheduleLoaded, setScheduleLoaded] = useState(false);
 
   const hasDeskAccess = profile?.corporate === DESK;
+  // Groups this account may work with; empty means the whole desk
+  const scopeKey = (profile?.corporate_groups ?? []).join("|");
+  const scopeGroups = useMemo(
+    () => (scopeKey ? scopeKey.split("|") : []),
+    [scopeKey]
+  );
 
   // Approved passenger list, maintained by the operations team. Limited
   // assistants only receive their own groups, enforced by the database.
@@ -366,8 +372,13 @@ const McfcPortal = () => {
       .eq("corporate", DESK)
       .eq("active", true)
       .order("sort")
-      .then(({ data }) => {
-        if (!data) return;
+      .then(({ data: all }) => {
+        if (!all) return;
+        // Admins can read every group, so apply the profile's own scope here
+        // too: the directory and picker must match what can actually be booked
+        const data = scopeGroups.length > 0
+          ? all.filter((r) => scopeGroups.includes(r.grp))
+          : all;
         const groups = [...new Set(data.map((r) => r.grp))].sort(
           (a, b) =>
             (GROUP_ORDER.indexOf(a) + 1 || 99) - (GROUP_ORDER.indexOf(b) + 1 || 99)
@@ -395,7 +406,7 @@ const McfcPortal = () => {
           )
         );
       });
-  }, [hasDeskAccess, mfaVerified]);
+  }, [hasDeskAccess, mfaVerified, scopeGroups]);
 
   useEffect(() => {
     loadPassengers();
@@ -559,6 +570,10 @@ const McfcPortal = () => {
   };
 
   const selectedPerson = passengerOptions.find((p) => p.id === personId) ?? null;
+  // Global addresses, plus personal ones belonging to people in scope
+  const visibleAddresses = addresses.filter(
+    (a) => !a.passenger_id || passengerOptions.some((p) => p.id === a.passenger_id)
+  );
   const personAddresses = addresses.filter((a) => a.passenger_id === personId);
   // Assistants limited to one group see it named on the tab
   const longDay = (d: string) =>
@@ -603,7 +618,7 @@ const McfcPortal = () => {
     const ids = new Set(
       manifestOf(car).map((n) => passengerIdByName.get(n)).filter(Boolean) as string[]
     );
-    return addresses.filter((a) => !a.passenger_id || ids.has(a.passenger_id));
+    return visibleAddresses.filter((a) => !a.passenger_id || ids.has(a.passenger_id));
   };
 
   const homeFixtureOn = (date: string) =>
@@ -2366,7 +2381,7 @@ const McfcPortal = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {addresses.map((a) => (
+                  {visibleAddresses.map((a) => (
                     <tr
                       key={a.id}
                       className="border-t"
@@ -2401,7 +2416,7 @@ const McfcPortal = () => {
                       </td>
                     </tr>
                   ))}
-                  {addresses.length === 0 && (
+                  {visibleAddresses.length === 0 && (
                     <tr>
                       <td
                         className="px-4 py-8 text-center"
