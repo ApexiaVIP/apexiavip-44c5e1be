@@ -11,6 +11,7 @@ import {
   Plus,
   Printer,
   RefreshCw,
+  UserCog,
   Users,
   X,
 } from "lucide-react";
@@ -140,6 +141,17 @@ const carIssues = (car: CarRequest): string[] => {
   if (!car.time) issues.push("Set the first pick up time.");
   return issues;
 };
+
+interface Passenger {
+  id: string;
+  name: string;
+  grp: string;
+  phone: string;
+  email: string;
+  notify_sms: boolean;
+  notify_email: boolean;
+  notify_target: string;
+}
 
 interface CorporateAddress {
   id: string;
@@ -274,11 +286,11 @@ const lightInputStyle = {
 const McfcPortal = () => {
   const { user, profile, loading, mfaVerified, mfaResolved, signOut } = useAuth();
 
-  const [view, setView] = useState<"desk" | "fixtures" | "addresses" | "schedule">("desk");
+  const [view, setView] = useState<"desk" | "fixtures" | "people" | "addresses" | "schedule">(
+    "desk"
+  );
   const [passengerGroups, setPassengerGroups] = useState<{ group: string; names: string[] }[]>([]);
-  const [passengerOptions, setPassengerOptions] = useState<
-    { id: string; name: string; grp: string }[]
-  >([]);
+  const [passengerOptions, setPassengerOptions] = useState<Passenger[]>([]);
   const [addresses, setAddresses] = useState<CorporateAddress[]>([]);
   const [travelDate, setTravelDate] = useState("");
   const [cars, setCars] = useState<CarRequest[]>([emptyCar()]);
@@ -297,6 +309,19 @@ const McfcPortal = () => {
   const [cancelConfirmRef, setCancelConfirmRef] = useState<string | null>(null);
   const [cancellingRef, setCancellingRef] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Person editor
+  const [personId, setPersonId] = useState<string | null>(null);
+  const [personPhone, setPersonPhone] = useState("");
+  const [personEmail, setPersonEmail] = useState("");
+  const [personSms, setPersonSms] = useState(false);
+  const [personEmailOn, setPersonEmailOn] = useState(false);
+  const [personTarget, setPersonTarget] = useState<"passenger" | "booker">("passenger");
+  const [personSaving, setPersonSaving] = useState(false);
+  const [personError, setPersonError] = useState<string | null>(null);
+  const [personSaved, setPersonSaved] = useState(false);
+  const [personAddrLabel, setPersonAddrLabel] = useState("");
+  const [personAddrText, setPersonAddrText] = useState("");
 
   // Address book form
   const [addrLabel, setAddrLabel] = useState("");
@@ -324,18 +349,18 @@ const McfcPortal = () => {
 
   const hasDeskAccess = profile?.corporate === DESK;
 
-  // Approved passenger list, maintained by the operations team
-  useEffect(() => {
+  // Approved passenger list, maintained by the operations team. Limited
+  // assistants only receive their own groups, enforced by the database.
+  const loadPassengers = useCallback(() => {
     if (!hasDeskAccess || !mfaVerified) return;
-    let cancelled = false;
     supabase
       .from("corporate_passengers")
-      .select("id, name, grp, sort")
+      .select("id, name, grp, sort, phone, email, notify_sms, notify_email, notify_target")
       .eq("corporate", DESK)
       .eq("active", true)
       .order("sort")
       .then(({ data }) => {
-        if (cancelled || !data) return;
+        if (!data) return;
         const groups = [...new Set(data.map((r) => r.grp))].sort(
           (a, b) =>
             (GROUP_ORDER.indexOf(a) + 1 || 99) - (GROUP_ORDER.indexOf(b) + 1 || 99)
@@ -348,14 +373,26 @@ const McfcPortal = () => {
         );
         setPassengerOptions(
           groups.flatMap((g) =>
-            data.filter((r) => r.grp === g).map((r) => ({ id: r.id, name: r.name, grp: g }))
+            data
+              .filter((r) => r.grp === g)
+              .map((r) => ({
+                id: r.id,
+                name: r.name,
+                grp: g,
+                phone: r.phone ?? "",
+                email: r.email ?? "",
+                notify_sms: r.notify_sms === true,
+                notify_email: r.notify_email === true,
+                notify_target: r.notify_target ?? "passenger",
+              }))
           )
         );
       });
-    return () => {
-      cancelled = true;
-    };
   }, [hasDeskAccess, mfaVerified]);
+
+  useEffect(() => {
+    loadPassengers();
+  }, [loadPassengers]);
 
   const loadFixtures = useCallback(() => {
     if (!hasDeskAccess || !mfaVerified) return;
@@ -514,6 +551,14 @@ const McfcPortal = () => {
     );
   };
 
+  const selectedPerson = passengerOptions.find((p) => p.id === personId) ?? null;
+  const personAddresses = addresses.filter((a) => a.passenger_id === personId);
+  // Assistants limited to one group see it named on the tab
+  const peopleLabel =
+    profile?.corporate_groups && profile.corporate_groups.length === 1
+      ? profile.corporate_groups[0]
+      : "People";
+
   const passengerIdByName = useMemo(() => {
     const m = new Map<string, string>();
     passengerOptions.forEach((p) => m.set(p.name, p.id));
@@ -585,6 +630,65 @@ const McfcPortal = () => {
         };
       })
     );
+  };
+
+  const openPerson = (person: Passenger) => {
+    setPersonId(person.id);
+    setPersonPhone(person.phone);
+    setPersonEmail(person.email);
+    setPersonSms(person.notify_sms);
+    setPersonEmailOn(person.notify_email);
+    setPersonTarget(person.notify_target === "booker" ? "booker" : "passenger");
+    setPersonError(null);
+    setPersonSaved(false);
+    setPersonAddrLabel("");
+    setPersonAddrText("");
+  };
+
+  const savePerson = async () => {
+    if (!personId) return;
+    setPersonSaving(true);
+    setPersonError(null);
+    setPersonSaved(false);
+    try {
+      await invokeDesk({
+        action: "passenger_update",
+        id: personId,
+        phone: personPhone.trim(),
+        email: personEmail.trim(),
+        notifySms: personSms,
+        notifyEmail: personEmailOn,
+        notifyTarget: personTarget,
+      });
+      setPersonSaved(true);
+      loadPassengers();
+    } catch (err) {
+      setPersonError(err instanceof Error ? err.message : "We couldn't save these details.");
+    } finally {
+      setPersonSaving(false);
+    }
+  };
+
+  const addPersonAddress = async () => {
+    if (!personId) return;
+    setPersonSaving(true);
+    setPersonError(null);
+    try {
+      await invokeDesk({
+        action: "address_add",
+        label: personAddrLabel.trim(),
+        address: personAddrText.trim(),
+        passengerId: personId,
+        greyTarmac: false,
+      });
+      setPersonAddrLabel("");
+      setPersonAddrText("");
+      loadAddresses();
+    } catch (err) {
+      setPersonError(err instanceof Error ? err.message : "We couldn't save this address.");
+    } finally {
+      setPersonSaving(false);
+    }
   };
 
   const addAddress = async () => {
@@ -929,6 +1033,7 @@ const McfcPortal = () => {
           [
             { key: "desk", label: "Travel Desk", icon: Car },
             { key: "fixtures", label: "Fixtures", icon: CalendarDays },
+            { key: "people", label: peopleLabel, icon: UserCog },
             { key: "addresses", label: "Address Book", icon: MapPin },
             { key: "schedule", label: "Match Day Schedule", icon: Printer },
           ] as const
@@ -1764,6 +1869,250 @@ const McfcPortal = () => {
               Times shown in UK time. The published schedule is checked automatically every Monday
               and any moved fixture is flagged here and emailed to your travel team.
             </p>
+          </>
+        )}
+
+        {view === "people" && (
+          <>
+            <div className="mb-8">
+              <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
+                Directory
+              </p>
+              <h1 className="font-display text-4xl font-light tracking-wider text-white">
+                {peopleLabel}
+              </h1>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-white shadow-md overflow-hidden">
+                <div className="max-h-[36rem] overflow-y-auto">
+                  {passengerGroups.map((g) => (
+                    <div key={g.group}>
+                      <p
+                        className="px-4 py-2 text-[11px] tracking-[0.25em] uppercase font-semibold sticky top-0"
+                        style={{ color: NAVY, backgroundColor: "rgba(108,171,221,0.18)" }}
+                      >
+                        {g.group}
+                      </p>
+                      {g.names.map((name) => {
+                        const person = passengerOptions.find((p) => p.name === name);
+                        if (!person) return null;
+                        const on = person.notify_sms || person.notify_email;
+                        return (
+                          <button
+                            key={person.id}
+                            type="button"
+                            onClick={() => openPerson(person)}
+                            className="w-full text-left px-4 py-3 border-t flex items-center justify-between gap-2 transition-colors hover:bg-[#6CABDD]/10"
+                            style={{
+                              borderColor: "rgba(28,44,91,0.12)",
+                              backgroundColor:
+                                personId === person.id ? "rgba(28,44,91,0.08)" : undefined,
+                              color: NAVY,
+                            }}
+                          >
+                            <span className="text-sm">{person.name}</span>
+                            <span
+                              className="text-[10px] tracking-[0.12em] uppercase"
+                              style={{ color: on ? NAVY : `${NAVY}66` }}
+                            >
+                              {on ? (person.notify_target === "booker" ? "To PA" : "Confirms") : "Off"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                  {passengerGroups.length === 0 && (
+                    <p className="px-4 py-8 text-center text-sm" style={{ color: `${NAVY}99` }}>
+                      Loading…
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="lg:col-span-2">
+                {!selectedPerson ? (
+                  <div className="bg-white p-8 shadow-md text-sm" style={{ color: `${NAVY}99` }}>
+                    Choose someone from the list to edit their contact details, confirmations and
+                    saved addresses.
+                  </div>
+                ) : (
+                  <div className="bg-white p-6 shadow-md">
+                    <h2
+                      className="text-sm tracking-[0.2em] uppercase font-semibold mb-1"
+                      style={{ color: NAVY }}
+                    >
+                      {selectedPerson.name}
+                    </h2>
+                    <p className="text-xs mb-6" style={{ color: `${NAVY}80` }}>
+                      {selectedPerson.grp}
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                          Mobile
+                        </label>
+                        <input
+                          placeholder="+447700900123"
+                          value={personPhone}
+                          onChange={(e) => setPersonPhone(e.target.value)}
+                          className={lightInput}
+                          style={lightInputStyle}
+                        />
+                      </div>
+                      <div>
+                        <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          placeholder="name@cityfootball.com"
+                          value={personEmail}
+                          onChange={(e) => setPersonEmail(e.target.value)}
+                          className={lightInput}
+                          style={lightInputStyle}
+                        />
+                      </div>
+                    </div>
+
+                    <p
+                      className="text-[11px] tracking-[0.18em] uppercase mt-6 mb-3"
+                      style={{ color: `${NAVY}99` }}
+                    >
+                      Booking confirmations
+                    </p>
+                    <div className="flex flex-wrap items-center gap-5">
+                      <label className="flex items-center gap-2.5 text-sm cursor-pointer" style={{ color: NAVY }}>
+                        <input
+                          type="checkbox"
+                          checked={personSms}
+                          onChange={(e) => setPersonSms(e.target.checked)}
+                          className="w-4 h-4 accent-[#1C2C5B]"
+                        />
+                        By SMS
+                      </label>
+                      <label className="flex items-center gap-2.5 text-sm cursor-pointer" style={{ color: NAVY }}>
+                        <input
+                          type="checkbox"
+                          checked={personEmailOn}
+                          onChange={(e) => setPersonEmailOn(e.target.checked)}
+                          className="w-4 h-4 accent-[#1C2C5B]"
+                        />
+                        By email
+                      </label>
+                      <select
+                        value={personTarget}
+                        aria-label="Send confirmations to"
+                        onChange={(e) => setPersonTarget(e.target.value as "passenger" | "booker")}
+                        className="h-10 bg-white border rounded-none px-2 text-sm outline-none"
+                        style={lightInputStyle}
+                      >
+                        <option value="passenger">Send to {selectedPerson.name}</option>
+                        <option value="booker">Send to me instead</option>
+                      </select>
+                    </div>
+                    <p className="text-xs mt-3" style={{ color: `${NAVY}99` }}>
+                      {!personSms && !personEmailOn
+                        ? "Confirmations are off. Nothing is sent when a car is booked."
+                        : personTarget === "booker"
+                          ? "Confirmations for this person come to you, not to them."
+                          : `Confirmations go directly to ${selectedPerson.name}.`}
+                    </p>
+
+                    <div className="mt-6 flex items-center gap-4 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={personSaving}
+                        onClick={savePerson}
+                        className="tracking-[0.2em] uppercase text-xs px-8 py-3.5 text-white transition-opacity hover:opacity-90 disabled:opacity-40 inline-flex items-center gap-3"
+                        style={{ backgroundColor: NAVY }}
+                      >
+                        {personSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                        Save Details
+                      </button>
+                      {personSaved && (
+                        <span className="text-xs" style={{ color: NAVY }}>
+                          Saved.
+                        </span>
+                      )}
+                      {personError && (
+                        <span className="text-xs font-medium text-red-700">{personError}</span>
+                      )}
+                    </div>
+
+                    <div className="mt-8 pt-6 border-t" style={{ borderColor: "rgba(28,44,91,0.12)" }}>
+                      <p
+                        className="text-[11px] tracking-[0.18em] uppercase mb-3"
+                        style={{ color: `${NAVY}99` }}
+                      >
+                        Favourite addresses
+                      </p>
+                      {personAddresses.length > 0 ? (
+                        <ul className="mb-4 space-y-2">
+                          {personAddresses.map((a) => (
+                            <li
+                              key={a.id}
+                              className="flex items-start justify-between gap-3 text-sm"
+                              style={{ color: NAVY }}
+                            >
+                              <span>
+                                <strong>{a.label}</strong>
+                                <span style={{ color: `${NAVY}99` }}> {a.address}</span>
+                              </span>
+                              <button
+                                type="button"
+                                disabled={addrDeletingId === a.id}
+                                onClick={() => deleteAddress(a.id)}
+                                className="shrink-0 underline underline-offset-4 hover:opacity-70 text-[11px] tracking-[0.12em] uppercase text-red-700 disabled:opacity-50"
+                              >
+                                {addrDeletingId === a.id ? "Removing…" : "Remove"}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm mb-4" style={{ color: `${NAVY}99` }}>
+                          None saved yet. Their home address only ever appears on cars they are
+                          travelling in.
+                        </p>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input
+                          placeholder="Name, e.g. Home"
+                          value={personAddrLabel}
+                          onChange={(e) => setPersonAddrLabel(e.target.value)}
+                          maxLength={80}
+                          className={lightInput}
+                          style={lightInputStyle}
+                        />
+                        <input
+                          placeholder="Full address including postcode"
+                          value={personAddrText}
+                          onChange={(e) => setPersonAddrText(e.target.value)}
+                          maxLength={240}
+                          className={lightInput}
+                          style={lightInputStyle}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        disabled={
+                          personSaving || !personAddrLabel.trim() || !personAddrText.trim()
+                        }
+                        onClick={addPersonAddress}
+                        className="mt-3 inline-flex items-center gap-2 border border-dashed px-5 py-2.5 text-xs tracking-[0.15em] uppercase transition-colors hover:bg-[#6CABDD]/10 disabled:opacity-40"
+                        style={{ borderColor: `${NAVY}66`, color: NAVY }}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add Address
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </>
         )}
 

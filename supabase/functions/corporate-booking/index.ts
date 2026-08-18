@@ -108,6 +108,34 @@ const walkStops = (
   return { manifest, peak };
 };
 
+/** Best-effort SMS; a failure never blocks a booking. */
+const trySendSms = async (to: string, message: string) => {
+  const sid = Deno.env.get("TWILIO_ACCOUNT_SID");
+  const authToken = Deno.env.get("TWILIO_AUTH_TOKEN");
+  const from = Deno.env.get("TWILIO_FROM");
+  if (!sid || !authToken || !from || !to) return;
+  try {
+    const params = new URLSearchParams({ To: to, Body: message });
+    params.append(from.startsWith("MG") ? "MessagingServiceSid" : "From", from);
+    const res = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${btoa(`${sid}:${authToken}`)}`,
+        },
+        body: params.toString(),
+      }
+    );
+    if (!res.ok) console.error("Confirmation SMS failed:", res.status, await res.text());
+  } catch (err) {
+    console.error("Confirmation SMS failed:", err);
+  }
+};
+
+const stopsFallback = (j: { stops: Stop[] }) => j.stops[0]?.address ?? "";
+
 /** Human route line for the chauffeur and the ops team. */
 const describeRoute = (stops: Stop[]) =>
   stops
@@ -164,7 +192,7 @@ serve(async (req) => {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("status, corporate, full_name, email, phone")
+      .select("status, corporate, corporate_groups, full_name, email, phone")
       .eq("id", userData.user.id)
       .maybeSingle();
     if (!profile || profile.status !== "active") {
@@ -174,6 +202,23 @@ serve(async (req) => {
       return json(403, { success: false, error: "No corporate desk access" });
     }
     const corporate = profile.corporate;
+    // Some assistants are limited to certain groups (for example executives
+    // only). Null means the whole desk.
+    const groupScope: string[] | null = Array.isArray(profile.corporate_groups)
+      ? (profile.corporate_groups as string[])
+      : null;
+
+    /** Passengers this caller is allowed to see and book for. */
+    const scopedPassengers = async (columns: string) => {
+      let q = supabase
+        .from("corporate_passengers")
+        .select(columns)
+        .eq("corporate", corporate)
+        .eq("active", true);
+      if (groupScope && groupScope.length > 0) q = q.in("grp", groupScope);
+      const { data } = await q;
+      return (data ?? []) as unknown as Record<string, unknown>[];
+    };
 
     const body = await req.json();
     const action = typeof body.action === "string" ? body.action : "submit";
@@ -192,13 +237,10 @@ serve(async (req) => {
         return json(400, { success: false, error: "Please enter the address" });
       }
       if (passengerId) {
-        const { data: p } = await supabase
-          .from("corporate_passengers")
-          .select("id")
-          .eq("id", passengerId)
-          .eq("corporate", corporate)
-          .maybeSingle();
-        if (!p) return json(400, { success: false, error: "Unknown passenger" });
+        const visible = await scopedPassengers("id");
+        if (!visible.some((r) => r.id === passengerId)) {
+          return json(400, { success: false, error: "Unknown passenger" });
+        }
       }
       const { data: row, error: addError } = await supabase
         .from("corporate_addresses")
@@ -213,6 +255,48 @@ serve(async (req) => {
         .single();
       if (addError) throw addError;
       return json(200, { success: true, address: row });
+    }
+
+    if (action === "passenger_update") {
+      const id = typeof body.id === "string" && body.id ? body.id : "";
+      const visible = await scopedPassengers("id");
+      if (!id || !visible.some((r) => r.id === id)) {
+        return json(400, { success: false, error: "Unknown passenger" });
+      }
+      const phone = typeof body.phone === "string" ? body.phone.replace(/[\s\-()]/g, "") : "";
+      const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      if (phone && !/^\+[1-9]\d{7,14}$/.test(phone)) {
+        return json(400, {
+          success: false,
+          error: "Enter the mobile in international format, for example +447700900123",
+        });
+      }
+      if (email && (!email.includes("@") || email.length > 255)) {
+        return json(400, { success: false, error: "Enter a valid email address" });
+      }
+      const notifyTarget = body.notifyTarget === "booker" ? "booker" : "passenger";
+      const notifySms = body.notifySms === true;
+      const notifyEmail = body.notifyEmail === true;
+      // Confirmations to the passenger need somewhere to send them
+      if (notifyTarget === "passenger" && notifySms && !phone) {
+        return json(400, { success: false, error: "Add a mobile number to send confirmations by SMS" });
+      }
+      if (notifyTarget === "passenger" && notifyEmail && !email) {
+        return json(400, { success: false, error: "Add an email address to send confirmations by email" });
+      }
+      const { error: updError } = await supabase
+        .from("corporate_passengers")
+        .update({
+          phone,
+          email,
+          notify_sms: notifySms,
+          notify_email: notifyEmail,
+          notify_target: notifyTarget,
+        })
+        .eq("id", id)
+        .eq("corporate", corporate);
+      if (updError) throw updError;
+      return json(200, { success: true });
     }
 
     if (action === "address_delete") {
@@ -246,9 +330,23 @@ serve(async (req) => {
         .lt("collection_at", dayEnd)
         .order("collection_at");
       if (schedError) throw schedError;
-      const active = (rows ?? []).filter(
+      let active = (rows ?? []).filter(
         (r) => r.status !== "Failed" && r.status !== "Cancelled"
       );
+
+      // A limited assistant sees only journeys made up of their own people
+      if (groupScope && groupScope.length > 0) {
+        const visible = new Set(
+          (await scopedPassengers("name")).map((r) => r.name as string)
+        );
+        active = active.filter((r) => {
+          const names = String(r.name ?? "")
+            .split(",")
+            .map((n) => n.trim())
+            .filter(Boolean);
+          return names.length > 0 && names.every((n) => visible.has(n));
+        });
+      }
 
       const live: Record<string, unknown> = {};
       const refs = active.map((r) => r.reference as string).filter(Boolean);
@@ -349,12 +447,8 @@ serve(async (req) => {
     }
 
     // Passenger names must come from this desk's approved list
-    const { data: allowedRows } = await supabase
-      .from("corporate_passengers")
-      .select("name")
-      .eq("corporate", corporate)
-      .eq("active", true);
-    const allowedNames = new Set((allowedRows ?? []).map((r: { name: string }) => r.name));
+    const allowedRows = await scopedPassengers("name");
+    const allowedNames = new Set(allowedRows.map((r) => r.name as string));
 
     // Each car becomes an ordered stop list, whether the desk sent the
     // multi-stop shape or the older single-leg one
@@ -725,6 +819,85 @@ serve(async (req) => {
       }
     } catch (emailErr) {
       console.error("Ops email failed:", emailErr);
+    }
+
+    // --- Passenger confirmations, per their own preferences ---
+    if (confirmedReferences.length > 0) {
+      try {
+        const contactRows = await scopedPassengers(
+          "name, phone, email, notify_sms, notify_email, notify_target"
+        );
+        const contacts = new Map(contactRows.map((r) => [r.name as string, r]));
+
+        for (const [i, journey] of journeys.entries()) {
+          const car = cars[i];
+          if (!confirmedReferences.includes(dispatchBookings[i].Reference)) continue;
+          const when = `${day}-${monthName}-${year} at ${car.time}`;
+          // An amendment must not read like a brand new car
+          const lead = amendReference ? "Updated booking" : "Car confirmed";
+
+          for (const name of journey.manifest) {
+            const c = contacts.get(name);
+            if (!c) continue;
+            if (c.notify_sms !== true && c.notify_email !== true) continue;
+
+            // Where this passenger gets on and off
+            const boarding = journey.stops.find(
+              (s) => s.type === "pickup" && s.passengers.includes(name)
+            );
+            const setDown = journey.stops.find(
+              (s) =>
+                s.type === "dropoff" &&
+                (s.passengers.length === 0 || s.passengers.includes(name))
+            );
+            const toBooker = c.notify_target === "booker";
+            const line =
+              `${name}: car on ${when} from ${boarding?.address ?? stopsFallback(journey)}` +
+              `${setDown ? ` to ${setDown.address}` : ""}. ${car.vehicle}.`;
+
+            const smsTo = toBooker ? bookerPhone : ((c.phone as string) || "");
+            const emailTo = toBooker ? bookerEmail : ((c.email as string) || "");
+
+            if (c.notify_sms === true && smsTo) {
+              await trySendSms(
+                smsTo,
+                `APEXIA VIP - ${lead}. ${line} Booked by ${bookerName}. Any changes, contact your travel desk.`
+              );
+            }
+            if (c.notify_email === true && emailTo) {
+              await fetch("https://api.resend.com/emails", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${RESEND_API_KEY}`,
+                },
+                body: JSON.stringify({
+                  from: "Apexia VIP <info@apexiavip.com>",
+                  to: [emailTo],
+                  subject: `${lead}: ${when}`,
+                  html: `
+                    <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 520px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
+                      <p style="color: #b89b5e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3em;">Apexia VIP</p>
+                      <h1 style="font-size: 20px; font-weight: 300; letter-spacing: 0.08em;">${amendReference ? "Your booking has been updated" : "Your car is confirmed"}</h1>
+                      <p style="font-size: 14px; color: #8a8070; line-height: 1.8;">
+                        <strong style="color: #e0d5c4;">${sanitize(name)}</strong><br/>
+                        ${sanitize(when)}<br/>
+                        From ${sanitize(boarding?.address ?? "")}${setDown ? ` to ${sanitize(setDown.address)}` : ""}<br/>
+                        Vehicle: ${sanitize(car.vehicle)}<br/>
+                        Booked by ${sanitize(bookerName)}
+                      </p>
+                      <p style="font-size: 11px; color: #8a8070;">Any changes, please contact your travel desk. All journeys are handled with complete discretion.</p>
+                    </div>
+                  `,
+                }),
+              });
+            }
+          }
+        }
+      } catch (notifyErr) {
+        // Confirmations must never fail a booking that is already placed
+        console.error("Passenger confirmations failed:", notifyErr);
+      }
     }
 
     if (confirmedReferences.length === 0) {

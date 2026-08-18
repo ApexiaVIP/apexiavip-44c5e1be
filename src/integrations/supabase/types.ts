@@ -135,27 +135,42 @@ export type Database = {
           active: boolean
           corporate: string
           created_at: string
+          email: string
           grp: string
           id: string
           name: string
+          notify_email: boolean
+          notify_sms: boolean
+          notify_target: string
+          phone: string
           sort: number
         }
         Insert: {
           active?: boolean
           corporate: string
           created_at?: string
+          email?: string
           grp: string
           id?: string
           name: string
+          notify_email?: boolean
+          notify_sms?: boolean
+          notify_target?: string
+          phone?: string
           sort?: number
         }
         Update: {
           active?: boolean
           corporate?: string
           created_at?: string
+          email?: string
           grp?: string
           id?: string
           name?: string
+          notify_email?: boolean
+          notify_sms?: boolean
+          notify_target?: string
+          phone?: string
           sort?: number
         }
         Relationships: []
@@ -393,6 +408,7 @@ export type Database = {
           address_line2: string
           avatar_url: string
           corporate: string | null
+          corporate_groups: string[] | null
           country: string
           created_at: string
           email: string
@@ -411,6 +427,7 @@ export type Database = {
           address_line2?: string
           avatar_url?: string
           corporate?: string | null
+          corporate_groups?: string[] | null
           country?: string
           created_at?: string
           email?: string
@@ -429,6 +446,7 @@ export type Database = {
           address_line2?: string
           avatar_url?: string
           corporate?: string | null
+          corporate_groups?: string[] | null
           country?: string
           created_at?: string
           email?: string

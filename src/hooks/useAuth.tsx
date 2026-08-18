@@ -26,6 +26,8 @@ interface Profile {
   primary_member_id: string | null;
   /** Corporate travel desk this member belongs to (e.g. "mcfc"), if any */
   corporate: string | null;
+  /** Passenger groups this user may see; null means the whole desk */
+  corporate_groups: string[] | null;
 }
 
 interface AuthContextValue {
