@@ -1,6 +1,70 @@
 import { sendLovableEmail } from 'npm:@lovable.dev/email-js'
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
+type QueueMessage = {
+  msg_id: number
+  message: Record<string, unknown>
+  read_ct: number
+  enqueued_at?: string
+}
+
+type EmailSendLog = {
+  message_id?: string | null
+  template_name?: string | null
+  recipient_email?: string | null
+  status?: string | null
+  error_message?: string | null
+}
+
+type EmailSendState = {
+  retry_after_until?: string | null
+  batch_size?: number | null
+  send_delay_ms?: number | null
+  auth_email_ttl_minutes?: number | null
+  transactional_email_ttl_minutes?: number | null
+}
+
+type Database = {
+  public: {
+    Tables: {
+      email_send_log: {
+        Row: EmailSendLog
+        Insert: EmailSendLog
+        Update: Partial<EmailSendLog>
+      }
+      email_send_state: {
+        Row: EmailSendState
+      }
+    }
+    Functions: {
+      move_to_dlq: {
+        Args: {
+          source_queue: string
+          dlq_name: string
+          message_id: number
+          payload: Record<string, unknown>
+        }
+        Returns: undefined
+      }
+      read_email_batch: {
+        Args: {
+          queue_name: string
+          batch_size: number
+          vt: number
+        }
+        Returns: QueueMessage[]
+      }
+      delete_email: {
+        Args: {
+          queue_name: string
+          message_id: number
+        }
+        Returns: undefined
+      }
+    }
+  }
+}
+
 const MAX_RETRIES = 5
 const DEFAULT_BATCH_SIZE = 10
 const DEFAULT_SEND_DELAY_MS = 200
@@ -54,9 +118,9 @@ function parseJwtClaims(token: string): Record<string, unknown> | null {
 
 // Move a message to the dead letter queue and log the reason.
 async function moveToDlq(
-  supabase: ReturnType<typeof createClient>,
+  supabase: ReturnType<typeof createClient<Database>>,
   queue: string,
-  msg: { msg_id: number; message: Record<string, unknown> },
+  msg: QueueMessage,
   reason: string
 ): Promise<void> {
   const payload = msg.message
@@ -111,7 +175,7 @@ Deno.serve(async (req) => {
     )
   }
 
-  const supabase = createClient(supabaseUrl, supabaseServiceKey)
+  const supabase = createClient<Database>(supabaseUrl, supabaseServiceKey)
 
   // 1. Check rate-limit cooldown and read queue config
   const { data: state } = await supabase
