@@ -1,40 +1,105 @@
 import { sendLovableEmail } from 'npm:@lovable.dev/email-js'
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
+type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
 type QueueMessage = {
   msg_id: number
-  message: Record<string, unknown>
+  message: Json
   read_ct: number
-  enqueued_at?: string
 }
 
-type EmailSendLog = {
-  message_id?: string | null
-  template_name?: string | null
-  recipient_email?: string | null
-  status?: string | null
-  error_message?: string | null
-}
-
-type EmailSendState = {
-  retry_after_until?: string | null
-  batch_size?: number | null
-  send_delay_ms?: number | null
-  auth_email_ttl_minutes?: number | null
-  transactional_email_ttl_minutes?: number | null
+type EmailPayload = {
+  message_id?: string
+  label?: string
+  to?: string
+  from?: string
+  sender_domain?: string
+  subject?: string
+  html?: string
+  text?: string
+  purpose?: string
+  idempotency_key?: string
+  unsubscribe_token?: string
+  run_id?: string
+  queued_at?: string
 }
 
 type Database = {
   public: {
     Tables: {
       email_send_log: {
-        Row: EmailSendLog
-        Insert: EmailSendLog
-        Update: Partial<EmailSendLog>
+        Row: {
+          id: string
+          created_at: string
+          message_id: string | null
+          template_name: string
+          recipient_email: string
+          status: string
+          error_message: string | null
+          metadata: Json | null
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          message_id?: string | null
+          template_name: string
+          recipient_email: string
+          status: string
+          error_message?: string | null
+          metadata?: Json | null
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          message_id?: string | null
+          template_name?: string
+          recipient_email?: string
+          status?: string
+          error_message?: string | null
+          metadata?: Json | null
+        }
+        Relationships: []
       }
       email_send_state: {
-        Row: EmailSendState
+        Row: {
+          id: number
+          retry_after_until: string | null
+          batch_size: number
+          send_delay_ms: number
+          auth_email_ttl_minutes: number
+          transactional_email_ttl_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          retry_after_until?: string | null
+          batch_size?: number
+          send_delay_ms?: number
+          auth_email_ttl_minutes?: number
+          transactional_email_ttl_minutes?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          retry_after_until?: string | null
+          batch_size?: number
+          send_delay_ms?: number
+          auth_email_ttl_minutes?: number
+          transactional_email_ttl_minutes?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
+    }
+    Views: {
+      [_ in never]: never
     }
     Functions: {
       move_to_dlq: {
@@ -42,9 +107,9 @@ type Database = {
           source_queue: string
           dlq_name: string
           message_id: number
-          payload: Record<string, unknown>
+          payload: Json
         }
-        Returns: undefined
+        Returns: number
       }
       read_email_batch: {
         Args: {
@@ -59,8 +124,14 @@ type Database = {
           queue_name: string
           message_id: number
         }
-        Returns: undefined
+        Returns: boolean
       }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
     }
   }
 }
