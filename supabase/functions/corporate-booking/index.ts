@@ -776,8 +776,8 @@ serve(async (req) => {
         BookingNotes: [
           anyGrey ? "GREY TARMAC DROP OFF (front entrance)." : "",
           asDirected ? `AS DIRECTED: car at disposal for ${asDirectedHours} hours.` : "",
+          `VEHICLE: ${car.vehicle.toUpperCase()}.`,
           `${deskName} Travel Desk request (car ${i + 1} of ${cars.length}), booked by ${bookerName}.`,
-          `Vehicle: ${car.vehicle}.`,
           `Passengers: ${labelled.join(", ")}.`,
           `Route: ${describeRoute(stops, sizes)}.`,
           car.notes?.trim() ? `Notes: ${car.notes.trim()}` : "",

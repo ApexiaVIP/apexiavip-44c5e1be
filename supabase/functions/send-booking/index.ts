@@ -309,10 +309,12 @@ serve(async (req) => {
       BookingClass: bookingClass,
       NumSuitcases: bags ?? 0,
       BookedBy: "Website",
+      // Booking class only distinguishes Executive from VIP, so the model
+      // leads the notes: it is the one place the dispatcher sees which car
       BookingNotes:
         journeyType === "hourly"
-          ? `Vehicle: ${vehicle}. As directed hire: ${asDirectedHours} hours.`
-          : `Vehicle: ${vehicle}`,
+          ? `VEHICLE: ${vehicle.toUpperCase()}. As directed hire: ${asDirectedHours} hours.`
+          : `VEHICLE: ${vehicle.toUpperCase()}`,
       AsDirected: journeyType === "hourly" ? "T" : "F",
       ...(journeyType === "hourly"
         ? { AsDirectedTime: asDirectedHours! * 60, AsDirectedMileage: 0 }
