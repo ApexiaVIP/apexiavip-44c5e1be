@@ -92,6 +92,84 @@ export type Database = {
         }
         Relationships: []
       }
+      bookings_backup_20260818: {
+        Row: {
+          as_directed_hours: number | null
+          assigned_booking_id: number | null
+          assigned_reference: string | null
+          bags: number | null
+          collection_at: string | null
+          corporate: string | null
+          created_at: string | null
+          dropoff: Json | null
+          email: string | null
+          id: string | null
+          journey_type: string | null
+          name: string | null
+          passengers: number | null
+          phone: string | null
+          pickup: Json | null
+          reference: string | null
+          status: string | null
+          status_checked_at: string | null
+          stops: Json | null
+          travel_date: string | null
+          user_id: string | null
+          vehicle: string | null
+          via: Json | null
+        }
+        Insert: {
+          as_directed_hours?: number | null
+          assigned_booking_id?: number | null
+          assigned_reference?: string | null
+          bags?: number | null
+          collection_at?: string | null
+          corporate?: string | null
+          created_at?: string | null
+          dropoff?: Json | null
+          email?: string | null
+          id?: string | null
+          journey_type?: string | null
+          name?: string | null
+          passengers?: number | null
+          phone?: string | null
+          pickup?: Json | null
+          reference?: string | null
+          status?: string | null
+          status_checked_at?: string | null
+          stops?: Json | null
+          travel_date?: string | null
+          user_id?: string | null
+          vehicle?: string | null
+          via?: Json | null
+        }
+        Update: {
+          as_directed_hours?: number | null
+          assigned_booking_id?: number | null
+          assigned_reference?: string | null
+          bags?: number | null
+          collection_at?: string | null
+          corporate?: string | null
+          created_at?: string | null
+          dropoff?: Json | null
+          email?: string | null
+          id?: string | null
+          journey_type?: string | null
+          name?: string | null
+          passengers?: number | null
+          phone?: string | null
+          pickup?: Json | null
+          reference?: string | null
+          status?: string | null
+          status_checked_at?: string | null
+          stops?: Json | null
+          travel_date?: string | null
+          user_id?: string | null
+          vehicle?: string | null
+          via?: Json | null
+        }
+        Relationships: []
+      }
       corporate_addresses: {
         Row: {
           address: string
