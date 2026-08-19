@@ -287,10 +287,17 @@ const BookingForm = () => {
 
       setSubmitted(true);
       toast({
-        title: editing ? "Booking Updated" : "Enquiry Sent",
-        description: editing
-          ? "Your changes have been sent to our team."
-          : "We will be in touch shortly.",
+        title: result?.handedToOps
+          ? "Changes sent to our team"
+          : editing
+            ? "Booking Updated"
+            : "Enquiry Sent",
+        description:
+          result?.handedToOps
+            ? result.message
+            : editing
+              ? "Your changes have been sent to our team."
+              : "We will be in touch shortly.",
       });
     } catch (err) {
       console.error(err);

@@ -457,7 +457,13 @@ serve(async (req) => {
       body: JSON.stringify({
         from: "Apexia VIP <info@apexiavip.com>",
         to: ["info@apexiavip.com"],
-        subject: `${amendReference ? "Booking AMENDED" : "Booking Enquiry"}: ${safeName} (${safeVehicle})`,
+        subject: `${
+          amendReference
+            ? dispatchFailureMessage
+              ? "ACTION NEEDED - Booking AMENDED (APPLY BY HAND)"
+              : "Booking AMENDED"
+            : "Booking Enquiry"
+        }: ${safeName} (${safeVehicle})`,
         html: htmlBody,
         reply_to: email.trim(),
       }),
@@ -467,6 +473,20 @@ serve(async (req) => {
 
     if (!res.ok) {
       throw new Error(`Resend API error [${res.status}]: ${JSON.stringify(data)}`);
+    }
+
+    if (dispatchFailureMessage && amendReference) {
+      // The change cannot be applied automatically, but the ops email above
+      // carries the new details, so hand it over rather than dead-ending
+      return new Response(
+        JSON.stringify({
+          success: true,
+          handedToOps: true,
+          message:
+            "Your changes have been sent to our team, who will confirm them shortly.",
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     if (dispatchFailureMessage) {
