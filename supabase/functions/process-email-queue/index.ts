@@ -409,9 +409,9 @@ Deno.serve(async (req) => {
 
         // Log success
         await supabase.from('email_send_log').insert({
-          message_id: payload.message_id,
+          message_id: payload.message_id ?? null,
           template_name: payload.label || queue,
-          recipient_email: payload.to,
+          recipient_email: payload.to || 'unknown',
           status: 'sent',
         })
 
