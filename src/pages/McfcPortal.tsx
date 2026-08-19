@@ -583,6 +583,14 @@ const McfcPortal = () => {
       month: "long",
       year: "numeric",
     });
+  const fixturesInRange = fixtures
+    .filter((f) => {
+      const d = ukDateKey(f.kickoff_utc);
+      return d >= scheduleDate && d <= scheduleDateTo;
+    })
+    .sort((a, b) => a.kickoff_utc.localeCompare(b.kickoff_utc));
+  const fixtureOnDay = (d: string) =>
+    fixturesInRange.find((f) => ukDateKey(f.kickoff_utc) === d) ?? null;
   const scheduleRangeLabel =
     scheduleDate === scheduleDateTo
       ? longDay(scheduleDate)
@@ -830,11 +838,13 @@ const McfcPortal = () => {
   // The printed schedule names the fixture unless the desk has typed its own
   useEffect(() => {
     if (scheduleTitleTouched) return;
-    const f = fixtures.find((fx) => {
+    const inRange = fixtures.filter((fx) => {
       const d = ukDateKey(fx.kickoff_utc);
       return d >= scheduleDate && d <= scheduleDateTo;
     });
-    setScheduleTitle(f ? fixtureTitle(f) : "");
+    // With several games in the period the fixtures are listed under the
+    // heading instead, so the sheet is not titled after only one of them
+    setScheduleTitle(inRange.length === 1 ? fixtureTitle(inRange[0]) : "");
   }, [scheduleDate, scheduleDateTo, fixtures, scheduleTitleTouched]);
 
   const loadSchedule = useCallback(async () => {
@@ -2556,6 +2566,18 @@ const McfcPortal = () => {
                     {scheduleRangeLabel}
                     {" - Operated by Apexia VIP"}
                   </p>
+                  {fixturesInRange.length > 1 && (
+                    <ul className="mt-2 space-y-0.5">
+                      {fixturesInRange.map((f) => (
+                        <li key={f.id} className="text-xs" style={{ color: NAVY }}>
+                          <strong>{ukDateLong(f.kickoff_utc)}</strong>
+                          {": "}
+                          {f.home_team} v {f.away_team}, KO {ukTime(f.kickoff_utc)},{" "}
+                          {f.venue} ({f.is_home ? "Home" : "Away"})
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
               {scheduleLoading ? (
@@ -2590,8 +2612,10 @@ const McfcPortal = () => {
                       {scheduleRows.map((r, idx) => {
                         const grey = r.dropoff?.grey_tarmac === true;
                         const day = r.collection_at ? ukDateKey(r.collection_at) : "";
+                        // Label the day whenever the sheet covers more than one,
+                        // so every car is clearly under its own date
                         const firstOfDay =
-                          scheduleDays.length > 1 &&
+                          (scheduleDays.length > 1 || scheduleDate !== scheduleDateTo) &&
                           scheduleRows.findIndex(
                             (x) => (x.collection_at ? ukDateKey(x.collection_at) : "") === day
                           ) === idx;
@@ -2609,6 +2633,14 @@ const McfcPortal = () => {
                                 }}
                               >
                                 {longDay(day)}
+                                {(() => {
+                                  const f = fixtureOnDay(day);
+                                  return f
+                                    ? ` - ${f.home_team} v ${f.away_team}, KO ${ukTime(
+                                        f.kickoff_utc
+                                      )} (${f.is_home ? "Home" : "Away"})`
+                                    : "";
+                                })()}
                               </td>
                             </tr>
                           )}
