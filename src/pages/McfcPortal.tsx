@@ -51,6 +51,8 @@ interface Stop {
   address: string;
   /** Who boards, or who alights; empty on a drop off means everyone aboard */
   passengers: string[];
+  /** How many people an entry stands for, where it represents a party */
+  counts?: Record<string, number>;
   /** Match-day front-entrance drop-off */
   greyTarmac: boolean;
 }
@@ -78,6 +80,16 @@ const manifestOf = (car: CarRequest) => {
   return seen;
 };
 
+/** How many seats an entry takes at the stop that collected it. */
+const seatsFor = (car: CarRequest, name: string) => {
+  for (const s of car.stops) {
+    if (s.type === "pickup" && s.passengers.includes(name)) {
+      return Math.max(1, Math.floor(s.counts?.[name] ?? 1));
+    }
+  }
+  return 1;
+};
+
 /** Who is in the car as it arrives at the given stop. */
 const aboardAt = (car: CarRequest, index: number) => {
   let aboard: string[] = [];
@@ -98,12 +110,13 @@ const aboardAt = (car: CarRequest, index: number) => {
 const peakOf = (car: CarRequest) => {
   let aboard: string[] = [];
   let peak = 0;
+  const seats = (list: string[]) => list.reduce((n, p) => n + seatsFor(car, p), 0);
   car.stops.forEach((s) => {
     if (s.type === "pickup") {
       s.passengers.forEach((p) => {
         if (!aboard.includes(p)) aboard.push(p);
       });
-      peak = Math.max(peak, aboard.length);
+      peak = Math.max(peak, seats(aboard));
     } else {
       const leaving = s.passengers.length > 0 ? s.passengers : [...aboard];
       aboard = aboard.filter((p) => !leaving.includes(p));
@@ -154,6 +167,8 @@ interface Passenger {
   id: string;
   name: string;
   grp: string;
+  /** Stands for a party (guests, family) rather than one person */
+  is_group: boolean;
   phone: string;
   email: string;
   notify_sms: boolean;
@@ -339,7 +354,9 @@ const McfcPortal = () => {
   const [newPersonName, setNewPersonName] = useState("");
   const [newPersonGroup, setNewPersonGroup] = useState("");
   const [newPersonError, setNewPersonError] = useState<string | null>(null);
+  const [newPersonGroupEntry, setNewPersonGroupEntry] = useState(false);
   const [addingPerson, setAddingPerson] = useState(false);
+  const [personIsGroup, setPersonIsGroup] = useState(false);
 
   // Address book form
   const [addrLabel, setAddrLabel] = useState("");
@@ -380,7 +397,9 @@ const McfcPortal = () => {
     if (!hasDeskAccess || !mfaVerified) return;
     supabase
       .from("corporate_passengers")
-      .select("id, name, grp, sort, phone, email, notify_sms, notify_email, notify_target")
+      .select(
+        "id, name, grp, sort, phone, email, notify_sms, notify_email, notify_target, is_group"
+      )
       .eq("corporate", DESK)
       .eq("active", true)
       .order("sort")
@@ -409,6 +428,7 @@ const McfcPortal = () => {
                 id: r.id,
                 name: r.name,
                 grp: g,
+                is_group: r.is_group === true,
                 phone: r.phone ?? "",
                 email: r.email ?? "",
                 notify_sms: r.notify_sms === true,
@@ -555,15 +575,19 @@ const McfcPortal = () => {
         const selected = stop.passengers.includes(name);
         if (!selected && stop.type === "pickup") {
           // Never seat more people at once than the vehicle holds
-          const aboard = aboardAt(c, stopIdx).length + stop.passengers.length;
-          if (aboard >= (CAPACITY[c.vehicle] ?? 2)) return c;
+          const used =
+            aboardAt(c, stopIdx).reduce((n, p) => n + seatsFor(c, p), 0) +
+            stop.passengers.reduce((n, p) => n + Math.max(1, stop.counts?.[p] ?? 1), 0);
+          if (used >= (CAPACITY[c.vehicle] ?? 2)) return c;
         }
         const passengers = selected
           ? stop.passengers.filter((p) => p !== name)
           : [...stop.passengers, name];
+        const counts = { ...(stop.counts ?? {}) };
+        if (selected) delete counts[name];
         return {
           ...c,
-          stops: c.stops.map((s, k) => (k === stopIdx ? { ...s, passengers } : s)),
+          stops: c.stops.map((s, k) => (k === stopIdx ? { ...s, passengers, counts } : s)),
         };
       })
     );
@@ -699,6 +723,7 @@ const McfcPortal = () => {
     setPersonName(person.name);
     setPersonPhone(person.phone);
     setPersonEmail(person.email);
+    setPersonIsGroup(person.is_group);
     setPersonSms(person.notify_sms);
     setPersonEmailOn(person.notify_email);
     setPersonTarget(person.notify_target === "booker" ? "booker" : "passenger");
@@ -718,6 +743,7 @@ const McfcPortal = () => {
         action: "passenger_update",
         id: personId,
         name: personName.trim(),
+        isGroup: personIsGroup,
         phone: personPhone.trim(),
         email: personEmail.trim(),
         notifySms: personSms,
@@ -744,8 +770,10 @@ const McfcPortal = () => {
         action: "passenger_add",
         name: newPersonName.trim(),
         grp,
+        isGroup: newPersonGroupEntry,
       });
       setNewPersonName("");
+      setNewPersonGroupEntry(false);
       loadPassengers();
       if (typeof data.id === "string") setPersonId(data.id);
     } catch (err) {
@@ -924,6 +952,7 @@ const McfcPortal = () => {
           type: s?.type === "dropoff" ? "dropoff" : "pickup",
           address: s?.address ?? "",
           passengers: Array.isArray(s?.passengers) ? s.passengers : [],
+          counts: s?.counts ?? {},
           greyTarmac: s?.greyTarmac === true,
         }))
       : [
@@ -1010,6 +1039,7 @@ const McfcPortal = () => {
               type: s.type,
               address: s.address.trim(),
               passengers: s.passengers,
+              counts: s.counts ?? {},
               greyTarmac: s.greyTarmac && greyAvailableForStop(s),
             }));
             const lastDrop = [...stops].reverse().find((s) => s.type === "dropoff");
@@ -1578,23 +1608,62 @@ const McfcPortal = () => {
                           {isPickup ? "Picking up" : "Dropping off"}
                         </p>
                         <div className="flex flex-wrap items-center gap-2">
-                          {stop.passengers.map((p) => (
-                            <span
-                              key={p}
-                              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm text-white"
-                              style={{ backgroundColor: NAVY }}
-                            >
-                              {p}
-                              <button
-                                type="button"
-                                aria-label={`Remove ${p}`}
-                                onClick={() => toggleStopPassenger(i, s, p)}
-                                className="text-white/60 hover:text-white"
+                          {stop.passengers.map((p) => {
+                            const party = passengerOptions.find((o) => o.name === p)?.is_group;
+                            const seatsLeft =
+                              capacity -
+                              aboardAt(car, s).reduce((n, x) => n + seatsFor(car, x), 0) -
+                              stop.passengers
+                                .filter((x) => x !== p)
+                                .reduce((n, x) => n + Math.max(1, stop.counts?.[x] ?? 1), 0);
+                            return (
+                              <span
+                                key={p}
+                                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm text-white"
+                                style={{ backgroundColor: NAVY }}
                               >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </span>
-                          ))}
+                                {p}
+                                {party && isPickup && (
+                                  <select
+                                    value={stop.counts?.[p] ?? 1}
+                                    aria-label={`How many for ${p}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) =>
+                                      updateStop(i, s, {
+                                        counts: {
+                                          ...(stop.counts ?? {}),
+                                          [p]: Number(e.target.value),
+                                        },
+                                      })
+                                    }
+                                    className="bg-white text-[#1C2C5B] text-xs px-1 py-0.5 outline-none"
+                                  >
+                                    {Array.from(
+                                      { length: Math.max(1, seatsLeft) },
+                                      (_, n) => n + 1
+                                    ).map((n) => (
+                                      <option key={n} value={n}>
+                                        {n}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                                {party && !isPickup && (stop.counts?.[p] ?? 0) > 1 && (
+                                  <span className="text-xs text-white/80">
+                                    x{stop.counts?.[p]}
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${p}`}
+                                  onClick={() => toggleStopPassenger(i, s, p)}
+                                  className="text-white/60 hover:text-white"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            );
+                          })}
                           {!isPickup && stop.passengers.length === 0 && (
                             <span className="text-sm" style={{ color: `${NAVY}99` }}>
                               Everyone on board
@@ -1668,6 +1737,10 @@ const McfcPortal = () => {
                                             }
                                           >
                                             {name}
+                                            {passengerOptions.find((o) => o.name === name)
+                                              ?.is_group
+                                              ? " (party)"
+                                              : ""}
                                           </button>
                                         );
                                       })}
@@ -2224,6 +2297,18 @@ const McfcPortal = () => {
                       ))}
                     </select>
                   )}
+                  <label
+                    className="flex items-center gap-2 text-xs mt-2 cursor-pointer"
+                    style={{ color: NAVY }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={newPersonGroupEntry}
+                      onChange={(e) => setNewPersonGroupEntry(e.target.checked)}
+                      className="w-3.5 h-3.5 accent-[#1C2C5B]"
+                    />
+                    A party, such as guests or family
+                  </label>
                   <button
                     type="button"
                     disabled={addingPerson || !newPersonName.trim()}
@@ -2263,6 +2348,18 @@ const McfcPortal = () => {
                         <p className="text-xs mt-1.5" style={{ color: `${NAVY}80` }}>
                           {selectedPerson.grp}. Renaming does not change journeys already booked.
                         </p>
+                        <label
+                          className="flex items-center gap-2 text-xs mt-2 cursor-pointer"
+                          style={{ color: NAVY }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={personIsGroup}
+                            onChange={(e) => setPersonIsGroup(e.target.checked)}
+                            className="w-3.5 h-3.5 accent-[#1C2C5B]"
+                          />
+                          A party: ask how many are travelling when booking
+                        </label>
                       </div>
                       <button
                         type="button"

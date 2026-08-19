@@ -73,6 +73,8 @@ interface Stop {
   address: string;
   /** Who boards, or who alights; empty on a drop off means everyone aboard */
   passengers: string[];
+  /** How many people an entry stands for, where it represents a party */
+  counts?: Record<string, number>;
   /** Match-day front-entrance drop-off */
   greyTarmac: boolean;
 }
@@ -97,9 +99,12 @@ const walkStops = (
   stops: Stop[],
   capacity: number,
   openEnded = false
-): { error: string } | { manifest: string[]; peak: number } => {
+): { error: string } | { manifest: string[]; peak: number; sizes: Map<string, number> } => {
   const aboard: string[] = [];
   const manifest: string[] = [];
+  // An entry such as the chairman's guests stands for a party of several
+  const sizes = new Map<string, number>();
+  const seatsAboard = () => aboard.reduce((n, p) => n + (sizes.get(p) ?? 1), 0);
   let peak = 0;
 
   for (const [idx, stop] of stops.entries()) {
@@ -110,10 +115,15 @@ const walkStops = (
       }
       for (const p of stop.passengers) {
         if (manifest.includes(p)) return { error: `${at}: ${p} is picked up twice` };
+        const size = Math.floor(Number(stop.counts?.[p] ?? 1));
+        if (!Number.isFinite(size) || size < 1 || size > capacity) {
+          return { error: `${at}: ${p} needs a number between 1 and ${capacity}` };
+        }
+        sizes.set(p, size);
         aboard.push(p);
         manifest.push(p);
       }
-      peak = Math.max(peak, aboard.length);
+      peak = Math.max(peak, seatsAboard());
       if (peak > capacity) {
         return { error: `${at}: more passengers than the vehicle seats (${capacity})` };
       }
@@ -136,7 +146,7 @@ const walkStops = (
       error: `${aboard.join(", ")} ${aboard.length === 1 ? "is" : "are"} not dropped off anywhere`,
     };
   }
-  return { manifest, peak };
+  return { manifest, peak, sizes };
 };
 
 /** Best-effort SMS; a failure never blocks a booking. */
@@ -167,12 +177,18 @@ const trySendSms = async (to: string, message: string) => {
 
 const stopsFallback = (j: { stops: Stop[] }) => j.stops[0]?.address ?? "";
 
+/** "KAM Guests x3" where an entry stands for a party. */
+const withCount = (name: string, sizes: Map<string, number>) => {
+  const n = sizes.get(name) ?? 1;
+  return n > 1 ? `${name} x${n}` : name;
+};
+
 /** Human route line for the chauffeur and the ops team. */
-const describeRoute = (stops: Stop[]) =>
+const describeRoute = (stops: Stop[], sizes: Map<string, number>) =>
   stops
     .map((s, idx) => {
       const who = s.passengers.length > 0
-        ? s.passengers.join(", ")
+        ? s.passengers.map((n) => withCount(n, sizes)).join(", ")
         : s.type === "dropoff"
           ? "all remaining"
           : "";
@@ -312,7 +328,7 @@ serve(async (req) => {
         // Someone previously removed comes back rather than duplicating
         const { error: reviveError } = await supabase
           .from("corporate_passengers")
-          .update({ active: true, grp })
+          .update({ active: true, grp, is_group: body.isGroup === true })
           .eq("id", existing.id);
         if (reviveError) throw reviveError;
         return json(200, { success: true, id: existing.id, restored: true });
@@ -333,6 +349,7 @@ serve(async (req) => {
           grp,
           sort: ((last?.sort as number) ?? 0) + 1,
           active: true,
+          is_group: body.isGroup === true,
         })
         .select("id")
         .single();
@@ -406,6 +423,7 @@ serve(async (req) => {
         .update({
           ...(newName ? { name: newName } : {}),
           ...(newGrp ? { grp: newGrp } : {}),
+          ...(body.isGroup != null ? { is_group: body.isGroup === true } : {}),
           phone,
           email,
           notify_sms: notifySms,
@@ -585,6 +603,7 @@ serve(async (req) => {
       stops: Stop[];
       manifest: string[];
       peak: number;
+      sizes: Map<string, number>;
       asDirected: boolean;
       asDirectedHours: number;
     }[] = [];
@@ -651,10 +670,18 @@ serve(async (req) => {
         if (r.greyTarmac != null && typeof r.greyTarmac !== "boolean") {
           return json(400, { success: false, error: `${at}: invalid grey tarmac flag` });
         }
+        const counts: Record<string, number> = {};
+        if (r.counts && typeof r.counts === "object") {
+          for (const [name, n] of Object.entries(r.counts as Record<string, unknown>)) {
+            const size = Math.floor(Number(n));
+            if (Number.isFinite(size) && size > 0) counts[name] = size;
+          }
+        }
         stops.push({
           type: r.type === "dropoff" ? "dropoff" : "pickup",
           address,
           passengers: passengers as string[],
+          counts,
           greyTarmac: r.greyTarmac === true,
         });
       }
@@ -680,6 +707,7 @@ serve(async (req) => {
         stops,
         manifest: walked.manifest,
         peak: walked.peak,
+        sizes: walked.sizes,
         asDirected,
         asDirectedHours,
       });
@@ -726,7 +754,8 @@ serve(async (req) => {
     });
 
     const dispatchBookings = cars.map((car, i) => {
-      const { stops, manifest, peak, asDirected, asDirectedHours } = journeys[i];
+      const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journeys[i];
+      const labelled = manifest.map((n) => withCount(n, sizes));
       const reference = amendReference ?? `APEXIA-${deskName}-${requestId}-C${i + 1}`;
       const last = stops[stops.length - 1];
       const endsWithDropoff = last?.type === "dropoff";
@@ -749,8 +778,8 @@ serve(async (req) => {
           asDirected ? `AS DIRECTED: car at disposal for ${asDirectedHours} hours.` : "",
           `${deskName} Travel Desk request (car ${i + 1} of ${cars.length}), booked by ${bookerName}.`,
           `Vehicle: ${car.vehicle}.`,
-          `Passengers: ${manifest.join(", ")}.`,
-          `Route: ${describeRoute(stops)}.`,
+          `Passengers: ${labelled.join(", ")}.`,
+          `Route: ${describeRoute(stops, sizes)}.`,
           car.notes?.trim() ? `Notes: ${car.notes.trim()}` : "",
         ].filter(Boolean).join(" "),
         AsDirected: asDirected ? "T" : "F",
@@ -772,12 +801,12 @@ serve(async (req) => {
 
     // Store each car against the booker so it shows in the portal history
     const carRowValues = cars.map((car, i) => {
-      const { stops, manifest, peak, asDirected, asDirectedHours } = journeys[i];
+      const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journeys[i];
       const last = stops[stops.length - 1];
       const endsWithDropoff = last?.type === "dropoff";
       const viaStops = asDirected && !endsWithDropoff ? stops.slice(1) : stops.slice(1, -1);
       return {
-        name: manifest.join(", "),
+        name: manifest.map((n) => withCount(n, sizes)).join(", "),
         email: bookerEmail,
         phone: bookerPhone,
         travel_date: `${day}-${monthName}-${year} ${car.time}`,
@@ -889,7 +918,7 @@ serve(async (req) => {
 
     // --- One ops summary email for the whole request ---
     const carRows = cars.map((car, i) => {
-      const { stops, manifest, peak } = journeys[i];
+      const { stops, manifest, peak, sizes } = journeys[i];
       const routeHtml = stops
         .map(
           (s, n) =>
@@ -897,7 +926,7 @@ serve(async (req) => {
               s.type === "pickup" ? "Pick up" : "Drop off"
             }</strong> ${sanitize(
               s.passengers.length > 0
-                ? s.passengers.join(", ")
+                ? s.passengers.map((n) => withCount(n, sizes)).join(", ")
                 : s.type === "dropoff"
                   ? "all remaining"
                   : ""
@@ -911,7 +940,7 @@ serve(async (req) => {
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${i + 1}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.time)}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.vehicle)} (${peak} up)</td>
-        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(manifest.join(", "))}</td>
+        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(manifest.map((n) => withCount(n, sizes)).join(", "))}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${routeHtml}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.notes?.trim() || "")}</td>
       </tr>`;
