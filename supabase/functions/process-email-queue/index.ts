@@ -295,11 +295,10 @@ Deno.serve(async (req) => {
     const messageIds = Array.from(
       new Set(
         messages
-          .map((msg) =>
-            msg?.message?.message_id && typeof msg.message.message_id === 'string'
-              ? msg.message.message_id
-              : null
-          )
+          .map((msg) => {
+            const p = getPayload(msg)
+            return p.message_id && typeof p.message_id === 'string' ? p.message_id : null
+          })
           .filter((id): id is string => Boolean(id))
       )
     )
