@@ -216,6 +216,7 @@ export type Database = {
           email: string
           grp: string
           id: string
+          is_group: boolean
           name: string
           notify_email: boolean
           notify_sms: boolean
@@ -230,6 +231,7 @@ export type Database = {
           email?: string
           grp: string
           id?: string
+          is_group?: boolean
           name: string
           notify_email?: boolean
           notify_sms?: boolean
@@ -244,6 +246,7 @@ export type Database = {
           email?: string
           grp?: string
           id?: string
+          is_group?: boolean
           name?: string
           notify_email?: boolean
           notify_sms?: boolean
