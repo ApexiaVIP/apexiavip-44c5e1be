@@ -1,40 +1,105 @@
 import { sendLovableEmail } from 'npm:@lovable.dev/email-js'
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
+type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
 type QueueMessage = {
   msg_id: number
-  message: Record<string, unknown>
+  message: Json
   read_ct: number
-  enqueued_at?: string
 }
 
-type EmailSendLog = {
-  message_id?: string | null
-  template_name?: string | null
-  recipient_email?: string | null
-  status?: string | null
-  error_message?: string | null
-}
-
-type EmailSendState = {
-  retry_after_until?: string | null
-  batch_size?: number | null
-  send_delay_ms?: number | null
-  auth_email_ttl_minutes?: number | null
-  transactional_email_ttl_minutes?: number | null
+type EmailPayload = {
+  message_id?: string
+  label?: string
+  to?: string
+  from?: string
+  sender_domain?: string
+  subject?: string
+  html?: string
+  text?: string
+  purpose?: string
+  idempotency_key?: string
+  unsubscribe_token?: string
+  run_id?: string
+  queued_at?: string
 }
 
 type Database = {
   public: {
     Tables: {
       email_send_log: {
-        Row: EmailSendLog
-        Insert: EmailSendLog
-        Update: Partial<EmailSendLog>
+        Row: {
+          id: string
+          created_at: string
+          message_id: string | null
+          template_name: string
+          recipient_email: string
+          status: string
+          error_message: string | null
+          metadata: Json | null
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          message_id?: string | null
+          template_name: string
+          recipient_email: string
+          status: string
+          error_message?: string | null
+          metadata?: Json | null
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          message_id?: string | null
+          template_name?: string
+          recipient_email?: string
+          status?: string
+          error_message?: string | null
+          metadata?: Json | null
+        }
+        Relationships: []
       }
       email_send_state: {
-        Row: EmailSendState
+        Row: {
+          id: number
+          retry_after_until: string | null
+          batch_size: number
+          send_delay_ms: number
+          auth_email_ttl_minutes: number
+          transactional_email_ttl_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          retry_after_until?: string | null
+          batch_size?: number
+          send_delay_ms?: number
+          auth_email_ttl_minutes?: number
+          transactional_email_ttl_minutes?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          retry_after_until?: string | null
+          batch_size?: number
+          send_delay_ms?: number
+          auth_email_ttl_minutes?: number
+          transactional_email_ttl_minutes?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
+    }
+    Views: {
+      [_ in never]: never
     }
     Functions: {
       move_to_dlq: {
@@ -42,9 +107,9 @@ type Database = {
           source_queue: string
           dlq_name: string
           message_id: number
-          payload: Record<string, unknown>
+          payload: Json
         }
-        Returns: undefined
+        Returns: number
       }
       read_email_batch: {
         Args: {
@@ -59,8 +124,14 @@ type Database = {
           queue_name: string
           message_id: number
         }
-        Returns: undefined
+        Returns: boolean
       }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
     }
   }
 }
@@ -116,6 +187,10 @@ function parseJwtClaims(token: string): Record<string, unknown> | null {
   }
 }
 
+function getPayload(msg: QueueMessage): EmailPayload {
+  return (msg.message ?? {}) as EmailPayload
+}
+
 // Move a message to the dead letter queue and log the reason.
 async function moveToDlq(
   supabase: ReturnType<typeof createClient<Database>>,
@@ -123,11 +198,11 @@ async function moveToDlq(
   msg: QueueMessage,
   reason: string
 ): Promise<void> {
-  const payload = msg.message
+  const payload = getPayload(msg)
   await supabase.from('email_send_log').insert({
-    message_id: payload.message_id,
-    template_name: (payload.label || queue) as string,
-    recipient_email: payload.to,
+    message_id: payload.message_id ?? null,
+    template_name: payload.label || queue,
+    recipient_email: payload.to || 'unknown',
     status: 'dlq',
     error_message: reason,
   })
@@ -135,7 +210,7 @@ async function moveToDlq(
     source_queue: queue,
     dlq_name: `${queue}_dlq`,
     message_id: msg.msg_id,
-    payload,
+    payload: msg.message,
   })
   if (error) {
     console.error('Failed to move message to DLQ', { queue, msg_id: msg.msg_id, reason, error })
@@ -220,11 +295,10 @@ Deno.serve(async (req) => {
     const messageIds = Array.from(
       new Set(
         messages
-          .map((msg) =>
-            msg?.message?.message_id && typeof msg.message.message_id === 'string'
-              ? msg.message.message_id
-              : null
-          )
+          .map((msg) => {
+            const p = getPayload(msg)
+            return p.message_id && typeof p.message_id === 'string' ? p.message_id : null
+          })
           .filter((id): id is string => Boolean(id))
       )
     )
@@ -255,16 +329,15 @@ Deno.serve(async (req) => {
 
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i]
-      const payload = msg.message
+      const payload = getPayload(msg)
       const failedAttempts =
-        payload?.message_id && typeof payload.message_id === 'string'
+        payload.message_id && typeof payload.message_id === 'string'
           ? (failedAttemptsByMessageId.get(payload.message_id) ?? 0)
           : msg.read_ct ?? 0
 
       // Drop expired messages (TTL exceeded).
-      // Prefer payload.queued_at when present; fall back to PGMQ's enqueued_at
-      // which is always set by the queue.
-      const queuedAt = payload.queued_at ?? msg.enqueued_at
+      // Prefer payload.queued_at when present.
+      const queuedAt = payload.queued_at
       if (queuedAt) {
         const ageMs = Date.now() - new Date(queuedAt).getTime()
         const maxAgeMs = ttlMinutes[queue] * 60 * 1000
@@ -316,12 +389,12 @@ Deno.serve(async (req) => {
         await sendLovableEmail(
           {
             run_id: payload.run_id,
-            to: payload.to,
-            from: payload.from,
+            to: payload.to ?? '',
+            from: payload.from ?? '',
             sender_domain: payload.sender_domain,
-            subject: payload.subject,
-            html: payload.html,
-            text: payload.text,
+            subject: payload.subject ?? '',
+            html: payload.html ?? '',
+            text: payload.text ?? '',
             purpose: payload.purpose,
             label: payload.label,
             idempotency_key: payload.idempotency_key,
@@ -336,9 +409,9 @@ Deno.serve(async (req) => {
 
         // Log success
         await supabase.from('email_send_log').insert({
-          message_id: payload.message_id,
+          message_id: payload.message_id ?? null,
           template_name: payload.label || queue,
-          recipient_email: payload.to,
+          recipient_email: payload.to || 'unknown',
           status: 'sent',
         })
 
@@ -363,9 +436,9 @@ Deno.serve(async (req) => {
 
         if (isRateLimited(error)) {
           await supabase.from('email_send_log').insert({
-            message_id: payload.message_id,
+            message_id: payload.message_id ?? null,
             template_name: payload.label || queue,
-            recipient_email: payload.to,
+            recipient_email: payload.to || 'unknown',
             status: 'rate_limited',
             error_message: errorMsg.slice(0, 1000),
           })
@@ -400,13 +473,13 @@ Deno.serve(async (req) => {
 
         // Log non-429 failures to track real retry attempts.
         await supabase.from('email_send_log').insert({
-          message_id: payload.message_id,
+          message_id: payload.message_id ?? null,
           template_name: payload.label || queue,
-          recipient_email: payload.to,
+          recipient_email: payload.to || 'unknown',
           status: 'failed',
           error_message: errorMsg.slice(0, 1000),
         })
-        if (payload?.message_id && typeof payload.message_id === 'string') {
+        if (payload.message_id && typeof payload.message_id === 'string') {
           failedAttemptsByMessageId.set(payload.message_id, failedAttempts + 1)
         }
 
