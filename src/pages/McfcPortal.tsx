@@ -61,6 +61,9 @@ interface CarRequest {
   vehicle: string;
   time: string;
   notes: string;
+  /** Car stays at the passenger's disposal rather than ending somewhere */
+  asDirected: boolean;
+  asDirectedHours: number;
 }
 
 /** Everyone the car carries at some point, in boarding order. */
@@ -113,9 +116,13 @@ const peakOf = (car: CarRequest) => {
 const carIssues = (car: CarRequest): string[] => {
   const issues: string[] = [];
   const capacity = CAPACITY[car.vehicle] ?? 2;
-  if (car.stops.length < 2) issues.push("Add at least a pick up and a drop off.");
+  if (car.stops.length < (car.asDirected ? 1 : 2)) {
+    issues.push(
+      car.asDirected ? "Add where the car collects." : "Add at least a pick up and a drop off."
+    );
+  }
   if (car.stops[0]?.type !== "pickup") issues.push("The first stop must be a pick up.");
-  if (car.stops[car.stops.length - 1]?.type !== "dropoff") {
+  if (!car.asDirected && car.stops[car.stops.length - 1]?.type !== "dropoff") {
     issues.push("The last stop must be a drop off.");
   }
   if (car.stops.some((s) => !s.address.trim())) issues.push("Every stop needs an address.");
@@ -134,8 +141,9 @@ const carIssues = (car: CarRequest): string[] => {
       issues.push(`Stop ${idx + 1}: ${stranded.join(", ")} is not in the car yet.`);
     }
   });
+  // An as-directed car keeps its passengers, so nobody is left behind
   const leftAboard = aboardAt(car, car.stops.length);
-  if (leftAboard.length > 0) {
+  if (!car.asDirected && leftAboard.length > 0) {
     issues.push(`${leftAboard.join(", ")} is not dropped off anywhere.`);
   }
   if (!car.time) issues.push("Set the first pick up time.");
@@ -212,6 +220,8 @@ interface RecentBooking {
   dropoff: { line1?: string; grey_tarmac?: boolean } | null;
   via: { line1?: string }[] | null;
   stops: Stop[] | null;
+  journey_type: string | null;
+  as_directed_hours: number | null;
 }
 
 const emptyStop = (type: StopType): Stop => ({
@@ -226,6 +236,8 @@ const emptyCar = (): CarRequest => ({
   vehicle: "S-Class",
   time: "",
   notes: "",
+  asDirected: false,
+  asDirectedHours: 4,
 });
 
 /** Kickoffs are stored in UTC; the desk works in UK time. */
@@ -475,7 +487,7 @@ const McfcPortal = () => {
     supabase
       .from("bookings")
       .select(
-        "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops"
+        "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops, journey_type, as_directed_hours"
       )
       .eq("corporate", DESK)
       .eq("user_id", user.id)
@@ -641,9 +653,7 @@ const McfcPortal = () => {
    * Before the fixture list is loaded we cannot tell, so the tick still shows.
    */
   const greyAvailableForStop = (stop: Stop) =>
-    stop.type === "dropoff" &&
-    !!greyAddressForStop(stop) &&
-    (fixtures.length === 0 || !!homeFixtureOn(travelDate));
+    stop.type === "dropoff" && (fixtures.length === 0 || !!homeFixtureOn(travelDate));
 
   /** Best saved address for a fixture's ground, else the ground's name. */
   const venueAddressFor = (f: Fixture) => {
@@ -757,6 +767,33 @@ const McfcPortal = () => {
       setPersonError(err instanceof Error ? err.message : "We couldn't remove this person.");
     } finally {
       setPersonRemoving(false);
+    }
+  };
+
+  const [saveAddrFor, setSaveAddrFor] = useState<string | null>(null);
+  const [saveAddrLabel, setSaveAddrLabel] = useState("");
+  const [saveAddrPerson, setSaveAddrPerson] = useState("");
+  const [saveAddrBusy, setSaveAddrBusy] = useState(false);
+
+  /** Keep an address typed while booking, without leaving the form. */
+  const saveStopAddress = async (address: string) => {
+    setSaveAddrBusy(true);
+    try {
+      await invokeDesk({
+        action: "address_add",
+        label: saveAddrLabel.trim(),
+        address: address.trim(),
+        ...(saveAddrPerson ? { passengerId: saveAddrPerson } : {}),
+        greyTarmac: false,
+      });
+      setSaveAddrFor(null);
+      setSaveAddrLabel("");
+      setSaveAddrPerson("");
+      loadAddresses();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "We couldn't save this address.");
+    } finally {
+      setSaveAddrBusy(false);
     }
   };
 
@@ -912,6 +949,8 @@ const McfcPortal = () => {
         vehicle: VEHICLES.includes(b.vehicle) ? b.vehicle : "S-Class",
         time: b.collection_at ? b.collection_at.slice(11, 16) : "",
         notes: "",
+        asDirected: b.journey_type === "hourly",
+        asDirectedHours: b.as_directed_hours ?? 4,
       },
     ]);
     setView("desk");
@@ -979,6 +1018,8 @@ const McfcPortal = () => {
               vehicle: c.vehicle,
               time: c.time,
               notes: c.notes.trim(),
+              asDirected: c.asDirected,
+              asDirectedHours: c.asDirectedHours,
               // Single-leg fields for older deployments of the booking function
               passengers: manifestOf(c),
               pickup: stops[0]?.address ?? "",
@@ -1307,6 +1348,46 @@ const McfcPortal = () => {
                 )}
               </div>
 
+              <div
+                className="flex flex-wrap items-center gap-4 mb-4 px-3 py-2.5"
+                style={{ backgroundColor: "rgba(28,44,91,0.06)" }}
+              >
+                <label className="flex items-center gap-2.5 text-sm cursor-pointer" style={{ color: NAVY }}>
+                  <input
+                    type="checkbox"
+                    checked={car.asDirected}
+                    onChange={(e) => updateCar(i, { asDirected: e.target.checked })}
+                    className="w-4 h-4 accent-[#1C2C5B]"
+                  />
+                  As directed (car stays with them)
+                </label>
+                {car.asDirected && (
+                  <label className="flex items-center gap-2 text-sm" style={{ color: NAVY }}>
+                    for
+                    <select
+                      value={car.asDirectedHours}
+                      onChange={(e) =>
+                        updateCar(i, { asDirectedHours: Number(e.target.value) })
+                      }
+                      className="h-9 bg-white border rounded-none px-2 text-sm outline-none"
+                      style={lightInputStyle}
+                    >
+                      {Array.from({ length: 24 }, (_, n) => n + 1).map((h) => (
+                        <option key={h} value={h}>
+                          {h} {h === 1 ? "hour" : "hours"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {car.asDirected && (
+                  <span className="text-xs" style={{ color: `${NAVY}99` }}>
+                    No fixed destination needed. Add a set down only where one is known,
+                    such as a Grey Tarmac drop.
+                  </span>
+                )}
+              </div>
+
               <label className={lightLabel} style={{ color: `${NAVY}99` }}>
                 Journey
               </label>
@@ -1401,6 +1482,70 @@ const McfcPortal = () => {
                         className={lightInput}
                         style={lightInputStyle}
                       />
+                      {stop.address.trim() &&
+                        !addresses.some((a) => a.address === stop.address.trim()) && (
+                          saveAddrFor === pickerKey ? (
+                            <div
+                              className="mt-2 p-3 border"
+                              style={{ borderColor: `${NAVY}33` }}
+                            >
+                              <input
+                                placeholder="Save as, e.g. Home"
+                                value={saveAddrLabel}
+                                onChange={(e) => setSaveAddrLabel(e.target.value)}
+                                maxLength={80}
+                                className={lightInput}
+                                style={lightInputStyle}
+                              />
+                              <select
+                                value={saveAddrPerson}
+                                aria-label="Save this address for"
+                                onChange={(e) => setSaveAddrPerson(e.target.value)}
+                                className="w-full mt-2 h-9 bg-white border rounded-none px-2 text-xs outline-none"
+                                style={lightInputStyle}
+                              >
+                                <option value="">Everyone (global address)</option>
+                                {passengerOptions.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="flex items-center gap-3 mt-2">
+                                <button
+                                  type="button"
+                                  disabled={saveAddrBusy || !saveAddrLabel.trim()}
+                                  onClick={() => saveStopAddress(stop.address)}
+                                  className="px-4 py-2 text-[11px] tracking-[0.12em] uppercase text-white disabled:opacity-40"
+                                  style={{ backgroundColor: NAVY }}
+                                >
+                                  {saveAddrBusy ? "Saving…" : "Save"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSaveAddrFor(null)}
+                                  className="text-[11px] tracking-[0.12em] uppercase underline underline-offset-4"
+                                  style={{ color: `${NAVY}99` }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSaveAddrFor(pickerKey);
+                                setSaveAddrLabel("");
+                                setSaveAddrPerson("");
+                              }}
+                              className="mt-2 text-[11px] tracking-[0.12em] uppercase underline underline-offset-4 hover:opacity-70"
+                              style={{ color: NAVY }}
+                            >
+                              Save this address
+                            </button>
+                          )
+                        )}
                       {addressChoicesFor(car).length > 0 && (
                         <select
                           value=""
@@ -1586,8 +1731,7 @@ const McfcPortal = () => {
                           Grey Tarmac drop off (front entrance on match day)
                         </label>
                       ) : (
-                        !isPickup &&
-                        greyAddressForStop(stop) && (
+                        !isPickup && (
                           <p className="text-xs mt-3" style={{ color: `${NAVY}99` }}>
                             Grey Tarmac drop off applies on home match days only.
                             {travelDate

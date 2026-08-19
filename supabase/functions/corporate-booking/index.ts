@@ -82,6 +82,9 @@ interface CarRequest {
   vehicle: string;
   time: string;
   notes: string;
+  /** Car stays at the passenger's disposal; the journey has no fixed end */
+  asDirected?: boolean;
+  asDirectedHours?: number;
   // Legacy single-leg shape, still accepted
   passengers?: string[];
   pickup?: string;
@@ -92,7 +95,8 @@ interface CarRequest {
 /** A car is an ordered run of stops; this walks it, checking it makes sense. */
 const walkStops = (
   stops: Stop[],
-  capacity: number
+  capacity: number,
+  openEnded = false
 ): { error: string } | { manifest: string[]; peak: number } => {
   const aboard: string[] = [];
   const manifest: string[] = [];
@@ -126,7 +130,8 @@ const walkStops = (
     }
   }
 
-  if (aboard.length > 0) {
+  // An as-directed car keeps its passengers: the chauffeur stays with them
+  if (aboard.length > 0 && !openEnded) {
     return {
       error: `${aboard.join(", ")} ${aboard.length === 1 ? "is" : "are"} not dropped off anywhere`,
     };
@@ -576,7 +581,13 @@ serve(async (req) => {
 
     // Each car becomes an ordered stop list, whether the desk sent the
     // multi-stop shape or the older single-leg one
-    const journeys: { stops: Stop[]; manifest: string[]; peak: number }[] = [];
+    const journeys: {
+      stops: Stop[];
+      manifest: string[];
+      peak: number;
+      asDirected: boolean;
+      asDirectedHours: number;
+    }[] = [];
 
     for (const [i, car] of cars.entries()) {
       const label = `Car ${i + 1}`;
@@ -594,6 +605,12 @@ serve(async (req) => {
         return json(400, { success: false, error: `${label}: notes too long` });
       }
 
+      const asDirected = car.asDirected === true;
+      const asDirectedHours = asDirected ? Number(car.asDirectedHours) : 0;
+      if (asDirected && (!Number.isFinite(asDirectedHours) || asDirectedHours < 1 || asDirectedHours > 24)) {
+        return json(400, { success: false, error: `${label}: choose how many hours the car is needed for` });
+      }
+
       const rawStops: unknown[] = Array.isArray(car.stops) && car.stops.length > 0
         ? car.stops
         : [
@@ -601,10 +618,13 @@ serve(async (req) => {
             { type: "dropoff", address: car.destination, passengers: [], greyTarmac: car.greyTarmac === true },
           ];
 
-      if (rawStops.length < 2 || rawStops.length > MAX_STOPS) {
+      const minStops = asDirected ? 1 : 2;
+      if (rawStops.length < minStops || rawStops.length > MAX_STOPS) {
         return json(400, {
           success: false,
-          error: `${label}: a journey needs 2 to ${MAX_STOPS} stops`,
+          error: asDirected
+            ? `${label}: an as directed car needs at least a collection`
+            : `${label}: a journey needs 2 to ${MAX_STOPS} stops`,
         });
       }
 
@@ -642,7 +662,7 @@ serve(async (req) => {
       if (stops[0].type !== "pickup") {
         return json(400, { success: false, error: `${label}: the first stop must be a pick up` });
       }
-      if (stops[stops.length - 1].type !== "dropoff") {
+      if (!asDirected && stops[stops.length - 1].type !== "dropoff") {
         return json(400, { success: false, error: `${label}: the last stop must be a drop off` });
       }
       if (stops.some((s) => s.greyTarmac && s.type !== "dropoff")) {
@@ -652,26 +672,23 @@ serve(async (req) => {
         });
       }
 
-      const walked = walkStops(stops, capacity);
+      const walked = walkStops(stops, capacity, asDirected);
       if ("error" in walked) {
         return json(400, { success: false, error: `${label}, ${walked.error}` });
       }
-      journeys.push({ stops, manifest: walked.manifest, peak: walked.peak });
+      journeys.push({
+        stops,
+        manifest: walked.manifest,
+        peak: walked.peak,
+        asDirected,
+        asDirectedHours,
+      });
     }
 
     // Grey tarmac is a home match-day arrangement: the destination must be a
     // saved front-entrance address and the date must be a home fixture. Desks
     // with no fixture list yet are not held to the fixture half of the rule.
     if (journeys.some((j) => j.stops.some((s) => s.greyTarmac))) {
-      const { data: greyRows } = await supabase
-        .from("corporate_addresses")
-        .select("address")
-        .eq("corporate", corporate)
-        .eq("grey_tarmac", true);
-      const greyAddresses = new Set(
-        (greyRows ?? []).map((r) => (r.address as string).trim())
-      );
-
       const { data: fixtureRows } = await supabase
         .from("fixtures")
         .select("is_home, kickoff_utc")
@@ -685,22 +702,11 @@ serve(async (req) => {
           }) === travelDate
       );
 
-      for (const [i, journey] of journeys.entries()) {
-        for (const stop of journey.stops) {
-          if (!stop.greyTarmac) continue;
-          if (!greyAddresses.has(stop.address)) {
-            return json(400, {
-              success: false,
-              error: `Car ${i + 1}: Grey Tarmac is only available at a saved front-entrance address`,
-            });
-          }
-          if (hasFixtures && !isHomeMatchDay) {
-            return json(400, {
-              success: false,
-              error: "Grey Tarmac drop off applies on home match days only",
-            });
-          }
-        }
+      if (hasFixtures && !isHomeMatchDay) {
+        return json(400, {
+          success: false,
+          error: "Grey Tarmac drop off applies on home match days only",
+        });
       }
     }
 
@@ -720,9 +726,13 @@ serve(async (req) => {
     });
 
     const dispatchBookings = cars.map((car, i) => {
-      const { stops, manifest, peak } = journeys[i];
+      const { stops, manifest, peak, asDirected, asDirectedHours } = journeys[i];
       const reference = amendReference ?? `APEXIA-${deskName}-${requestId}-C${i + 1}`;
-      const viaStops = stops.slice(1, -1);
+      const last = stops[stops.length - 1];
+      const endsWithDropoff = last?.type === "dropoff";
+      // An as-directed car has no fixed destination, so everything after the
+      // collection rides as a stop en route
+      const viaStops = asDirected && !endsWithDropoff ? stops.slice(1) : stops.slice(1, -1);
       const anyGrey = stops.some((s) => s.greyTarmac);
       return {
         Reference: reference,
@@ -736,15 +746,21 @@ serve(async (req) => {
         BookedBy: `${deskName} Travel Desk`,
         BookingNotes: [
           anyGrey ? "GREY TARMAC DROP OFF (front entrance)." : "",
+          asDirected ? `AS DIRECTED: car at disposal for ${asDirectedHours} hours.` : "",
           `${deskName} Travel Desk request (car ${i + 1} of ${cars.length}), booked by ${bookerName}.`,
           `Vehicle: ${car.vehicle}.`,
           `Passengers: ${manifest.join(", ")}.`,
           `Route: ${describeRoute(stops)}.`,
           car.notes?.trim() ? `Notes: ${car.notes.trim()}` : "",
         ].filter(Boolean).join(" "),
-        AsDirected: "F",
+        AsDirected: asDirected ? "T" : "F",
+        ...(asDirected
+          ? { AsDirectedTime: asDirectedHours * 60, AsDirectedMileage: 0 }
+          : {}),
         PickUpAddress: dispatchAddress(stops[0].address),
-        DropOffAddress: dispatchAddress(stops[stops.length - 1].address),
+        ...(endsWithDropoff
+          ? { DropOffAddress: dispatchAddress(last.address) }
+          : {}),
         // Everything between the first and last stop rides as a via address
         ...Object.fromEntries(
           viaStops
@@ -756,8 +772,10 @@ serve(async (req) => {
 
     // Store each car against the booker so it shows in the portal history
     const carRowValues = cars.map((car, i) => {
-      const { stops, manifest, peak } = journeys[i];
-      const viaStops = stops.slice(1, -1);
+      const { stops, manifest, peak, asDirected, asDirectedHours } = journeys[i];
+      const last = stops[stops.length - 1];
+      const endsWithDropoff = last?.type === "dropoff";
+      const viaStops = asDirected && !endsWithDropoff ? stops.slice(1) : stops.slice(1, -1);
       return {
         name: manifest.join(", "),
         email: bookerEmail,
@@ -769,18 +787,21 @@ serve(async (req) => {
         collection_at: new Date(`${travelDate}T${car.time}:00`).toISOString(),
         pickup: { line1: stops[0].address, town: "", postcode: "" },
         dropoff: {
-          line1: stops[stops.length - 1].address,
+          line1: endsWithDropoff
+            ? last.address
+            : `As directed (${asDirectedHours} hours)`,
           town: "",
           postcode: "",
           // Any front-entrance stop marks the car, so it stands out on the sheet
           ...(stops.some((s) => s.greyTarmac) ? { grey_tarmac: true } : {}),
         },
+        journey_type: asDirected ? "hourly" : "destination",
+        as_directed_hours: asDirected ? asDirectedHours : null,
         via:
           viaStops.length > 0
             ? viaStops.map((s) => ({ line1: s.address, town: "", postcode: "" }))
             : null,
         stops,
-        journey_type: "destination",
       };
     });
     if (!amendReference) {
