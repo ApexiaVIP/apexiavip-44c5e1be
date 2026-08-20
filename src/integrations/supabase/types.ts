@@ -599,6 +599,24 @@ export type Database = {
         }
         Relationships: []
       }
+      tmp_manual_invoke: {
+        Row: {
+          created_at: string | null
+          id: number
+          request_id: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: number
+          request_id?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: number
+          request_id?: number | null
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
