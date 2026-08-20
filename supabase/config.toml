@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.fixtures-sync]
 verify_jwt = false
+
+[functions.booking-watch]
+verify_jwt = false
