@@ -157,11 +157,32 @@ serve(async (req) => {
 
     let notified = 0;
     let changed = 0;
+    // What happened to each one, so a manual run can be read at a glance
+    const details: Record<string, unknown>[] = [];
+
+    // Record that every watched booking was looked at, not just the ones that
+    // moved: otherwise there is no way to tell "checked, unchanged" apart from
+    // "never looked at"
+    const checkedAt = new Date().toISOString();
+    await admin
+      .from("bookings")
+      .update({ status_checked_at: checkedAt })
+      .in(
+        "reference",
+        bookings.map((b) => b.reference as string)
+      );
 
     for (const b of bookings) {
       const match = live.find((x: Record<string, unknown>) => x?.Reference === b.reference);
       const status = typeof match?.BookingStatus === "string" ? match.BookingStatus : "";
-      if (!status || status === b.status) continue;
+      if (!status) {
+        details.push({ reference: b.reference, outcome: "not returned by the booking system" });
+        continue;
+      }
+      if (status === b.status) {
+        details.push({ reference: b.reference, status, outcome: "unchanged" });
+        continue;
+      }
 
       changed += 1;
       await admin
@@ -171,6 +192,7 @@ serve(async (req) => {
 
       const moment = classify(status);
       if (!moment) {
+        details.push({ reference: b.reference, status, outcome: "changed, nothing worth texting" });
         // Back to an uninteresting state: whatever we said no longer stands
         if (b.notified_status) {
           await admin
@@ -180,7 +202,10 @@ serve(async (req) => {
         }
         continue;
       }
-      if (status === b.notified_status) continue;
+      if (status === b.notified_status) {
+        details.push({ reference: b.reference, status, outcome: "already texted" });
+        continue;
+      }
 
       const driver = (match?.Driver as { Name?: string } | undefined)?.Name?.trim() ?? "";
       const car =
@@ -241,6 +266,13 @@ serve(async (req) => {
       for (const to of numbers) {
         if (await trySendSms(to, message)) sentAny = true;
       }
+      details.push({
+        reference: b.reference,
+        status,
+        moment,
+        recipients: numbers.size,
+        outcome: sentAny ? "texted" : "no number to text",
+      });
       if (sentAny) {
         notified += 1;
         await admin
@@ -250,7 +282,7 @@ serve(async (req) => {
       }
     }
 
-    return json(200, { success: true, watched: bookings.length, changed, notified });
+    return json(200, { success: true, watched: bookings.length, changed, notified, details });
   } catch (error) {
     console.error("booking-watch error:", error);
     return json(500, { success: false, error: "An error occurred" });
