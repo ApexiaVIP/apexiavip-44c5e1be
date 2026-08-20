@@ -28,6 +28,7 @@ export type Database = {
           id: string
           journey_type: string
           name: string
+          notified_status: string | null
           passengers: number | null
           phone: string
           pickup: Json | null
@@ -53,6 +54,7 @@ export type Database = {
           id?: string
           journey_type?: string
           name: string
+          notified_status?: string | null
           passengers?: number | null
           phone: string
           pickup?: Json | null
@@ -78,6 +80,7 @@ export type Database = {
           id?: string
           journey_type?: string
           name?: string
+          notified_status?: string | null
           passengers?: number | null
           phone?: string
           pickup?: Json | null
