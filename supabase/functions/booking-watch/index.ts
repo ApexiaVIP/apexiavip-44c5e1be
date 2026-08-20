@@ -13,7 +13,7 @@ const json = (status: number, body: Record<string, unknown>) =>
   });
 
 /** How far either side of a collection time a booking is worth watching. */
-const WATCH_BEFORE_HOURS = 36;
+const WATCH_BEFORE_HOURS = 24 * 14;
 const WATCH_AFTER_HOURS = 4;
 const MAX_WATCHED = 100;
 
@@ -129,6 +129,7 @@ serve(async (req) => {
       .gte("collection_at", new Date(now - WATCH_AFTER_HOURS * 3600 * 1000).toISOString())
       .lte("collection_at", new Date(now + WATCH_BEFORE_HOURS * 3600 * 1000).toISOString())
       .not("status", "in", '("Cancelled","Failed","Completed")')
+      .order("collection_at")
       .limit(MAX_WATCHED);
 
     const bookings = watched ?? [];
@@ -169,7 +170,17 @@ serve(async (req) => {
         .eq("reference", b.reference);
 
       const moment = classify(status);
-      if (!moment || status === b.notified_status) continue;
+      if (!moment) {
+        // Back to an uninteresting state: whatever we said no longer stands
+        if (b.notified_status) {
+          await admin
+            .from("bookings")
+            .update({ notified_status: null })
+            .eq("reference", b.reference);
+        }
+        continue;
+      }
+      if (status === b.notified_status) continue;
 
       const driver = (match?.Driver as { Name?: string } | undefined)?.Name?.trim() ?? "";
       const car =
