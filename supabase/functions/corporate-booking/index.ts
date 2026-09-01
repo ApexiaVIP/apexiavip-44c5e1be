@@ -71,6 +71,8 @@ const MAX_STOPS = 12;
 interface Stop {
   type: "pickup" | "dropoff";
   address: string;
+  /** Optional time for this stop; the first collection uses the car's time */
+  time?: string;
   /** Who boards, or who alights; empty on a drop off means everyone aboard */
   passengers: string[];
   /** How many people an entry stands for, where it represents a party */
@@ -100,11 +102,11 @@ const walkStops = (
   capacity: number,
   openEnded = false
 ): { error: string } | { manifest: string[]; peak: number; sizes: Map<string, number> } => {
-  const aboard: string[] = [];
+  // Who is aboard right now, and how many seats each entry takes
+  const aboard: { name: string; size: number }[] = [];
   const manifest: string[] = [];
-  // An entry such as the chairman's guests stands for a party of several
   const sizes = new Map<string, number>();
-  const seatsAboard = () => aboard.reduce((n, p) => n + (sizes.get(p) ?? 1), 0);
+  const seatsAboard = () => aboard.reduce((n, a) => n + a.size, 0);
   let peak = 0;
 
   for (const [idx, stop] of stops.entries()) {
@@ -114,26 +116,30 @@ const walkStops = (
         return { error: `${at}: choose who is being picked up` };
       }
       for (const p of stop.passengers) {
-        if (manifest.includes(p)) return { error: `${at}: ${p} is picked up twice` };
+        // Collecting the same people again later is normal; only someone
+        // already sitting in the car cannot be collected
+        if (aboard.some((a) => a.name === p)) {
+          return { error: `${at}: ${p} is already in this car` };
+        }
         const size = Math.floor(Number(stop.counts?.[p] ?? 1));
         if (!Number.isFinite(size) || size < 1 || size > capacity) {
           return { error: `${at}: ${p} needs a number between 1 and ${capacity}` };
         }
         sizes.set(p, size);
-        aboard.push(p);
-        manifest.push(p);
+        aboard.push({ name: p, size });
+        if (!manifest.includes(p)) manifest.push(p);
       }
       peak = Math.max(peak, seatsAboard());
       if (peak > capacity) {
         return { error: `${at}: more passengers than the vehicle seats (${capacity})` };
       }
     } else {
-      const leaving = stop.passengers.length > 0 ? stop.passengers : [...aboard];
+      const leaving = stop.passengers.length > 0 ? stop.passengers : aboard.map((a) => a.name);
       if (leaving.length === 0) {
         return { error: `${at}: nobody is in the car to drop off` };
       }
       for (const p of leaving) {
-        const k = aboard.indexOf(p);
+        const k = aboard.findIndex((a) => a.name === p);
         if (k === -1) return { error: `${at}: ${p} is not in this car` };
         aboard.splice(k, 1);
       }
@@ -142,8 +148,9 @@ const walkStops = (
 
   // An as-directed car keeps its passengers: the chauffeur stays with them
   if (aboard.length > 0 && !openEnded) {
+    const names = aboard.map((a) => a.name);
     return {
-      error: `${aboard.join(", ")} ${aboard.length === 1 ? "is" : "are"} not dropped off anywhere`,
+      error: `${names.join(", ")} ${names.length === 1 ? "is" : "are"} not dropped off anywhere`,
     };
   }
   return { manifest, peak, sizes };
@@ -192,9 +199,9 @@ const describeRoute = (stops: Stop[], sizes: Map<string, number>) =>
         : s.type === "dropoff"
           ? "all remaining"
           : "";
-      return `${idx + 1}) ${s.type === "pickup" ? "PICK UP" : "DROP OFF"}${
-        who ? ` ${who}` : ""
-      } at ${s.address}${s.greyTarmac ? " [GREY TARMAC]" : ""}`;
+      return `${idx + 1}) ${s.time ? `${s.time} ` : ""}${
+        s.type === "pickup" ? "PICK UP" : "DROP OFF"
+      }${who ? ` ${who}` : ""} at ${s.address}${s.greyTarmac ? " [GREY TARMAC]" : ""}`;
     })
     .join("; ");
 
@@ -677,9 +684,12 @@ serve(async (req) => {
             if (Number.isFinite(size) && size > 0) counts[name] = size;
           }
         }
+        const stopTime =
+          typeof r.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(r.time) ? r.time : "";
         stops.push({
           type: r.type === "dropoff" ? "dropoff" : "pickup",
           address,
+          ...(stopTime ? { time: stopTime } : {}),
           passengers: passengers as string[],
           counts,
           greyTarmac: r.greyTarmac === true,
@@ -1079,6 +1089,86 @@ serve(async (req) => {
       } catch (notifyErr) {
         // Confirmations must never fail a booking that is already placed
         console.error("Passenger confirmations failed:", notifyErr);
+      }
+    }
+
+    // The assistant who arranged it gets their own confirmation: they only had
+    // an on-screen message before, with nothing to keep or forward
+    if (bookerEmail && confirmedReferences.length > 0) {
+      try {
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${RESEND_API_KEY}`,
+          },
+          body: JSON.stringify({
+            from: "Apexia VIP <info@apexiavip.com>",
+            to: [bookerEmail],
+            subject: `${amendReference ? "Booking updated" : "Booking confirmed"}: ${
+              cars.length
+            } car${cars.length === 1 ? "" : "s"} on ${day}-${monthName}-${year}`,
+            html: `
+              <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 640px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
+                <p style="color: #b89b5e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3em;">Apexia VIP</p>
+                <h1 style="font-size: 20px; font-weight: 300; letter-spacing: 0.08em;">
+                  ${amendReference ? "Your booking has been updated" : "Your cars are confirmed"}
+                </h1>
+                <p style="font-size: 13px; color: #8a8070;">
+                  ${sanitize(bookerName)}, here is what we have for
+                  <strong style="color: #e0d5c4;">${day}-${monthName}-${year}</strong>.
+                  Our team will confirm each chauffeur and vehicle nearer the time, and you
+                  will be texted when each car is on its way.
+                </p>
+                <table style="width: 100%; margin-top: 16px; border-collapse: collapse; font-size: 13px;">
+                  ${cars
+                    .map((car, i) => {
+                      const { stops, manifest, sizes, asDirected, asDirectedHours } = journeys[i];
+                      return `
+                      <tr><td style="padding: 14px 0 4px; color: #b89b5e; font-size: 12px; letter-spacing: 0.1em;">
+                        CAR ${i + 1} &nbsp;|&nbsp; ${sanitize(car.time)} &nbsp;|&nbsp; ${sanitize(car.vehicle)}${
+                        asDirected ? ` &nbsp;|&nbsp; as directed, ${asDirectedHours} hours` : ""
+                      }
+                      </td></tr>
+                      <tr><td style="padding: 0 0 4px;">${sanitize(
+                        manifest.map((n) => withCount(n, sizes)).join(", ")
+                      )}</td></tr>
+                      <tr><td style="padding: 0 0 10px; color: #8a8070; line-height: 1.7;">${stops
+                        .map(
+                          (s, n) =>
+                            `${n + 1}. ${s.time ? `${sanitize(s.time)} ` : ""}${
+                              s.type === "pickup" ? "Pick up" : "Drop off"
+                            } ${sanitize(
+                              s.passengers.length > 0
+                                ? s.passengers.map((x) => withCount(x, sizes)).join(", ")
+                                : s.type === "dropoff"
+                                  ? "all remaining"
+                                  : ""
+                            )} at ${sanitize(s.address)}${
+                              s.greyTarmac ? " <strong style=\"color:#e0c341;\">[Grey Tarmac]</strong>" : ""
+                            }`
+                        )
+                        .join("<br/>")}</td></tr>
+                      ${
+                        car.notes?.trim()
+                          ? `<tr><td style="padding: 0 0 10px; color: #8a8070;">Notes: ${sanitize(
+                              car.notes.trim()
+                            )}</td></tr>`
+                          : ""
+                      }`;
+                    })
+                    .join("")}
+                </table>
+                <p style="font-size: 11px; color: #8a8070; margin-top: 24px;">
+                  Need to change or cancel? Open the travel desk, or reply to this email.
+                  All journeys are handled with complete discretion.
+                </p>
+              </div>
+            `,
+          }),
+        });
+      } catch (bookerMailErr) {
+        console.error("Booker confirmation email failed (non-blocking):", bookerMailErr);
       }
     }
 

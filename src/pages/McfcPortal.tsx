@@ -49,6 +49,8 @@ type StopType = "pickup" | "dropoff";
 interface Stop {
   type: StopType;
   address: string;
+  /** Optional time for this stop; the first collection uses the car's time */
+  time?: string;
   /** Who boards, or who alights; empty on a drop off means everyone aboard */
   passengers: string[];
   /** How many people an entry stands for, where it represents a party */
@@ -80,9 +82,10 @@ const manifestOf = (car: CarRequest) => {
   return seen;
 };
 
-/** How many seats an entry takes at the stop that collected it. */
-const seatsFor = (car: CarRequest, name: string) => {
-  for (const s of car.stops) {
+/** Seats an entry takes, as of the most recent stop that collected it. */
+const seatsFor = (car: CarRequest, name: string, upTo = car.stops.length) => {
+  for (let i = Math.min(upTo, car.stops.length) - 1; i >= 0; i--) {
+    const s = car.stops[i];
     if (s.type === "pickup" && s.passengers.includes(name)) {
       return Math.max(1, Math.floor(s.counts?.[name] ?? 1));
     }
@@ -110,13 +113,15 @@ const aboardAt = (car: CarRequest, index: number) => {
 const peakOf = (car: CarRequest) => {
   let aboard: string[] = [];
   let peak = 0;
-  const seats = (list: string[]) => list.reduce((n, p) => n + seatsFor(car, p), 0);
-  car.stops.forEach((s) => {
+  car.stops.forEach((s, idx) => {
     if (s.type === "pickup") {
       s.passengers.forEach((p) => {
         if (!aboard.includes(p)) aboard.push(p);
       });
-      peak = Math.max(peak, seats(aboard));
+      peak = Math.max(
+        peak,
+        aboard.reduce((n, p) => n + seatsFor(car, p, idx + 1), 0)
+      );
     } else {
       const leaving = s.passengers.length > 0 ? s.passengers : [...aboard];
       aboard = aboard.filter((p) => !leaving.includes(p));
@@ -147,11 +152,17 @@ const carIssues = (car: CarRequest): string[] => {
     issues.push(`Too many passengers at once for the ${car.vehicle} (${capacity} seats).`);
   }
   car.stops.forEach((s, idx) => {
-    if (s.type !== "dropoff") return;
     const aboard = aboardAt(car, idx);
-    const stranded = s.passengers.filter((p) => !aboard.includes(p));
-    if (stranded.length > 0) {
-      issues.push(`Stop ${idx + 1}: ${stranded.join(", ")} is not in the car yet.`);
+    if (s.type === "dropoff") {
+      const stranded = s.passengers.filter((p) => !aboard.includes(p));
+      if (stranded.length > 0) {
+        issues.push(`Stop ${idx + 1}: ${stranded.join(", ")} is not in the car yet.`);
+      }
+      return;
+    }
+    const twice = s.passengers.filter((p) => aboard.includes(p));
+    if (twice.length > 0) {
+      issues.push(`Stop ${idx + 1}: ${twice.join(", ")} is already in this car.`);
     }
   });
   // An as-directed car keeps its passengers, so nobody is left behind
@@ -574,9 +585,12 @@ const McfcPortal = () => {
         const stop = c.stops[stopIdx];
         const selected = stop.passengers.includes(name);
         if (!selected && stop.type === "pickup") {
+          // Someone already in the car cannot be collected again, but
+          // collecting them later after a set down is perfectly normal
+          if (aboardAt(c, stopIdx).includes(name)) return c;
           // Never seat more people at once than the vehicle holds
           const used =
-            aboardAt(c, stopIdx).reduce((n, p) => n + seatsFor(c, p), 0) +
+            aboardAt(c, stopIdx).reduce((n, p) => n + seatsFor(c, p, stopIdx), 0) +
             stop.passengers.reduce((n, p) => n + Math.max(1, stop.counts?.[p] ?? 1), 0);
           if (used >= (CAPACITY[c.vehicle] ?? 2)) return c;
         }
@@ -658,11 +672,18 @@ const McfcPortal = () => {
 
   // Saved addresses relevant to this car: globals plus the personal addresses
   // of whoever is seated in it
-  const addressChoicesFor = (car: CarRequest) => {
-    const ids = new Set(
-      manifestOf(car).map((n) => passengerIdByName.get(n)).filter(Boolean) as string[]
-    );
-    return visibleAddresses.filter((a) => !a.passenger_id || ids.has(a.passenger_id));
+  /**
+   * Every address the desk can see, with whoever's it is named. Filtering by
+   * who happened to be seated already hid addresses people had just saved.
+   */
+  const addressChoicesFor = (_car: CarRequest) => visibleAddresses;
+
+  /** The name the desk gave an address, so it is recognisable once chosen. */
+  const savedNameFor = (address: string) => {
+    const hit = addresses.find((a) => a.address === address.trim());
+    if (!hit) return "";
+    const person = hit.passenger_id ? passengerNameById(hit.passenger_id) : null;
+    return person ? `${hit.label} (${person})` : hit.label;
   };
 
   const homeFixtureOn = (date: string) =>
@@ -951,6 +972,7 @@ const McfcPortal = () => {
       ? b.stops.map((s) => ({
           type: s?.type === "dropoff" ? "dropoff" : "pickup",
           address: s?.address ?? "",
+          time: s?.time ?? "",
           passengers: Array.isArray(s?.passengers) ? s.passengers : [],
           counts: s?.counts ?? {},
           greyTarmac: s?.greyTarmac === true,
@@ -1038,6 +1060,7 @@ const McfcPortal = () => {
             const stops = c.stops.map((s) => ({
               type: s.type,
               address: s.address.trim(),
+              ...(s.time ? { time: s.time } : {}),
               passengers: s.passengers,
               counts: s.counts ?? {},
               greyTarmac: s.greyTarmac && greyAvailableForStop(s),
@@ -1426,7 +1449,14 @@ const McfcPortal = () => {
                   const isPickup = stop.type === "pickup";
                   const aboard = aboardAt(car, s);
                   const pickerKey = `${i}:${s}`;
-                  const seatsUsed = aboard.length + (isPickup ? stop.passengers.length : 0);
+                  const seatsUsed =
+                    aboard.reduce((n, p) => n + seatsFor(car, p, s), 0) +
+                    (isPickup
+                      ? stop.passengers.reduce(
+                          (n, p) => n + Math.max(1, stop.counts?.[p] ?? 1),
+                          0
+                        )
+                      : 0);
                   return (
                     <div
                       key={s}
@@ -1501,17 +1531,48 @@ const McfcPortal = () => {
                         </span>
                       </div>
 
-                      <input
-                        placeholder={
-                          isPickup ? "Collection address" : "Set down address"
-                        }
-                        value={stop.address}
-                        onChange={(e) =>
-                          updateStop(i, s, { address: e.target.value, greyTarmac: false })
-                        }
-                        className={lightInput}
-                        style={lightInputStyle}
-                      />
+                      <div className="flex gap-3">
+                        <input
+                          placeholder={isPickup ? "Collection address" : "Set down address"}
+                          value={stop.address}
+                          onChange={(e) =>
+                            updateStop(i, s, { address: e.target.value, greyTarmac: false })
+                          }
+                          className={lightInput + " flex-1"}
+                          style={lightInputStyle}
+                        />
+                        <div className="w-32 shrink-0">
+                          {s === 0 ? (
+                            <input
+                              type="time"
+                              aria-label="Collection time"
+                              value={car.time}
+                              onChange={(e) => updateCar(i, { time: e.target.value })}
+                              className={lightInput}
+                              style={lightInputStyle}
+                            />
+                          ) : (
+                            <input
+                              type="time"
+                              aria-label={`Time for stop ${s + 1}`}
+                              value={stop.time ?? ""}
+                              onChange={(e) => updateStop(i, s, { time: e.target.value })}
+                              className={lightInput}
+                              style={lightInputStyle}
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-[11px] mt-1" style={{ color: `${NAVY}80` }}>
+                        {s === 0
+                          ? "Collection time"
+                          : "Time for this stop (optional)"}
+                      </p>
+                      {savedNameFor(stop.address) && (
+                        <p className="text-xs mt-1 font-medium" style={{ color: NAVY }}>
+                          Saved address: {savedNameFor(stop.address)}
+                        </p>
+                      )}
                       {stop.address.trim() &&
                         !addresses.some((a) => a.address === stop.address.trim()) && (
                           saveAddrFor === pickerKey ? (
@@ -1711,18 +1772,21 @@ const McfcPortal = () => {
                                     <div className="flex flex-wrap gap-2">
                                       {g.names.map((name) => {
                                         const selected = stop.passengers.includes(name);
-                                        const elsewhere =
-                                          !selected && manifest.includes(name);
+                                        // Only someone already in the car is out
+                                        // of bounds; collecting them again after
+                                        // a set down is normal
+                                        const alreadyAboard =
+                                          !selected && aboard.includes(name);
                                         const full = !selected && seatsUsed >= capacity;
                                         return (
                                           <button
                                             key={name}
                                             type="button"
                                             onClick={() => toggleStopPassenger(i, s, name)}
-                                            disabled={elsewhere || full}
+                                            disabled={alreadyAboard || full}
                                             title={
-                                              elsewhere
-                                                ? "Already picked up at another stop"
+                                              alreadyAboard
+                                                ? "Already in this car at this point"
                                                 : undefined
                                             }
                                             className="border px-3 py-1.5 text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1840,18 +1904,6 @@ const McfcPortal = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
-                <div>
-                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
-                    First Pick Up Time
-                  </label>
-                  <input
-                    type="time"
-                    value={car.time}
-                    onChange={(e) => updateCar(i, { time: e.target.value })}
-                    className={lightInput}
-                    style={lightInputStyle}
-                  />
-                </div>
                 <div>
                   <label className={lightLabel} style={{ color: `${NAVY}99` }}>
                     Vehicle
