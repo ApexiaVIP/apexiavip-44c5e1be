@@ -673,9 +673,34 @@ const McfcPortal = () => {
   // Saved addresses relevant to this car: globals plus the personal addresses
   // of whoever is seated in it
   /**
-   * Every address the desk can see, with whoever's it is named. Filtering by
-   * who happened to be seated already hid addresses people had just saved.
+   * Every address the desk can see, in three groups: the people actually in
+   * this car first, then addresses for everyone, then the rest. Nothing is
+   * hidden, since filtering by who was seated hid addresses just saved, but
+   * whoever an address belongs to stays obvious.
    */
+  const addressGroupsFor = (car: CarRequest) => {
+    const ids = new Set(
+      manifestOf(car).map((n) => passengerIdByName.get(n)).filter(Boolean) as string[]
+    );
+    const theirs = visibleAddresses.filter((a) => a.passenger_id && ids.has(a.passenger_id));
+    const global = visibleAddresses.filter((a) => !a.passenger_id);
+    const others = visibleAddresses.filter((a) => a.passenger_id && !ids.has(a.passenger_id));
+    const inCar = manifestOf(car);
+    return [
+      {
+        label:
+          inCar.length === 1
+            ? `${inCar[0]}'s addresses`
+            : inCar.length > 1
+              ? "Addresses for this car"
+              : "Personal addresses",
+        items: theirs,
+      },
+      { label: "Everyone", items: global },
+      { label: "Other people", items: others },
+    ].filter((g) => g.items.length > 0);
+  };
+
   const addressChoicesFor = (_car: CarRequest) => visibleAddresses;
 
   /** The name the desk gave an address, so it is recognisable once chosen. */
@@ -1637,7 +1662,7 @@ const McfcPortal = () => {
                             </button>
                           )
                         )}
-                      {addressChoicesFor(car).length > 0 && (
+                      {visibleAddresses.length > 0 && (
                         <select
                           value=""
                           aria-label={`Saved addresses for stop ${s + 1}`}
@@ -1649,14 +1674,18 @@ const McfcPortal = () => {
                           style={lightInputStyle}
                         >
                           <option value="">Saved addresses…</option>
-                          {addressChoicesFor(car).map((a) => (
-                            <option key={a.id} value={a.address}>
-                              {a.label}
-                              {a.passenger_id
-                                ? ` (${passengerNameById(a.passenger_id) ?? ""})`
-                                : ""}
-                              {a.grey_tarmac ? " - Grey Tarmac available" : ""}
-                            </option>
+                          {addressGroupsFor(car).map((g) => (
+                            <optgroup key={g.label} label={g.label}>
+                              {g.items.map((a) => (
+                                <option key={a.id} value={a.address}>
+                                  {a.label}
+                                  {a.passenger_id
+                                    ? ` (${passengerNameById(a.passenger_id) ?? ""})`
+                                    : ""}
+                                  {a.grey_tarmac ? " - Grey Tarmac available" : ""}
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       )}
