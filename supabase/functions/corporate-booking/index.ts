@@ -56,6 +56,21 @@ const londonMidnightUtc = (dateStr: string) => {
   return new Date(naive).toISOString();
 };
 
+const UK_POSTCODE = /\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b/i;
+
+/** Split "Etihad Stadium, Manchester M11 3FF" into its parts for Dispatch. */
+const splitAddress = (raw: string) => {
+  const address = raw.trim();
+  const m = address.match(UK_POSTCODE);
+  const postcode = m ? `${m[1].toUpperCase()} ${m[2].toUpperCase()}` : "";
+  const withoutPostcode = m ? address.replace(m[0], "").trim().replace(/[,\s]+$/, "") : address;
+  const parts = withoutPostcode.split(",").map((s) => s.trim()).filter(Boolean);
+  // Last part before the postcode is usually the town
+  const town = parts.length > 1 ? parts[parts.length - 1].replace(/[.,;]+$/, "") : "";
+  const line1 = parts.length > 1 ? parts.slice(0, -1).join(", ") : withoutPostcode;
+  return { line1: line1 || address, town, postcode };
+};
+
 const json = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), {
     status,
@@ -755,13 +770,16 @@ serve(async (req) => {
     const deskName = corporate.toUpperCase();
 
     // --- Build one Dispatch transfer carrying every car ---
-    const dispatchAddress = (line1: string) => ({
-      Line1: line1,
-      Line2: "",
-      Town: "",
-      Postcode: "",
-      Country: "United Kingdom",
-    });
+    const dispatchAddress = (raw: string) => {
+      const { line1, town, postcode } = splitAddress(raw);
+      return {
+        Line1: line1,
+        Line2: "",
+        Town: town,
+        Postcode: postcode,
+        Country: "United Kingdom",
+      };
+    };
 
     const dispatchBookings = cars.map((car, i) => {
       const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journeys[i];
@@ -780,9 +798,12 @@ serve(async (req) => {
         PassengerName: manifest[0],
         PassengerPhoneNumber: bookerPhone,
         PassengerMobileNumber: bookerPhone,
-        ...(bookerEmail ? { PassengerEmailAddress: bookerEmail } : {}),
+        PassengerEmailAddress: bookerEmail || "info@apexiavip.com",
         BookingClass: vehicleToBookingClass[car.vehicle] || "Executive",
-        BookedBy: `${deskName} Travel Desk`,
+        NumSuitcases: 0,
+        // "Website" is the source the booking system recognises; desk bookings
+        // sent an unrecognised source and landed as quotations
+        BookedBy: "Website",
         BookingNotes: [
           anyGrey ? "GREY TARMAC DROP OFF (front entrance)." : "",
           asDirected ? `AS DIRECTED: car at disposal for ${asDirectedHours} hours.` : "",
@@ -859,7 +880,7 @@ serve(async (req) => {
     }
 
     const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
-    const dispatchUrl = `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=${encodeURIComponent(`${deskName} Travel Desk`)}`;
+    const dispatchUrl = `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`;
 
     let transferFailureMessage: string | null = null;
     const failedReferences: string[] = [];
@@ -891,7 +912,8 @@ serve(async (req) => {
           const match = resultBookings.find(
             (b) => b.BookingReference === dispatchBooking.Reference || b.Reference === dispatchBooking.Reference
           ) ?? resultBookings[dispatchBookings.indexOf(dispatchBooking)];
-          if (match && match.Status === "Failed") {
+          if (!match || match.Status === "Failed") {
+            // No acknowledgement means no booking, whatever we hoped
             failedReferences.push(dispatchBooking.Reference);
           } else {
             confirmedReferences.push(dispatchBooking.Reference);
