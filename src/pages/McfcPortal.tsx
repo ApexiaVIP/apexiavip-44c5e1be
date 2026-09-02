@@ -703,9 +703,35 @@ const McfcPortal = () => {
 
   const addressChoicesFor = (_car: CarRequest) => visibleAddresses;
 
+  /**
+   * How a saved address reads on a booking: "The Lowry Hotel, 50 Dearmans
+   * Place, Salford M3 5LH". The name is what the desk recognises and what the
+   * chauffeur needs, so it belongs on the line itself, not just beside it.
+   */
+  const addressWithName = (a: CorporateAddress) => {
+    const address = a.address.trim();
+    const label = a.label.trim();
+    if (!label) return address;
+    const lower = address.toLowerCase();
+    // A label like "Etihad Stadium - Match Day" is already covered by an
+    // address that names the stadium, so it would only repeat itself
+    const stem = label.split(/\s+[-–]\s+/)[0].trim().toLowerCase();
+    if (lower.includes(label.toLowerCase()) || (stem && lower.includes(stem))) return address;
+    return `${label}, ${address}`;
+  };
+
+  /** The saved address a line of text came from, named or not. */
+  const matchSavedAddress = (text: string) => {
+    const value = text.trim();
+    if (!value) return null;
+    return (
+      addresses.find((a) => a.address.trim() === value || addressWithName(a) === value) ?? null
+    );
+  };
+
   /** The name the desk gave an address, so it is recognisable once chosen. */
   const savedNameFor = (address: string) => {
-    const hit = addresses.find((a) => a.address === address.trim());
+    const hit = matchSavedAddress(address);
     if (!hit) return "";
     const person = hit.passenger_id ? passengerNameById(hit.passenger_id) : null;
     return person ? `${hit.label} (${person})` : hit.label;
@@ -714,8 +740,10 @@ const McfcPortal = () => {
   const homeFixtureOn = (date: string) =>
     fixtures.find((f) => f.is_home && ukDateKey(f.kickoff_utc) === date);
 
-  const greyAddressForStop = (stop: Stop) =>
-    addresses.find((a) => a.grey_tarmac && a.address === stop.address);
+  const greyAddressForStop = (stop: Stop) => {
+    const hit = matchSavedAddress(stop.address);
+    return hit?.grey_tarmac ? hit : undefined;
+  };
 
   /**
    * Grey tarmac is a home match-day arrangement: the stop must set down at a
@@ -736,7 +764,7 @@ const McfcPortal = () => {
     );
     // On a home match day the front-entrance address is the useful one
     const saved = f.is_home ? matches.find((a) => a.grey_tarmac) ?? matches[0] : matches[0];
-    return saved?.address ?? venue;
+    return saved ? addressWithName(saved) : venue;
   };
 
   /** The fixture the current travel date falls on, if any. */
@@ -1599,7 +1627,7 @@ const McfcPortal = () => {
                         </p>
                       )}
                       {stop.address.trim() &&
-                        !addresses.some((a) => a.address === stop.address.trim()) && (
+                        !matchSavedAddress(stop.address) && (
                           saveAddrFor === pickerKey ? (
                             <div
                               className="mt-2 p-3 border"
@@ -1669,6 +1697,7 @@ const McfcPortal = () => {
                           onChange={(e) => {
                             if (e.target.value)
                               updateStop(i, s, { address: e.target.value, greyTarmac: false });
+                            e.target.value = "";
                           }}
                           className="w-full mt-2 h-9 bg-white border rounded-none px-2 text-xs outline-none"
                           style={lightInputStyle}
@@ -1677,7 +1706,7 @@ const McfcPortal = () => {
                           {addressGroupsFor(car).map((g) => (
                             <optgroup key={g.label} label={g.label}>
                               {g.items.map((a) => (
-                                <option key={a.id} value={a.address}>
+                                <option key={a.id} value={addressWithName(a)}>
                                   {a.label}
                                   {a.passenger_id
                                     ? ` (${passengerNameById(a.passenger_id) ?? ""})`
