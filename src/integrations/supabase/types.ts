@@ -490,6 +490,9 @@ export type Database = {
         Row: {
           address_line1: string
           address_line2: string
+          app_last_seen_at: string | null
+          app_nudged_at: string | null
+          app_platform: string | null
           avatar_url: string
           corporate: string | null
           corporate_groups: string[] | null
@@ -509,6 +512,9 @@ export type Database = {
         Insert: {
           address_line1?: string
           address_line2?: string
+          app_last_seen_at?: string | null
+          app_nudged_at?: string | null
+          app_platform?: string | null
           avatar_url?: string
           corporate?: string | null
           corporate_groups?: string[] | null
@@ -528,6 +534,9 @@ export type Database = {
         Update: {
           address_line1?: string
           address_line2?: string
+          app_last_seen_at?: string | null
+          app_nudged_at?: string | null
+          app_platform?: string | null
           avatar_url?: string
           corporate?: string | null
           corporate_groups?: string[] | null
