@@ -55,6 +55,21 @@ const Privacy = () => (
         the chauffeur assigned to your booking.
       </p>
 
+      <h2 className={h2}>Cookies and storage</h2>
+      <p className={p}>
+        This website sets no cookies, and we use no advertising or analytics
+        cookies or trackers. When you sign in as a member, your browser keeps
+        a session token in its local storage so that you stay signed in; it is
+        removed when you sign out. The site also caches its own files in your
+        browser so that it loads quickly. Both are strictly necessary to
+        provide the service you have asked for, so no consent banner is shown.
+        Fonts and all other assets are served from our own site. When you use
+        live chauffeur tracking, map tiles are loaded from OpenStreetMap and
+        your pickup postcode is looked up via the official UK postcode
+        database; these requests are made only for that feature. Nothing here
+        is used to follow you across other websites.
+      </p>
+
       <h2 className={h2}>How long we keep it</h2>
       <p className={p}>
         Membership details are kept while your membership is active. Booking
@@ -76,7 +91,7 @@ const Privacy = () => (
           info@apexiavip.com
         </a>
       </p>
-      <p className="text-smoke/60 text-xs font-light mt-8">Last updated: 25 July 2026</p>
+      <p className="text-smoke/60 text-xs font-light mt-8">Last updated: 11 September 2026</p>
     </div>
   </div>
 );

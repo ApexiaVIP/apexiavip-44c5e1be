@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Inter:wght@300;400;500&display=swap');
+/* Fonts are bundled with the site, imported in main.tsx (no request to Google Fonts) */
 
 /* Apex Limousine Services - Ultra-discrete luxury design system */
 
