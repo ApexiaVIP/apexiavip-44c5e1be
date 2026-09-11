@@ -6,7 +6,11 @@ const config: CapacitorConfig = {
   webDir: "dist",
   backgroundColor: "#0b0a08",
   ios: {
-    contentInset: "automatic",
+    // The page draws under the status bar and home indicator itself, using
+    // the safe-area insets (viewport-fit=cover is set inside the app)
+    contentInset: "never",
+    // Long-press link previews are a browser habit, not an app one
+    allowsLinkPreview: false,
   },
 };
 

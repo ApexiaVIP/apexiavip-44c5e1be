@@ -183,7 +183,7 @@ const Profile = () => {
     }
     await refreshProfile();
     toast({ title: "Profile saved" });
-    if (isWelcome) navigate("/#contact");
+    if (isWelcome) navigate("/book");
   };
 
   if (loading || (user && !mfaResolved)) {
@@ -296,7 +296,7 @@ const Profile = () => {
           {isWelcome && (
             <div className="text-center">
               <Link
-                to="/#contact"
+                to="/book"
                 className="text-smoke hover:text-foreground transition-colors text-xs tracking-[0.15em] uppercase"
               >
                 Skip for now

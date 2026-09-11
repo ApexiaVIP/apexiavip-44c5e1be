@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import apexiaLogo from "@/assets/apexia-logo.jpg";
+import apexiaLogo from "@/assets/apexia-logo.svg";
+import { isInstalledApp } from "@/lib/appLinks";
 
 interface AuthShellProps {
   eyebrow?: string;
@@ -13,16 +14,18 @@ interface AuthShellProps {
 /** Shared full-page layout for the members auth screens. */
 const AuthShell = ({ eyebrow = "Members Only", title, subtitle, children }: AuthShellProps) => (
   <div className="min-h-screen bg-background flex flex-col items-center justify-center px-8 py-16">
-    <Link
-      to="/"
-      className="absolute top-8 left-8 flex items-center gap-2 text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
-    >
-      <ArrowLeft className="w-4 h-4" />
-      Back
-    </Link>
+    {!isInstalledApp() && (
+      <Link
+        to="/"
+        className="absolute top-8 left-8 flex items-center gap-2 text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Back
+      </Link>
+    )}
 
     <div className="w-full max-w-md text-center">
-      <img src={apexiaLogo} alt="Apexia VIP" className="h-24 w-auto mx-auto mb-10" />
+      <img src={apexiaLogo} alt="Apexia VIP" className="h-16 w-auto mx-auto mb-10" width="944" height="550" />
       <p className="text-champagne text-xs tracking-[0.4em] uppercase mb-4">{eyebrow}</p>
       <h1 className="font-display text-3xl font-light tracking-wider text-foreground mb-4">
         {title}

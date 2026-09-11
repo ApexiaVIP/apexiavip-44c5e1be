@@ -138,7 +138,7 @@ const VehicleDetail = () => {
             {/* CTA */}
             <div className="text-center">
               <Link
-                to={`/?vehicle=${encodeURIComponent(vehicle.name)}#contact`}
+                to={`/book?vehicle=${encodeURIComponent(vehicle.name)}`}
                 className="inline-block border border-champagne text-champagne hover:bg-champagne hover:text-background px-12 py-4 text-xs tracking-[0.3em] uppercase transition-all duration-500"
               >
                 Book This Vehicle

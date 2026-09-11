@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Lock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { isInstalledApp } from "@/lib/appLinks";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const MembersGate = ({ children }: { children: ReactNode }) => {
@@ -31,7 +32,7 @@ const MembersGate = ({ children }: { children: ReactNode }) => {
         </p>
         <Link
           to="/login"
-          state={{ from: "/#contact" }}
+          state={{ from: "/book" }}
           className="inline-block border border-champagne text-champagne hover:bg-champagne hover:text-background transition-colors duration-500 text-xs tracking-[0.2em] uppercase px-10 py-4"
         >
           Verify Now
@@ -55,7 +56,7 @@ const MembersGate = ({ children }: { children: ReactNode }) => {
         </p>
         <Link
           to="/login"
-          state={{ from: "/#contact" }}
+          state={{ from: "/book" }}
           className="inline-block border border-champagne text-champagne hover:bg-champagne hover:text-background transition-colors duration-500 text-xs tracking-[0.2em] uppercase px-10 py-4"
         >
           Member Sign In
@@ -63,6 +64,10 @@ const MembersGate = ({ children }: { children: ReactNode }) => {
       </div>
     );
   }
+
+  // Inside the apps the header already says who is signed in and offers
+  // sign out, so the form does not repeat it
+  if (isInstalledApp()) return <div>{children}</div>;
 
   return (
     <div>

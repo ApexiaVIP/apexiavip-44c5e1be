@@ -297,7 +297,7 @@ const BookingForm = () => {
             ? result.message
             : editing
               ? "Your changes have been sent to our team."
-              : "We will be in touch shortly.",
+              : "We will text you as soon as your chauffeur is confirmed.",
       });
     } catch (err) {
       console.error(err);
@@ -318,12 +318,12 @@ const BookingForm = () => {
           <Check className="w-5 h-5 text-champagne" />
         </div>
         <h3 className="font-display text-2xl tracking-wider text-foreground mb-3">
-          {editing ? "Booking Updated" : "Enquiry Received"}
+          {editing ? "Booking Updated" : "Booking Received"}
         </h3>
-        <p className="text-smoke text-sm font-light">
+        <p className="text-smoke text-sm font-light max-w-sm mx-auto leading-relaxed">
           {editing
-            ? "Your booking has been updated. You can review it in My Bookings."
-            : "We will respond within 24 hours."}
+            ? "Your changes have been sent to our team, who will confirm them shortly."
+            : "Your booking has been sent to Apexia VIP. All bookings are subject to availability; we will confirm by text once your chauffeur is assigned, and you can follow progress in My Bookings."}
         </p>
       </div>
     );

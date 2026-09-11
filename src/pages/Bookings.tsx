@@ -56,8 +56,15 @@ const statusVariant = (status: string): "secondary" | "outline" | "destructive" 
   return "secondary";
 };
 
+// "Confirmed" is reserved for a chauffeur actually being assigned. Before
+// that the booking has only been received, and inside the hour it is
+// subject to availability.
 const displayStatus = (status: string) => {
-  if (status === "Pending" || status === "Requested" || status === "Confirmed") return "Confirmed";
+  if (status === "Pending" || status === "Requested" || status === "Confirmed") return "Received";
+  if (status === "Dispatched") return "Confirmed";
+  if (status === "En route to pickup") return "On the way";
+  if (status === "At Pickup") return "Arrived";
+  if (status === "Passenger on board") return "On board";
   if (status === "Clear/Completed" || status === "Clear") return "Completed";
   if (status === "Invoice") return "Completed";
   return status;
@@ -238,7 +245,7 @@ const Bookings = () => {
 
         {isUpcoming && isOwn && b.reference && b.status !== "Failed" && (
           <div className="flex items-center gap-3 flex-wrap">
-            <Link to={`/?edit=${encodeURIComponent(b.reference)}#contact`}>
+            <Link to={`/book?edit=${encodeURIComponent(b.reference)}`}>
               <Button variant="outline" size="sm" className="tracking-[0.15em] uppercase">
                 Amend
               </Button>
@@ -357,7 +364,7 @@ const Bookings = () => {
                 {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
               </Button>
             )}
-            <Link to="/#contact">
+            <Link to="/book">
               <Button size="sm" className="tracking-[0.15em] uppercase">
                 New Booking
               </Button>
@@ -384,7 +391,7 @@ const Bookings = () => {
               You have no bookings yet.
             </p>
             <Link
-              to="/#contact"
+              to="/book"
               className="inline-block border border-champagne text-champagne hover:bg-champagne hover:text-background transition-colors duration-500 text-xs tracking-[0.2em] uppercase px-10 py-4"
             >
               Make an Enquiry

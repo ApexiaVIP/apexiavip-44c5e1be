@@ -137,7 +137,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    // This device only: a member signing out on the website should not be
+    // thrown out of the app on their phone, or vice versa
+    await supabase.auth.signOut({ scope: "local" });
   };
 
   return (

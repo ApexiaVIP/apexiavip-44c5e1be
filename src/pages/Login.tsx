@@ -37,7 +37,7 @@ const Login = () => {
   const { user, mfaVerified, mfaResolved, refreshMfa, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = (location.state as { from?: string } | null)?.from ?? "/#contact";
+  const redirectTo = (location.state as { from?: string } | null)?.from ?? "/book";
 
   // "fresh": passwordless phone sign-in. "session": an existing signed-in
   // session that just needs code re-verification (e.g. after an admin 2FA reset).
@@ -90,7 +90,15 @@ const Login = () => {
           setMode("session");
           setStep("code");
         } catch (err) {
-          setError(surfaceError(err, "We could not send your access code. Please try again."));
+          const message = surfaceError(err, "We could not send your access code. Please try again.");
+          if (/not authenticated/i.test(message)) {
+            // The stored session is no longer valid (revoked elsewhere, or
+            // expired): drop it quietly and offer a normal sign-in
+            await supabase.auth.signOut({ scope: "local" });
+            startedRef.current = false;
+          } else {
+            setError(message);
+          }
         } finally {
           setSubmitting(false);
         }

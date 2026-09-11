@@ -16,6 +16,10 @@ import Admin from "./pages/Admin";
 import Privacy from "./pages/Privacy";
 import GetApp from "./pages/GetApp";
 import AppSidebar from "@/components/AppSidebar";
+import NativeTabBar from "@/components/NativeTabBar";
+import Book from "./pages/Book";
+import { isInstalledApp } from "@/lib/appLinks";
+import { useAuth } from "@/hooks/useAuth";
 // Aliased to a stub in native builds: the partner desk is desktop only
 import McfcPortal from "@/pages/McfcPortal";
 import NotFound from "./pages/NotFound";
@@ -43,6 +47,14 @@ const AuthLinkRedirect = () => {
   return null;
 };
 
+// The store apps open on the member's bookings, or on sign-in, never on the
+// marketing site
+const NativeHome = () => {
+  const { user, mfaVerified, mfaResolved, loading } = useAuth();
+  if (loading || (user && !mfaResolved)) return null;
+  return <Navigate to={user && mfaVerified ? "/bookings" : "/login"} replace />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -52,8 +64,12 @@ const App = () => (
         <AuthProvider>
           <AuthLinkRedirect />
           <AppSidebar />
+          <NativeTabBar />
           <Routes>
-            <Route path="/" element={isMcfcHost ? <McfcPortal /> : <Index />} />
+            <Route
+              path="/"
+              element={isMcfcHost ? <McfcPortal /> : isInstalledApp() ? <NativeHome /> : <Index />}
+            />
             <Route path="/fleet/:slug" element={<VehicleDetail />} />
             <Route path="/login" element={<Login />} />
             <Route path="/welcome" element={<Welcome />} />
@@ -64,6 +80,7 @@ const App = () => (
             <Route path="/admin" element={<Admin />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/app" element={<GetApp />} />
+            <Route path="/book" element={<Book />} />
             <Route path="/mcfc" element={<McfcPortal />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

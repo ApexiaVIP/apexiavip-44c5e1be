@@ -18,7 +18,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking } from "@/lib/mfa";
 import { useAuth } from "@/hooks/useAuth";
-import apexiaLogo from "@/assets/apexia-logo.jpg";
+import apexiaLogo from "@/assets/apexia-logo.svg";
 import mcfcBadge from "@/assets/mcfc-badge.svg";
 
 /**
@@ -1201,7 +1201,7 @@ const McfcPortal = () => {
           Back
         </Link>
         <div className="w-full max-w-md text-center">
-          <img src={apexiaLogo} alt="Apexia VIP" className="h-24 w-auto mx-auto mb-10" />
+          <img src={apexiaLogo} alt="Apexia VIP" className="h-16 w-auto mx-auto mb-10" width="944" height="550" />
           <p className="text-xs tracking-[0.4em] uppercase mb-4" style={{ color: SKY }}>
             Partner Portal
           </p>
