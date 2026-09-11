@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import apexiaLogo from "@/assets/apexia-logo.jpg";
 import { useAuth } from "@/hooks/useAuth";
+import { isInstalledApp } from "@/lib/appLinks";
 
 const Header = () => {
   const { user, isAdmin, signOut } = useAuth();
@@ -25,6 +26,14 @@ const Header = () => {
             >
               Contact
             </a>
+            {!isInstalledApp() && (
+              <Link
+                to="/app"
+                className="text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
+              >
+                App
+              </Link>
+            )}
             {isAdmin && (
               <Link
                 to="/admin"

@@ -15,6 +15,7 @@ import Bookings from "./pages/Bookings";
 import Admin from "./pages/Admin";
 import Privacy from "./pages/Privacy";
 import GetApp from "./pages/GetApp";
+import AppSidebar from "@/components/AppSidebar";
 // Aliased to a stub in native builds: the partner desk is desktop only
 import McfcPortal from "@/pages/McfcPortal";
 import NotFound from "./pages/NotFound";
@@ -50,6 +51,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <AuthLinkRedirect />
+          <AppSidebar />
           <Routes>
             <Route path="/" element={isMcfcHost ? <McfcPortal /> : <Index />} />
             <Route path="/fleet/:slug" element={<VehicleDetail />} />
