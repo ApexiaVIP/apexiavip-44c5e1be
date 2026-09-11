@@ -67,6 +67,18 @@ serve(async (req) => {
     }
 
     const body = await req.json();
+
+    // A verified sign-in from inside one of the store apps tells us the member
+    // has it installed, so later texts can stop inviting them to get it
+    const rememberPlatform = async () => {
+      const platform = body.platform === "ios" || body.platform === "android" ? body.platform : null;
+      if (!platform) return;
+      const { error } = await admin
+        .from("profiles")
+        .update({ app_platform: platform, app_last_seen_at: new Date().toISOString() })
+        .eq("id", user.id);
+      if (error) console.error("Could not record app platform:", error);
+    };
     const action = body?.action;
 
     if (action === "status") {
@@ -224,6 +236,7 @@ serve(async (req) => {
         .from("mfa_sessions")
         .upsert({ user_id: user.id, session_id: sessionId }, { onConflict: "session_id" });
       if (claimSessionError) throw claimSessionError;
+      await rememberPlatform();
 
       return json(200, { success: true });
     }
@@ -262,6 +275,7 @@ serve(async (req) => {
         .from("mfa_sessions")
         .upsert({ user_id: user.id, session_id: sessionId }, { onConflict: "session_id" });
       if (sessionError) throw sessionError;
+      await rememberPlatform();
 
       return json(200, { success: true });
     }

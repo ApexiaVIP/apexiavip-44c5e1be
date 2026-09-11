@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { detectPlatform } from "@/lib/appLinks";
 
 export interface PhoneChallenge {
   /** How the code was delivered */
@@ -120,7 +121,7 @@ const completeLogin = async (data: { token_hash: string; claim_token: string }) 
   });
   if (error) throw new Error("We could not sign you in. Please try again.");
 
-  await invoke2fa({ action: "claim", token: data.claim_token });
+  await invoke2fa({ action: "claim", token: data.claim_token, platform: detectPlatform() });
 };
 
 /**
@@ -149,7 +150,7 @@ export const startPhoneChallenge = async (): Promise<PhoneChallenge> => {
 
 /** Verify the SMS code; on success this session is marked verified server-side. */
 export const verifyPhoneChallenge = async (code: string): Promise<void> => {
-  await invoke2fa({ action: "verify", code });
+  await invoke2fa({ action: "verify", code, platform: detectPlatform() });
 };
 
 /** Whether the current session has passed SMS verification. */

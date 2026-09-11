@@ -14,6 +14,7 @@ import Profile from "./pages/Profile";
 import Bookings from "./pages/Bookings";
 import Admin from "./pages/Admin";
 import Privacy from "./pages/Privacy";
+import GetApp from "./pages/GetApp";
 // Aliased to a stub in native builds: the partner desk is desktop only
 import McfcPortal from "@/pages/McfcPortal";
 import NotFound from "./pages/NotFound";
@@ -60,6 +61,7 @@ const App = () => (
             <Route path="/bookings" element={<Bookings />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/app" element={<GetApp />} />
             <Route path="/mcfc" element={<McfcPortal />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

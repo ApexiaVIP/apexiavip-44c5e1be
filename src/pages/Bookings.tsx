@@ -2,6 +2,7 @@ import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
 import MemberLayout from "@/components/MemberLayout";
+import { GET_APP_URL, isInstalledApp } from "@/lib/appLinks";
 import TrackMap from "@/components/TrackMap";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -363,6 +364,15 @@ const Bookings = () => {
             </Link>
           </div>
         </div>
+
+        {!isInstalledApp() && (
+          <p className="text-smoke text-xs tracking-wider mb-8 -mt-4">
+            Follow your chauffeur live on the day with the Apexia VIP app.{" "}
+            <a href={GET_APP_URL} className="text-champagne hover:text-foreground transition-colors underline underline-offset-4">
+              Get the app
+            </a>
+          </p>
+        )}
 
         {isLoading ? (
           <div className="py-20 text-center">

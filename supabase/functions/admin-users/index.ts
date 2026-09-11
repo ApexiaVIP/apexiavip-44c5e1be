@@ -168,7 +168,7 @@ serve(async (req) => {
       if (phone) {
         await trySendSms(
           phone,
-          "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed."
+          "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed. The app is at apexiavip.com/app"
         );
       }
 
@@ -195,6 +195,12 @@ serve(async (req) => {
                       : `Your membership is now active. To sign in, simply visit the site, choose Members, select email sign-in and enter this email address. We will email you a secure access code. There is no password to remember.`
                   }</p>
                   <p style="margin: 32px 0;"><a href="https://apexiavip.com/login" style="color: #b89b5e; border: 1px solid #b89b5e; padding: 14px 36px; text-decoration: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.2em;">Member Sign In</a></p>
+                  <p style="font-size: 13px; color: #8a8070; line-height: 1.7; margin-bottom: 8px;">Apexia VIP is also on your phone, with live chauffeur tracking on the day.</p>
+                  <p style="margin: 0 0 32px 0; font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase;">
+                    <a href="https://apps.apple.com/gb/app/apexia-vip/id6799735654" style="color: #b89b5e; text-decoration: none;">App Store</a>
+                    <span style="color: #4a4438; padding: 0 12px;">|</span>
+                    <a href="https://play.google.com/store/apps/details?id=com.apexiavip.app" style="color: #b89b5e; text-decoration: none;">Google Play</a>
+                  </p>
                   <p style="font-size: 11px; color: #8a8070;">All enquiries are handled with complete discretion.</p>
                 </div>
               `,
@@ -265,7 +271,7 @@ serve(async (req) => {
         // Tell the new family member they're in, and the primary it went through
         await trySendSms(
           target.phone,
-          "APEXIA VIP: Your family membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed."
+          "APEXIA VIP: Your family membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed. The app is at apexiavip.com/app"
         );
         if (target.primary_member_id) {
           const { data: primary } = await admin

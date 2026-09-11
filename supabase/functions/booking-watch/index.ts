@@ -262,9 +262,35 @@ serve(async (req) => {
         numbers.add(b.phone as string);
       }
 
+      // The moment the car is confirmed is when the app earns its place, so a
+      // member who has never signed in from it gets one line inviting them,
+      // and not again for a month
+      let appNudge = "";
+      let nudgeUserId: string | null = null;
+      if (moment === "assigned" && !b.corporate && b.user_id) {
+        const { data: member } = await admin
+          .from("profiles")
+          .select("app_platform, app_nudged_at")
+          .eq("id", b.user_id as string)
+          .maybeSingle();
+        const nudgedRecently =
+          !!member?.app_nudged_at &&
+          Date.now() - new Date(member.app_nudged_at as string).getTime() < 30 * 24 * 3600 * 1000;
+        if (member && !member.app_platform && !nudgedRecently) {
+          appNudge = " Follow your car live in the app: apexiavip.com/app";
+          nudgeUserId = b.user_id as string;
+        }
+      }
+
       let sentAny = false;
       for (const to of numbers) {
-        if (await trySendSms(to, message)) sentAny = true;
+        if (await trySendSms(to, message + appNudge)) sentAny = true;
+      }
+      if (sentAny && nudgeUserId) {
+        await admin
+          .from("profiles")
+          .update({ app_nudged_at: new Date().toISOString() })
+          .eq("id", nudgeUserId);
       }
       details.push({
         reference: b.reference,
