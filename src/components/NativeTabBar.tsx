@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { CalendarPlus, CarFront, UserRound } from "lucide-react";
+import { CalendarPlus, CarFront, ShieldCheck, UserRound } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { isInstalledApp } from "@/lib/appLinks";
 
@@ -14,10 +14,13 @@ const tabs = [
  * signed in, and never on the website.
  */
 const NativeTabBar = () => {
-  const { user, mfaVerified } = useAuth();
+  const { user, mfaVerified, isAdmin } = useAuth();
   const { pathname } = useLocation();
   if (!isInstalledApp() || !user || !mfaVerified) return null;
   if (pathname === "/login" || pathname.startsWith("/mcfc")) return null;
+
+  // Admins get a fourth tab; members never see it
+  const visible = isAdmin ? [...tabs, { to: "/admin", label: "Admin", icon: ShieldCheck }] : tabs;
 
   return (
     <nav
@@ -25,7 +28,7 @@ const NativeTabBar = () => {
       className="fixed bottom-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-md border-t border-border pb-[env(safe-area-inset-bottom)]"
     >
       <div className="flex">
-        {tabs.map(({ to, label, icon: Icon }) => (
+        {visible.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
