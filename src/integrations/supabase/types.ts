@@ -20,6 +20,10 @@ export type Database = {
           assigned_booking_id: number | null
           assigned_reference: string | null
           bags: number | null
+          booking_type: string
+          business: Json | null
+          children: Json | null
+          client_car: Json | null
           collection_at: string | null
           corporate: string | null
           created_at: string
@@ -28,6 +32,7 @@ export type Database = {
           id: string
           journey_type: string
           name: string
+          notes: string | null
           notified_status: string | null
           passengers: number | null
           phone: string
@@ -46,6 +51,10 @@ export type Database = {
           assigned_booking_id?: number | null
           assigned_reference?: string | null
           bags?: number | null
+          booking_type?: string
+          business?: Json | null
+          children?: Json | null
+          client_car?: Json | null
           collection_at?: string | null
           corporate?: string | null
           created_at?: string
@@ -54,6 +63,7 @@ export type Database = {
           id?: string
           journey_type?: string
           name: string
+          notes?: string | null
           notified_status?: string | null
           passengers?: number | null
           phone: string
@@ -72,6 +82,10 @@ export type Database = {
           assigned_booking_id?: number | null
           assigned_reference?: string | null
           bags?: number | null
+          booking_type?: string
+          business?: Json | null
+          children?: Json | null
+          client_car?: Json | null
           collection_at?: string | null
           corporate?: string | null
           created_at?: string
@@ -80,6 +94,7 @@ export type Database = {
           id?: string
           journey_type?: string
           name?: string
+          notes?: string | null
           notified_status?: string | null
           passengers?: number | null
           phone?: string
@@ -494,6 +509,7 @@ export type Database = {
           app_nudged_at: string | null
           app_platform: string | null
           avatar_url: string
+          business_defaults: Json | null
           corporate: string | null
           corporate_groups: string[] | null
           country: string
@@ -516,6 +532,7 @@ export type Database = {
           app_nudged_at?: string | null
           app_platform?: string | null
           avatar_url?: string
+          business_defaults?: Json | null
           corporate?: string | null
           corporate_groups?: string[] | null
           country?: string
@@ -538,6 +555,7 @@ export type Database = {
           app_nudged_at?: string | null
           app_platform?: string | null
           avatar_url?: string
+          business_defaults?: Json | null
           corporate?: string | null
           corporate_groups?: string[] | null
           country?: string
