@@ -34,7 +34,8 @@ const DESK = "mcfc";
 
 const GROUP_ORDER = ["First Team", "Management", "Executives"];
 
-const VEHICLES = ["S-Class", "Range Rover", "Viano", "JetClass"];
+const CLIENT_CAR = "Client's own car";
+const VEHICLES = ["S-Class", "Range Rover", "Viano", "JetClass", CLIENT_CAR];
 
 /** Passenger seats per vehicle (chauffeur excluded); must match the server */
 const CAPACITY: Record<string, number> = {
@@ -42,7 +43,13 @@ const CAPACITY: Record<string, number> = {
   "Range Rover": 3,
   Viano: 6,
   JetClass: 5,
+  // We drive whatever they own; the desk tells us the car, we trust the seats
+  [CLIENT_CAR]: 7,
 };
+
+const MAX_CHILDREN = 8;
+const seatFor = (age: number) =>
+  age < 1 ? "baby seat" : age < 4 ? "child seat" : age < 12 ? "booster" : "no seat";
 
 type StopType = "pickup" | "dropoff";
 
@@ -68,7 +75,13 @@ interface CarRequest {
   /** Car stays at the passenger's disposal rather than ending somewhere */
   asDirected: boolean;
   asDirectedHours: number;
+  /** Ages of any children aboard; decides the seats we fit */
+  children: number[];
+  /** When the vehicle is the client's own: what it is and whether they ride */
+  clientCar: { make_model: string; registration: string; client_travelling: boolean };
 }
+
+const emptyClientCar = () => ({ make_model: "", registration: "", client_travelling: true });
 
 /** Everyone the car carries at some point, in boarding order. */
 const manifestOf = (car: CarRequest) => {
@@ -134,6 +147,9 @@ const peakOf = (car: CarRequest) => {
 const carIssues = (car: CarRequest): string[] => {
   const issues: string[] = [];
   const capacity = CAPACITY[car.vehicle] ?? 2;
+  if (car.vehicle === CLIENT_CAR && (!car.clientCar.make_model.trim() || !car.clientCar.registration.trim())) {
+    issues.push("Give the client's car make, model and registration.");
+  }
   if (car.stops.length < (car.asDirected ? 1 : 2)) {
     issues.push(
       car.asDirected ? "Add where the car collects." : "Add at least a pick up and a drop off."
@@ -226,6 +242,9 @@ interface ScheduleRow {
   via: { line1?: string }[] | null;
   stops: Stop[] | null;
   status: string;
+  notes?: string | null;
+  children?: { age: number }[] | null;
+  client_car?: { make_model?: string; registration?: string; client_travelling?: boolean } | null;
   live: {
     bookingStatus: string | null;
     driverName: string;
@@ -264,6 +283,8 @@ const emptyCar = (): CarRequest => ({
   notes: "",
   asDirected: false,
   asDirectedHours: 4,
+  children: [],
+  clientCar: emptyClientCar(),
 });
 
 /** Kickoffs are stored in UTC; the desk works in UK time. */
@@ -1052,9 +1073,18 @@ const McfcPortal = () => {
         stops,
         vehicle: VEHICLES.includes(b.vehicle) ? b.vehicle : "S-Class",
         time: b.collection_at ? b.collection_at.slice(11, 16) : "",
-        notes: "",
+        notes: (b as { notes?: string | null }).notes ?? "",
         asDirected: b.journey_type === "hourly",
         asDirectedHours: b.as_directed_hours ?? 4,
+        children: Array.isArray((b as { children?: { age: number }[] | null }).children)
+          ? ((b as { children?: { age: number }[] }).children ?? []).map((c) => Number(c.age) || 0)
+          : [],
+        clientCar: {
+          make_model: (b as { client_car?: { make_model?: string } | null }).client_car?.make_model ?? "",
+          registration: (b as { client_car?: { registration?: string } | null }).client_car?.registration ?? "",
+          client_travelling:
+            (b as { client_car?: { client_travelling?: boolean } | null }).client_car?.client_travelling !== false,
+        },
       },
     ]);
     setView("desk");
@@ -1126,6 +1156,16 @@ const McfcPortal = () => {
               notes: c.notes.trim(),
               asDirected: c.asDirected,
               asDirectedHours: c.asDirectedHours,
+              children: c.children.map((age) => ({ age })),
+              ...(c.vehicle === CLIENT_CAR
+                ? {
+                    clientCar: {
+                      make_model: c.clientCar.make_model.trim(),
+                      registration: c.clientCar.registration.trim().toUpperCase(),
+                      client_travelling: c.clientCar.client_travelling,
+                    },
+                  }
+                : {}),
               // Single-leg fields for older deployments of the booking function
               passengers: manifestOf(c),
               pickup: stops[0]?.address ?? "",
@@ -1979,6 +2019,98 @@ const McfcPortal = () => {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {car.vehicle === CLIENT_CAR && (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className={lightLabel} style={{ color: `${NAVY}99` }}>Make and model</label>
+                    <input
+                      placeholder="e.g. Bentley Bentayga"
+                      value={car.clientCar.make_model}
+                      onChange={(e) => updateCar(i, { clientCar: { ...car.clientCar, make_model: e.target.value } })}
+                      className={lightInput}
+                      style={lightInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label className={lightLabel} style={{ color: `${NAVY}99` }}>Registration</label>
+                    <input
+                      placeholder="AB12 CDE"
+                      value={car.clientCar.registration}
+                      onChange={(e) => updateCar(i, { clientCar: { ...car.clientCar, registration: e.target.value } })}
+                      className={`${lightInput} uppercase`}
+                      style={lightInputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label className={lightLabel} style={{ color: `${NAVY}99` }}>Passenger aboard?</label>
+                    <select
+                      value={car.clientCar.client_travelling ? "yes" : "no"}
+                      onChange={(e) =>
+                        updateCar(i, { clientCar: { ...car.clientCar, client_travelling: e.target.value === "yes" } })
+                      }
+                      className={lightInput}
+                      style={lightInputStyle}
+                    >
+                      <option value="yes">Yes, travelling in it</option>
+                      <option value="no">No, move the car only</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4">
+                <div className="flex items-center justify-between">
+                  <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                    Children aboard (ages)
+                  </label>
+                  {car.children.length < MAX_CHILDREN && (
+                    <button
+                      type="button"
+                      onClick={() => updateCar(i, { children: [...car.children, 5] })}
+                      className="text-xs underline"
+                      style={{ color: NAVY }}
+                    >
+                      + Add child
+                    </button>
+                  )}
+                </div>
+                {car.children.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {car.children.map((age, ci) => (
+                      <span
+                        key={ci}
+                        className="inline-flex items-center gap-2 border rounded px-2 py-1 text-xs bg-white"
+                        style={{ borderColor: `${NAVY}33`, color: NAVY }}
+                      >
+                        Age
+                        <select
+                          value={age}
+                          onChange={(e) =>
+                            updateCar(i, {
+                              children: car.children.map((a, k) => (k === ci ? Number(e.target.value) : a)),
+                            })
+                          }
+                          className="bg-transparent"
+                        >
+                          {Array.from({ length: 18 }, (_, a) => (
+                            <option key={a} value={a}>{a === 0 ? "<1" : a}</option>
+                          ))}
+                        </select>
+                        <span style={{ color: `${NAVY}99` }}>{seatFor(age)}</span>
+                        <button
+                          type="button"
+                          aria-label="Remove child"
+                          onClick={() => updateCar(i, { children: car.children.filter((_, k) => k !== ci) })}
+                          style={{ color: `${NAVY}99` }}
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="mt-4">
@@ -3036,10 +3168,21 @@ const McfcPortal = () => {
                               {r.live?.driverMobile || ""}
                             </td>
                             <td className="px-3 py-2.5 whitespace-nowrap">
-                              {r.live?.vehicleDescription || r.vehicle}
+                              {r.client_car
+                                ? `Client's ${r.client_car.make_model ?? "car"}${
+                                    r.client_car.client_travelling === false ? " (move only)" : ""
+                                  }`
+                                : r.live?.vehicleDescription || r.vehicle}
+                              {(r.children?.length ?? 0) > 0 && (
+                                <div className="text-xs" style={{ color: "#b45309" }}>
+                                  {r.children!.length} {r.children!.length === 1 ? "child" : "children"} (
+                                  {r.children!.map((c) => c.age).join(", ")}):{" "}
+                                  {[...new Set(r.children!.map((c) => seatFor(c.age)))].join(", ")}
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-2.5 whitespace-nowrap">
-                              {r.live?.vehicleRegistration || "TBC"}
+                              {r.client_car?.registration || r.live?.vehicleRegistration || "TBC"}
                             </td>
                           </tr>
                           </Fragment>

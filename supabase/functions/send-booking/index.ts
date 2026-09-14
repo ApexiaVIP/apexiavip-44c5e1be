@@ -11,6 +11,18 @@ const MAX_REQUESTS_PER_HOUR = 10;
 const DEFAULT_COLLECTION_TIME = { hours: "09", minutes: "00" };
 
 // Map vehicle names to Dispatch booking classes
+import {
+  parseNotes,
+  parseChildren,
+  parseBusiness,
+  parseClientCar,
+  describeChildren,
+  describeClientCar,
+  detailLines,
+} from "../_shared/bookingDetails.ts";
+
+const CLIENT_CAR_VEHICLE = "Client's own car";
+
 const vehicleToBookingClass: Record<string, string> = {
   "Range Rover": "Executive",
   "S-Class": "Executive",
@@ -154,9 +166,31 @@ serve(async (req) => {
 
     // Journey type: to a destination (default) or by-the-hour at the
     // passenger's direction
-    const journeyType = body.journeyType === "hourly" ? "hourly" : "destination";
+    const journeyType =
+      body.journeyType === "hourly"
+        ? "hourly"
+        : body.journeyType === "client_car"
+          ? "client_car"
+          : "destination";
     const asDirectedHours =
       journeyType === "hourly" ? parseInt(String(body.asDirectedHours), 10) : null;
+
+    // The extra detail: notes, children, who is paying, the client's own car
+    const notes = parseNotes(body.notes);
+    const children = parseChildren(body.children);
+    const bookingType = body.bookingType === "business" ? "business" : "personal";
+    const business = bookingType === "business" ? parseBusiness(body.business) : null;
+    if (bookingType === "business" && !business) {
+      return new Response(JSON.stringify({ success: false, error: "Please give the company name for a business booking" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const clientCar = journeyType === "client_car" ? parseClientCar(body.clientCar) : null;
+    if (journeyType === "client_car" && !clientCar) {
+      return new Response(JSON.stringify({ success: false, error: "Please give the car's make, model and registration" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     if (journeyType === "hourly" && (!Number.isFinite(asDirectedHours) || asDirectedHours! < 4 || asDirectedHours! > 24)) {
       return new Response(JSON.stringify({ success: false, error: "Invalid hire duration (minimum 4 hours)" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -168,7 +202,7 @@ serve(async (req) => {
       !!(s as Record<string, unknown>).town &&
       !!(s as Record<string, unknown>).postcode;
     const viaStops: Record<string, string>[] =
-      journeyType === "destination" && Array.isArray(body.viaStops)
+      journeyType !== "hourly" && Array.isArray(body.viaStops)
         ? body.viaStops.slice(0, 5).filter(isValidStop)
         : [];
 
@@ -194,7 +228,7 @@ serve(async (req) => {
       });
     }
     const allowedVehicles = ["Range Rover", "S-Class", "Viano", "JetClass"];
-    if (!vehicle || !allowedVehicles.includes(vehicle)) {
+    if (journeyType !== "client_car" && (!vehicle || !allowedVehicles.includes(vehicle))) {
       return new Response(JSON.stringify({ success: false, error: "Invalid vehicle" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -205,7 +239,7 @@ serve(async (req) => {
       });
     }
     if (
-      journeyType === "destination" &&
+      journeyType !== "hourly" &&
       (!dropoffAddress || !dropoffAddress.line1 || !dropoffAddress.town || !dropoffAddress.postcode)
     ) {
       return new Response(JSON.stringify({ success: false, error: "Invalid dropoff address" }), {
@@ -221,7 +255,8 @@ serve(async (req) => {
     const safeEmail = sanitize(email.trim());
     const safePhone = sanitize(phone.trim());
     const safeTravelDate = sanitize(travelDate.trim());
-    const safeVehicle = sanitize(vehicle);
+    const vehicleName = journeyType === "client_car" ? CLIENT_CAR_VEHICLE : vehicle;
+    const safeVehicle = sanitize(vehicleName);
 
     // Rate limiting
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
@@ -272,16 +307,28 @@ serve(async (req) => {
       email: email.trim(),
       phone: phone.trim(),
       travel_date: travelDate,
-      vehicle,
+      vehicle: vehicleName,
       passengers: passengers ?? 1,
       bags: bags ?? 0,
       collection_at: collectionAt,
       pickup: pickupAddress,
-      dropoff: journeyType === "destination" ? dropoffAddress : null,
+      dropoff: journeyType !== "hourly" ? dropoffAddress : null,
       journey_type: journeyType,
       as_directed_hours: asDirectedHours,
       via: viaStops.length > 0 ? viaStops : null,
+      notes,
+      children: children.length > 0 ? children : null,
+      booking_type: bookingType,
+      business,
+      client_car: clientCar,
     };
+    // Remember business details so the next booking starts filled in
+    if (business) {
+      await supabase
+        .from("profiles")
+        .update({ business_defaults: business })
+        .eq("id", userData.user.id);
+    }
     if (!amendReference) {
       const { error: dbError } = await supabase.from("bookings").insert({
         ...bookingRow,
@@ -296,7 +343,16 @@ serve(async (req) => {
 
     // --- Send to Dispatch Transfer API ---
     const collectionDateTime = buildCollectionDateTime(travelDateRaw, travelDate);
-    const bookingClass = vehicleToBookingClass[vehicle] || "Executive";
+    const bookingClass =
+      journeyType === "client_car" ? "Executive" : vehicleToBookingClass[vehicle] || "Executive";
+    const dispatchNotes = [
+      journeyType === "client_car"
+        ? "VEHICLE: CLIENT'S OWN CAR (CHAUFFEUR ONLY)"
+        : journeyType === "hourly"
+          ? `VEHICLE: ${vehicle.toUpperCase()}. As directed hire: ${asDirectedHours} hours.`
+          : `VEHICLE: ${vehicle.toUpperCase()}`,
+      ...detailLines({ children, clientCar, business, notes }),
+    ].join(" | ");
 
     const dispatchPayload = {
       Reference: bookingReference,
@@ -311,10 +367,7 @@ serve(async (req) => {
       BookedBy: "Website",
       // Booking class only distinguishes Executive from VIP, so the model
       // leads the notes: it is the one place the dispatcher sees which car
-      BookingNotes:
-        journeyType === "hourly"
-          ? `VEHICLE: ${vehicle.toUpperCase()}. As directed hire: ${asDirectedHours} hours.`
-          : `VEHICLE: ${vehicle.toUpperCase()}`,
+      BookingNotes: dispatchNotes,
       AsDirected: journeyType === "hourly" ? "T" : "F",
       ...(journeyType === "hourly"
         ? { AsDirectedTime: asDirectedHours! * 60, AsDirectedMileage: 0 }
@@ -326,7 +379,7 @@ serve(async (req) => {
         Postcode: pickupAddress.postcode?.trim() || "",
         Country: pickupAddress.country?.trim() || "United Kingdom",
       },
-      ...(journeyType === "destination"
+      ...(journeyType !== "hourly"
         ? {
             DropOffAddress: {
               Line1: dropoffAddress.line1?.trim() || "",
@@ -421,6 +474,27 @@ serve(async (req) => {
       journeyType === "hourly"
         ? `As directed (${asDirectedHours} hour hire)`
         : `${sanitize(dropoffAddress.line1 || "")}, ${sanitize(dropoffAddress.town || "")}, ${sanitize(dropoffAddress.postcode || "")}`;
+    const rowStyle = `padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; vertical-align: top;`;
+    const detailRows = [
+      clientCar
+        ? `<tr><td style="${rowStyle}">Client's car</td><td style="padding: 12px 0; color: #e0c341;">${sanitize(describeClientCar(clientCar))}</td></tr>`
+        : "",
+      children.length > 0
+        ? `<tr><td style="${rowStyle}">Children</td><td style="padding: 12px 0; color: #e0c341;">${sanitize(describeChildren(children))}</td></tr>`
+        : "",
+      business
+        ? `<tr><td style="${rowStyle}">Business</td><td style="padding: 12px 0;">${sanitize(business.company)}${
+            business.department ? `, ${sanitize(business.department)}` : ""
+          }${business.clients ? `<br/>Clients: ${sanitize(business.clients)}` : ""}${
+            business.pa_name || business.pa_contact
+              ? `<br/>PA: ${sanitize([business.pa_name, business.pa_contact].filter(Boolean).join(", "))}`
+              : ""
+          }${business.invoice_address ? `<br/>Invoice to: ${sanitize(business.invoice_address)}` : ""}</td></tr>`
+        : "",
+      notes
+        ? `<tr><td style="${rowStyle}">Notes</td><td style="padding: 12px 0; white-space: pre-wrap;">${sanitize(notes)}</td></tr>`
+        : "",
+    ].join("");
     const stopsRows = viaStops
       .map(
         (stop, i) =>
@@ -444,6 +518,7 @@ serve(async (req) => {
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Pickup</td><td style="padding: 12px 0;">${safePickup}</td></tr>
           ${stopsRows}
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Dropoff</td><td style="padding: 12px 0;">${safeDropoff}</td></tr>
+          ${detailRows}
         </table>
       </div>
     `;
@@ -463,7 +538,9 @@ serve(async (req) => {
               ? "ACTION NEEDED - Booking AMENDED (APPLY BY HAND)"
               : "Booking AMENDED"
             : "Booking Enquiry"
-        }: ${safeName} (${safeVehicle})`,
+        }: ${safeName} (${safeVehicle})${clientCar ? " - CLIENT'S OWN CAR" : ""}${
+          children.length > 0 ? " - CHILD SEATS" : ""
+        }`,
         html: htmlBody,
         reply_to: email.trim(),
       }),

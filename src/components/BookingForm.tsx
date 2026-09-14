@@ -2,13 +2,14 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { format } from "date-fns";
-import { CalendarIcon, Check, Users, Luggage, Minus, Plus, X } from "lucide-react";
+import { CalendarIcon, Check, Users, Luggage, Minus, Plus, X, Baby } from "lucide-react";
 import { z } from "zod";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
 import {
   Form,
@@ -62,8 +63,35 @@ export const MIN_HIRE_HOURS = 4;
 export const MAX_HIRE_HOURS = 12;
 const MAX_STOPS = 5;
 
-const bookingSchema = z
+export const MAX_CHILDREN = 8;
+export const MAX_NOTES = 1000;
+
+const businessSchema = z.object({
+  company: z.string().trim().max(120).default(""),
+  department: z.string().trim().max(120).default(""),
+  clients: z.string().trim().max(300).default(""),
+  pa_name: z.string().trim().max(120).default(""),
+  pa_contact: z.string().trim().max(200).default(""),
+  invoice_address: z.string().trim().max(400).default(""),
+});
+
+const clientCarSchema = z.object({
+  make_model: z.string().trim().max(80).default(""),
+  registration: z.string().trim().max(20).default(""),
+  client_travelling: z.boolean().default(true),
+});
+
+/** What we fit for a child of this age; mirrors the server rule. */
+export const seatFor = (age: number) =>
+  age < 1 ? "baby seat" : age < 4 ? "child seat" : age < 12 ? "booster" : "no seat needed";
+
+export const bookingSchema = z
   .object({
+    bookingType: z.enum(["personal", "business"]),
+    business: businessSchema,
+    notes: z.string().trim().max(MAX_NOTES, `Please keep notes under ${MAX_NOTES} characters`).default(""),
+    children: z.array(z.object({ age: z.number().int().min(0).max(17) })).max(MAX_CHILDREN),
+    clientCar: clientCarSchema,
     name: z.string().trim().min(1, "Name is required").max(100),
     email: z.string().trim().email("Invalid email address").max(255),
     phone: z.string().trim().min(1, "Phone number is required").max(30),
@@ -71,10 +99,10 @@ const bookingSchema = z
     collectionTime: z
       .string()
       .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Please select a pickup time"),
-    vehicle: z.string().min(1, "Please select a vehicle"),
+    vehicle: z.string().default(""),
     passengers: z.number().min(1, "At least 1 passenger").max(20),
     bags: z.number().min(0).max(30),
-    journeyType: z.enum(["destination", "hourly"]),
+    journeyType: z.enum(["destination", "hourly", "client_car"]),
     asDirectedHours: z.string().default(""),
     pickupAddress: addressSchema,
     dropoffAddress: looseAddressSchema,
@@ -92,7 +120,19 @@ const bookingSchema = z
       if (!addr.postcode)
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, "postcode"], message: "Postcode is required" });
     };
-    if (v.journeyType === "destination") {
+    // The client's own car needs no Apexia vehicle; everything else does
+    if (v.journeyType === "client_car") {
+      if (!v.clientCar.make_model)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["clientCar", "make_model"], message: "Make and model are required" });
+      if (!v.clientCar.registration)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["clientCar", "registration"], message: "Registration is required" });
+    } else if (!v.vehicle) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["vehicle"], message: "Please select a vehicle" });
+    }
+    if (v.bookingType === "business" && !v.business.company) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["business", "company"], message: "Company name is required" });
+    }
+    if (v.journeyType !== "hourly") {
       requireAddress(v.dropoffAddress, ["dropoffAddress"]);
       v.viaStops.forEach((s, i) => requireAddress(s, ["viaStops", i]));
     } else {
@@ -119,6 +159,11 @@ const BookingForm = () => {
   const form = useForm<BookingFormValues>({
     resolver: zodResolver(bookingSchema),
     defaultValues: {
+      bookingType: "personal",
+      business: { company: "", department: "", clients: "", pa_name: "", pa_contact: "", invoice_address: "" },
+      notes: "",
+      children: [],
+      clientCar: { make_model: "", registration: "", client_travelling: true },
       name: "",
       email: "",
       phone: "",
@@ -139,7 +184,14 @@ const BookingForm = () => {
     append: appendStop,
     remove: removeStop,
   } = useFieldArray({ control: form.control, name: "viaStops" });
+  const {
+    fields: childFields,
+    append: appendChild,
+    remove: removeChild,
+  } = useFieldArray({ control: form.control, name: "children" });
   const journeyType = form.watch("journeyType");
+  const bookingType = form.watch("bookingType");
+  const childAges = form.watch("children");
 
   const { profile } = useAuth();
 
@@ -155,6 +207,18 @@ const BookingForm = () => {
     if (!form.getValues("phone") && profile.phone.startsWith("+44")) {
       setCountryCode("+44");
       form.setValue("phone", profile.phone.slice(3));
+    }
+    // The last business details this member used, so they are not retyped
+    const defaults = (profile as { business_defaults?: Record<string, string> | null }).business_defaults;
+    if (defaults && !form.getValues("business.company")) {
+      form.setValue("business", {
+        company: defaults.company ?? "",
+        department: defaults.department ?? "",
+        clients: defaults.clients ?? "",
+        pa_name: defaults.pa_name ?? "",
+        pa_contact: defaults.pa_contact ?? "",
+        invoice_address: defaults.invoice_address ?? "",
+      });
     }
   }, [profile]);
 
@@ -198,7 +262,30 @@ const BookingForm = () => {
       if (phoneMatch) setCountryCode(phoneMatch[1]);
       const pickup = (data.pickup ?? {}) as Record<string, string>;
       const dropoff = (data.dropoff ?? {}) as Record<string, string>;
+      const row = data as typeof data & {
+        notes?: string | null;
+        children?: { age: number }[] | null;
+        booking_type?: string | null;
+        business?: Record<string, string> | null;
+        client_car?: { make_model?: string; registration?: string; client_travelling?: boolean } | null;
+      };
       form.reset({
+        bookingType: row.booking_type === "business" ? "business" : "personal",
+        business: {
+          company: row.business?.company ?? "",
+          department: row.business?.department ?? "",
+          clients: row.business?.clients ?? "",
+          pa_name: row.business?.pa_name ?? "",
+          pa_contact: row.business?.pa_contact ?? "",
+          invoice_address: row.business?.invoice_address ?? "",
+        },
+        notes: row.notes ?? "",
+        children: Array.isArray(row.children) ? row.children.map((c) => ({ age: Number(c.age) || 0 })) : [],
+        clientCar: {
+          make_model: row.client_car?.make_model ?? "",
+          registration: row.client_car?.registration ?? "",
+          client_travelling: row.client_car?.client_travelling !== false,
+        },
         name: data.name,
         email: data.email,
         phone: phoneMatch ? phoneMatch[2] : data.phone,
@@ -206,10 +293,15 @@ const BookingForm = () => {
         collectionTime: collection
           ? `${String(collection.getHours()).padStart(2, "0")}:${String(collection.getMinutes()).padStart(2, "0")}`
           : "",
-        vehicle: data.vehicle,
+        vehicle: data.journey_type === "client_car" ? "" : data.vehicle,
         passengers: data.passengers ?? 1,
         bags: data.bags ?? 0,
-        journeyType: data.journey_type === "hourly" ? "hourly" : "destination",
+        journeyType:
+          data.journey_type === "hourly"
+            ? "hourly"
+            : data.journey_type === "client_car"
+              ? "client_car"
+              : "destination",
         asDirectedHours: data.as_directed_hours ? String(data.as_directed_hours) : "",
         viaStops: Array.isArray(data.via)
           ? (data.via as Record<string, string>[]).map((s) => ({
@@ -269,15 +361,20 @@ const BookingForm = () => {
             travelDateRaw: `${format(data.travelDate, "dd-MMM-yyyy")} ${data.collectionTime}`,
             collectionAt: collectionAt.toISOString(),
             amendReference: editing ?? undefined,
-            vehicle: data.vehicle,
+            vehicle: data.journeyType === "client_car" ? undefined : data.vehicle,
             passengers: data.passengers,
             bags: data.bags,
             journeyType: data.journeyType,
             asDirectedHours:
               data.journeyType === "hourly" ? parseInt(data.asDirectedHours, 10) : undefined,
             pickupAddress: data.pickupAddress,
-            dropoffAddress: data.journeyType === "destination" ? data.dropoffAddress : undefined,
-            viaStops: data.journeyType === "destination" ? data.viaStops : [],
+            dropoffAddress: data.journeyType !== "hourly" ? data.dropoffAddress : undefined,
+            viaStops: data.journeyType !== "hourly" ? data.viaStops : [],
+            notes: data.notes || undefined,
+            children: data.children,
+            bookingType: data.bookingType,
+            business: data.bookingType === "business" ? data.business : undefined,
+            clientCar: data.journeyType === "client_car" ? data.clientCar : undefined,
             website: honeypot,
           },
         }
@@ -350,7 +447,83 @@ const BookingForm = () => {
             tabIndex={-1}
           />
         </div>
-        {/* Vehicle Selection */}
+        {/* Who is this booking for */}
+        <FormField
+          control={form.control}
+          name="bookingType"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                Booking Type
+              </FormLabel>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <button
+                  type="button"
+                  onClick={() => field.onChange("personal")}
+                  className={cn(
+                    "border p-4 text-left transition-all duration-500",
+                    field.value === "personal"
+                      ? "border-champagne"
+                      : "border-border hover:border-champagne-muted"
+                  )}
+                >
+                  <p className="text-foreground text-sm tracking-wide">Personal</p>
+                  <p className="text-smoke text-xs font-light mt-1">
+                    For yourself or your family.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => field.onChange("business")}
+                  className={cn(
+                    "border p-4 text-left transition-all duration-500",
+                    field.value === "business"
+                      ? "border-champagne"
+                      : "border-border hover:border-champagne-muted"
+                  )}
+                >
+                  <p className="text-foreground text-sm tracking-wide">Business</p>
+                  <p className="text-smoke text-xs font-light mt-1">
+                    Invoiced to a company, booked by you or a PA.
+                  </p>
+                </button>
+              </div>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {bookingType === "business" && (
+          <div className="space-y-4 border border-border p-4 md:p-6">
+            <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Business Details</h3>
+            <div className="grid md:grid-cols-2 gap-4">
+              <FormField control={form.control} name="business.company" render={({ field }) => (
+                <FormItem><FormControl><Input placeholder="Company name" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="business.department" render={({ field }) => (
+                <FormItem><FormControl><Input placeholder="Department (optional)" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+            </div>
+            <FormField control={form.control} name="business.clients" render={({ field }) => (
+              <FormItem><FormControl><Input placeholder="Client names (optional)" {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <div className="grid md:grid-cols-2 gap-4">
+              <FormField control={form.control} name="business.pa_name" render={({ field }) => (
+                <FormItem><FormControl><Input placeholder="PA name (optional)" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="business.pa_contact" render={({ field }) => (
+                <FormItem><FormControl><Input placeholder="PA phone or email (optional)" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+            </div>
+            <FormField control={form.control} name="business.invoice_address" render={({ field }) => (
+              <FormItem><FormControl><Input placeholder="Invoice address" {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <p className="text-smoke/70 text-xs font-light">We remember these for your next booking.</p>
+          </div>
+        )}
+
+        {/* Vehicle Selection (not needed when we drive the client's own car) */}
+        {journeyType !== "client_car" && (
         <FormField
           control={form.control}
           name="vehicle"
@@ -414,6 +587,7 @@ const BookingForm = () => {
             </FormItem>
           )}
         />
+        )}
 
         {/* Contact Fields */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -555,7 +729,7 @@ const BookingForm = () => {
               <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
                 Journey Type
               </FormLabel>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                 <button
                   type="button"
                   onClick={() => field.onChange("destination")}
@@ -584,6 +758,21 @@ const BookingForm = () => {
                   <p className="text-foreground text-sm tracking-wide">By the Hour</p>
                   <p className="text-smoke text-xs font-light mt-1">
                     Your chauffeur at your direction. Minimum {MIN_HIRE_HOURS} hours.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => field.onChange("client_car")}
+                  className={cn(
+                    "border p-4 text-left transition-all duration-500",
+                    field.value === "client_car"
+                      ? "border-champagne"
+                      : "border-border hover:border-champagne-muted"
+                  )}
+                >
+                  <p className="text-foreground text-sm tracking-wide">Drive My Car</p>
+                  <p className="text-smoke text-xs font-light mt-1">
+                    A chauffeur for your own vehicle, with you aboard or moving it for you.
                   </p>
                 </button>
               </div>
@@ -627,9 +816,58 @@ const BookingForm = () => {
           />
         )}
 
+        {journeyType === "client_car" && (
+          <div className="space-y-4 border border-border p-4 md:p-6">
+            <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Your Vehicle</h3>
+            <div className="grid md:grid-cols-2 gap-4">
+              <FormField control={form.control} name="clientCar.make_model" render={({ field }) => (
+                <FormItem><FormControl><Input placeholder="Make and model" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="clientCar.registration" render={({ field }) => (
+                <FormItem><FormControl><Input placeholder="Registration" className="uppercase" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+            </div>
+            <FormField
+              control={form.control}
+              name="clientCar.client_travelling"
+              render={({ field }) => (
+                <FormItem>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => field.onChange(true)}
+                      className={cn(
+                        "border py-3 text-sm transition-all duration-500",
+                        field.value ? "border-champagne text-foreground" : "border-border text-smoke hover:border-champagne-muted"
+                      )}
+                    >
+                      I am travelling in it
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => field.onChange(false)}
+                      className={cn(
+                        "border py-3 text-sm transition-all duration-500",
+                        !field.value ? "border-champagne text-foreground" : "border-border text-smoke hover:border-champagne-muted"
+                      )}
+                    >
+                      Move it for me
+                    </button>
+                  </div>
+                </FormItem>
+              )}
+            />
+            <p className="text-smoke/70 text-xs font-light">
+              Your chauffeur collects the car from the pickup address below and takes it to the destination.
+            </p>
+          </div>
+        )}
+
         {/* Pickup Address */}
         <div className="space-y-4">
-          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Pickup Location</h3>
+          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">
+            {journeyType === "client_car" ? "Where the car is" : "Pickup Location"}
+          </h3>
           <LocationSearch
             placeholder="Search pickup: place, airport, restaurant or postcode"
             onSelect={applyPlace("pickupAddress")}
@@ -670,7 +908,7 @@ const BookingForm = () => {
           </div>
         </div>
 
-        {journeyType === "destination" && (
+        {journeyType !== "hourly" && (
           <>
             {/* Stops en route */}
             {stopFields.map((stopField, i) => (
@@ -731,7 +969,9 @@ const BookingForm = () => {
 
         {/* Dropoff Address */}
         <div className="space-y-4">
-          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">Dropoff Location</h3>
+          <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">
+            {journeyType === "client_car" ? "Where it needs to go" : "Dropoff Location"}
+          </h3>
           <LocationSearch
             placeholder="Search dropoff: place, airport, restaurant or postcode"
             onSelect={applyPlace("dropoffAddress")}
@@ -855,6 +1095,95 @@ const BookingForm = () => {
             )}
           />
         </div>
+
+        {/* Children: ages decide the seats we fit */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-smoke text-xs tracking-[0.2em] uppercase">
+              Children travelling
+            </p>
+            {childFields.length < MAX_CHILDREN && (
+              <button
+                type="button"
+                onClick={() => appendChild({ age: 5 })}
+                className="text-champagne hover:text-foreground transition-colors text-xs tracking-[0.15em] uppercase"
+              >
+                + Add child
+              </button>
+            )}
+          </div>
+          {childFields.length === 0 ? (
+            <p className="text-smoke/70 text-xs font-light">
+              Add any children so we can fit the right seats.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {childFields.map((child, i) => (
+                <div key={child.id} className="flex items-center gap-3 border border-border px-4 py-2">
+                  <Baby className="w-4 h-4 text-champagne flex-none" />
+                  <span className="text-smoke text-xs tracking-[0.15em] uppercase flex-none">Age</span>
+                  <FormField
+                    control={form.control}
+                    name={`children.${i}.age`}
+                    render={({ field }) => (
+                      <FormItem className="flex-none">
+                        <FormControl>
+                          <select
+                            value={field.value}
+                            onChange={(e) => field.onChange(Number(e.target.value))}
+                            className="bg-transparent border border-border text-foreground text-sm px-2 py-1 focus:outline-none focus:border-champagne"
+                          >
+                            {Array.from({ length: 18 }, (_, a) => (
+                              <option key={a} value={a} className="bg-background">
+                                {a === 0 ? "Under 1" : a}
+                              </option>
+                            ))}
+                          </select>
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <span className="text-smoke text-xs font-light flex-1">
+                    {seatFor(childAges?.[i]?.age ?? 0)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeChild(i)}
+                    aria-label="Remove child"
+                    className="text-smoke hover:text-foreground transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <p className="text-smoke/70 text-xs font-light">
+                Please count children in the passenger total above.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Notes */}
+        <FormField
+          control={form.control}
+          name="notes"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                Notes for your chauffeur (optional)
+              </FormLabel>
+              <FormControl>
+                <Textarea
+                  placeholder="Flight number, meeting point, luggage, anything else we should know."
+                  rows={3}
+                  maxLength={MAX_NOTES}
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
         <div className="pt-4">
           <Button

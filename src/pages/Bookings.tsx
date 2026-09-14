@@ -43,7 +43,29 @@ interface BookingRow {
   as_directed_hours: number | null;
   via: StoredAddress[] | null;
   status: string;
+  notes: string | null;
+  children: { age: number }[] | null;
+  booking_type: string | null;
+  business: { company?: string; department?: string } | null;
+  client_car: { make_model?: string; registration?: string; client_travelling?: boolean } | null;
 }
+
+const seatFor = (age: number) =>
+  age < 1 ? "baby seat" : age < 4 ? "child seat" : age < 12 ? "booster" : null;
+
+/** "2 children (ages 2 and 7), 1 child seat, 1 booster" */
+const childrenLine = (children: { age: number }[]) => {
+  const ages = children.map((c) => c.age);
+  const seats = new Map<string, number>();
+  for (const a of ages) {
+    const seat = seatFor(a);
+    if (seat) seats.set(seat, (seats.get(seat) ?? 0) + 1);
+  }
+  const seatText = [...seats.entries()].map(([k, n]) => `${n} ${k}${n > 1 ? "s" : ""}`).join(", ");
+  return `${children.length} ${children.length === 1 ? "child" : "children"} (age${ages.length > 1 ? "s" : ""} ${ages.join(", ")})${
+    seatText ? `, ${seatText}` : ""
+  }`;
+};
 
 /** Statuses where the journey is over */
 const FINAL_STATUSES = ["Clear/Completed", "Completed", "Cancelled", "No Show", "Invoice", "Failed"];
@@ -242,6 +264,37 @@ const Bookings = () => {
             </>
           )}
         </div>
+
+        {(b.client_car || (b.children?.length ?? 0) > 0 || b.booking_type === "business" || b.notes) && (
+          <div className="text-xs text-smoke space-y-1 border-t border-border pt-3">
+            {b.client_car && (
+              <p>
+                <span className="text-champagne tracking-[0.15em] uppercase mr-2">Your car</span>
+                {b.client_car.make_model} {b.client_car.registration}
+                {b.client_car.client_travelling === false ? " (moved for you)" : ""}
+              </p>
+            )}
+            {(b.children?.length ?? 0) > 0 && (
+              <p>
+                <span className="text-champagne tracking-[0.15em] uppercase mr-2">Children</span>
+                {childrenLine(b.children!)}
+              </p>
+            )}
+            {b.booking_type === "business" && b.business?.company && (
+              <p>
+                <span className="text-champagne tracking-[0.15em] uppercase mr-2">Business</span>
+                {b.business.company}
+                {b.business.department ? `, ${b.business.department}` : ""}
+              </p>
+            )}
+            {b.notes && (
+              <p className="whitespace-pre-wrap">
+                <span className="text-champagne tracking-[0.15em] uppercase mr-2">Notes</span>
+                {b.notes}
+              </p>
+            )}
+          </div>
+        )}
 
         {isUpcoming && isOwn && b.reference && b.status !== "Failed" && (
           <div className="flex items-center gap-3 flex-wrap">

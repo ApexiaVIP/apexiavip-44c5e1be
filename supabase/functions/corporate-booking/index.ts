@@ -10,12 +10,24 @@ const corsHeaders = {
 const MAX_REQUESTS_PER_HOUR = 20;
 const MAX_CARS = 10;
 
+import {
+  parseChildren,
+  parseClientCar,
+  describeChildren,
+  describeClientCar,
+  type Child,
+  type ClientCar,
+} from "../_shared/bookingDetails.ts";
+
+const CLIENT_CAR = "Client's own car";
+
 // Seats available per vehicle (must match the portal UI)
 const CAPACITY: Record<string, number> = {
   "S-Class": 2,
   "Range Rover": 3,
   "Viano": 6,
   "JetClass": 5,
+  [CLIENT_CAR]: 7,
 };
 
 const vehicleToBookingClass: Record<string, string> = {
@@ -104,6 +116,8 @@ interface CarRequest {
   /** Car stays at the passenger's disposal; the journey has no fixed end */
   asDirected?: boolean;
   asDirectedHours?: number;
+  children?: unknown;
+  clientCar?: unknown;
   // Legacy single-leg shape, still accepted
   passengers?: string[];
   pickup?: string;
@@ -492,7 +506,7 @@ serve(async (req) => {
       const { data: rows, error: schedError } = await supabase
         .from("bookings")
         .select(
-          "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status"
+          "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car"
         )
         .eq("corporate", corporate)
         .gte("collection_at", dayStart)
@@ -628,6 +642,8 @@ serve(async (req) => {
       sizes: Map<string, number>;
       asDirected: boolean;
       asDirectedHours: number;
+      children: Child[];
+      clientCar: ClientCar | null;
     }[] = [];
 
     for (const [i, car] of cars.entries()) {
@@ -644,6 +660,12 @@ serve(async (req) => {
       }
       if (car.notes != null && (typeof car.notes !== "string" || car.notes.length > 500)) {
         return json(400, { success: false, error: `${label}: notes too long` });
+      }
+
+      const children = parseChildren(car.children);
+      const clientCar = car.vehicle === CLIENT_CAR ? parseClientCar(car.clientCar) : null;
+      if (car.vehicle === CLIENT_CAR && !clientCar) {
+        return json(400, { success: false, error: `${label}: give the client's car make, model and registration` });
       }
 
       const asDirected = car.asDirected === true;
@@ -735,6 +757,8 @@ serve(async (req) => {
         sizes: walked.sizes,
         asDirected,
         asDirectedHours,
+        children,
+        clientCar,
       });
     }
 
@@ -782,7 +806,8 @@ serve(async (req) => {
     };
 
     const dispatchBookings = cars.map((car, i) => {
-      const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journeys[i];
+      const journey = journeys[i];
+      const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journey;
       const labelled = manifest.map((n) => withCount(n, sizes));
       const reference = amendReference ?? `APEXIA-${deskName}-${requestId}-C${i + 1}`;
       const last = stops[stops.length - 1];
@@ -807,7 +832,10 @@ serve(async (req) => {
         BookingNotes: [
           anyGrey ? "GREY TARMAC DROP OFF (front entrance)." : "",
           asDirected ? `AS DIRECTED: car at disposal for ${asDirectedHours} hours.` : "",
-          `VEHICLE: ${car.vehicle.toUpperCase()}.`,
+          journey.clientCar
+            ? `${describeClientCar(journey.clientCar)}`
+            : `VEHICLE: ${car.vehicle.toUpperCase()}.`,
+          journey.children.length > 0 ? `CHILDREN: ${describeChildren(journey.children)}.` : "",
           `${deskName} Travel Desk request (car ${i + 1} of ${cars.length}), booked by ${bookerName}.`,
           `Passengers: ${labelled.join(", ")}.`,
           `Route: ${describeRoute(stops, sizes)}.`,
@@ -832,7 +860,8 @@ serve(async (req) => {
 
     // Store each car against the booker so it shows in the portal history
     const carRowValues = cars.map((car, i) => {
-      const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journeys[i];
+      const journey = journeys[i];
+      const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journey;
       const last = stops[stops.length - 1];
       const endsWithDropoff = last?.type === "dropoff";
       const viaStops = asDirected && !endsWithDropoff ? stops.slice(1) : stops.slice(1, -1);
@@ -855,8 +884,11 @@ serve(async (req) => {
           // Any front-entrance stop marks the car, so it stands out on the sheet
           ...(stops.some((s) => s.greyTarmac) ? { grey_tarmac: true } : {}),
         },
-        journey_type: asDirected ? "hourly" : "destination",
+        journey_type: journey.clientCar ? "client_car" : asDirected ? "hourly" : "destination",
         as_directed_hours: asDirected ? asDirectedHours : null,
+        notes: car.notes?.trim() || null,
+        children: journey.children.length > 0 ? journey.children : null,
+        client_car: journey.clientCar,
         via:
           viaStops.length > 0
             ? viaStops.map((s) => ({ line1: s.address, town: "", postcode: "" }))
@@ -971,7 +1003,15 @@ serve(async (req) => {
       <tr>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${i + 1}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.time)}</td>
-        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.vehicle)} (${peak} up)</td>
+        <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.vehicle)} (${peak} up)${
+          journeys[i].clientCar
+            ? `<div style="color: #e0c341; margin-top: 4px;">${sanitize(journeys[i].clientCar!.make_model)} ${sanitize(journeys[i].clientCar!.registration)}${journeys[i].clientCar!.client_travelling ? "" : " (move only)"}</div>`
+            : ""
+        }${
+          journeys[i].children.length > 0
+            ? `<div style="color: #e0c341; margin-top: 4px;">${sanitize(describeChildren(journeys[i].children))}</div>`
+            : ""
+        }</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(manifest.map((n) => withCount(n, sizes)).join(", "))}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${routeHtml}</td>
         <td style="padding: 10px 8px; border-bottom: 1px solid #2a2a2a; vertical-align: top;">${sanitize(car.notes?.trim() || "")}</td>
