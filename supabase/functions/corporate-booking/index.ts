@@ -1239,6 +1239,12 @@ serve(async (req) => {
       // instruction from the desk, so pass it to the ops team by hand. The ops
       // email above already carries the new details, marked AMENDED.
       if (amendReference) {
+        // Record the requested details so the desk sees what it asked for,
+        // marked as awaiting the office rather than confirmed
+        await supabase
+          .from("bookings")
+          .update({ ...carRowValues[0], status: "Amendment requested" })
+          .eq("reference", amendReference);
         return json(200, {
           success: true,
           handedToOps: true,

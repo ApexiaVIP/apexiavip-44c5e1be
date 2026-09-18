@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { cancelBooking } from "@/lib/mfa";
+import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
 import { useAuth } from "@/hooks/useAuth";
 import apexiaLogo from "@/assets/apexia-logo.svg";
 import mcfcBadge from "@/assets/mcfc-badge.svg";
@@ -363,6 +363,8 @@ const McfcPortal = () => {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentBooking[]>([]);
+  /** Driver and vehicle from the booking system, by reference */
+  const [recentLive, setRecentLive] = useState<Record<string, LiveBookingStatus>>({});
   // Amending an existing car: its reference; Dispatch overwrites on resubmit
   const [amendRef, setAmendRef] = useState<string | null>(null);
   const [cancelConfirmRef, setCancelConfirmRef] = useState<string | null>(null);
@@ -545,7 +547,26 @@ const McfcPortal = () => {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(10)
-      .then(({ data }) => setRecent((data as unknown as RecentBooking[] | null) ?? []));
+      .then(async ({ data }) => {
+        const rows = (data as unknown as RecentBooking[] | null) ?? [];
+        setRecent(rows);
+        // Ask the booking system who is driving the ones still to run
+        const refs = rows
+          .filter(
+            (b) =>
+              b.reference &&
+              b.status !== "Cancelled" &&
+              b.status !== "Failed" &&
+              (!b.collection_at || new Date(b.collection_at).getTime() > Date.now() - 6 * 3600 * 1000)
+          )
+          .map((b) => b.reference as string);
+        try {
+          const live = await checkBookingStatuses(refs);
+          setRecentLive(Object.fromEntries(live.map((l) => [l.reference, l])));
+        } catch {
+          // The list still shows without live details
+        }
+      });
   }, [user, hasDeskAccess, mfaVerified]);
 
   useEffect(() => {
@@ -2201,6 +2222,7 @@ const McfcPortal = () => {
                     <th className="px-4 py-3 font-medium">Travel Date</th>
                     <th className="px-4 py-3 font-medium">Vehicle</th>
                     <th className="px-4 py-3 font-medium">Passengers</th>
+                    <th className="px-4 py-3 font-medium">Chauffeur</th>
                     <th className="px-4 py-3 font-medium">Status</th>
                     <th className="px-4 py-3 font-medium text-right">Actions</th>
                   </tr>
@@ -2217,9 +2239,37 @@ const McfcPortal = () => {
                         className="border-t"
                         style={{ borderColor: "rgba(28,44,91,0.12)" }}
                       >
-                        <td className="px-4 py-3 whitespace-nowrap">{b.travel_date}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {b.travel_date}
+                          {b.collection_at && (
+                            <span style={{ color: `${NAVY}99` }}>
+                              {" "}
+                              {new Date(b.collection_at).toLocaleTimeString("en-GB", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                timeZone: "Europe/London",
+                              })}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap">{b.vehicle}</td>
                         <td className="px-4 py-3">{b.name}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {(() => {
+                            const live = b.reference ? recentLive[b.reference] : undefined;
+                            if (live?.driver?.name) {
+                              return (
+                                <>
+                                  {live.driver.name}
+                                  {live.vehicle?.registration && (
+                                    <span style={{ color: `${NAVY}99` }}> {live.vehicle.registration}</span>
+                                  )}
+                                </>
+                              );
+                            }
+                            return <span style={{ color: `${NAVY}66` }}>Not yet assigned</span>;
+                          })()}
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span
                             className="inline-block px-2.5 py-1 text-[11px] tracking-[0.12em] uppercase text-white"
@@ -2227,10 +2277,22 @@ const McfcPortal = () => {
                               backgroundColor:
                                 b.status === "Failed" || b.status === "Cancelled"
                                   ? "#b91c1c"
-                                  : NAVY,
+                                  : b.status === "Amendment requested"
+                                    ? "#b45309"
+                                    : NAVY,
                             }}
                           >
-                            {b.status}
+                            {(() => {
+                              const live = b.reference ? recentLive[b.reference]?.bookingStatus : null;
+                              if (b.status === "Amendment requested") return "Change requested";
+                              if (live === "Dispatched") return "Chauffeur assigned";
+                              if (live === "En route to pickup") return "On the way";
+                              if (live === "At Pickup") return "Arrived";
+                              if (live === "Passenger on board") return "On board";
+                              if (live === "Cancelled") return "Cancelled";
+                              if (b.status === "Confirmed") return "Received";
+                              return b.status;
+                            })()}
                           </span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-right">

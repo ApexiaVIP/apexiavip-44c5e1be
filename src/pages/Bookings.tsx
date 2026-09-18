@@ -83,6 +83,7 @@ const statusVariant = (status: string): "secondary" | "outline" | "destructive" 
 // subject to availability.
 const displayStatus = (status: string) => {
   if (status === "Pending" || status === "Requested" || status === "Confirmed") return "Received";
+  if (status === "Amendment requested") return "Change requested";
   if (status === "Dispatched") return "Confirmed";
   if (status === "En route to pickup") return "On the way";
   if (status === "At Pickup") return "Arrived";

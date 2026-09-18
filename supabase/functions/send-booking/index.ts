@@ -554,7 +554,12 @@ serve(async (req) => {
 
     if (dispatchFailureMessage && amendReference) {
       // The change cannot be applied automatically, but the ops email above
-      // carries the new details, so hand it over rather than dead-ending
+      // carries the new details, so hand it over rather than dead-ending.
+      // Our record shows the requested details, awaiting the office.
+      await supabase
+        .from("bookings")
+        .update({ ...bookingRow, status: "Amendment requested" })
+        .eq("reference", bookingReference);
       return new Response(
         JSON.stringify({
           success: true,
