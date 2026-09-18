@@ -267,6 +267,9 @@ interface RecentBooking {
   stops: Stop[] | null;
   journey_type: string | null;
   as_directed_hours: number | null;
+  /** Who keyed it; the desk shares bookings, this just says who to ask */
+  booked_by?: string;
+  mine?: boolean;
 }
 
 const emptyStop = (type: StopType): Stop => ({
@@ -538,17 +541,12 @@ const McfcPortal = () => {
 
   const loadRecent = useCallback(() => {
     if (!user || !hasDeskAccess || !mfaVerified) return;
-    supabase
-      .from("bookings")
-      .select(
-        "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops, journey_type, as_directed_hours"
-      )
-      .eq("corporate", DESK)
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(10)
+    // The whole desk's recent requests (within what this assistant may see),
+    // so colleagues can amend or cancel each other's bookings
+    supabase.functions
+      .invoke("corporate-booking", { body: { action: "recent" } })
       .then(async ({ data }) => {
-        const rows = (data as unknown as RecentBooking[] | null) ?? [];
+        const rows = (Array.isArray(data?.recent) ? data.recent : []) as RecentBooking[];
         setRecent(rows);
         // Ask the booking system who is driving the ones still to run
         const refs = rows
@@ -2253,7 +2251,14 @@ const McfcPortal = () => {
                           )}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">{b.vehicle}</td>
-                        <td className="px-4 py-3">{b.name}</td>
+                        <td className="px-4 py-3">
+                          {b.name}
+                          {b.booked_by && !b.mine && (
+                            <div className="text-[11px]" style={{ color: `${NAVY}99` }}>
+                              Booked by {b.booked_by}
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           {(() => {
                             const live = b.reference ? recentLive[b.reference] : undefined;

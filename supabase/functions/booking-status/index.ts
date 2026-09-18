@@ -57,12 +57,32 @@ serve(async (req) => {
 
     const { data: profile } = await admin
       .from("profiles")
-      .select("status")
+      .select("status, corporate, corporate_groups")
       .eq("id", user.id)
       .maybeSingle();
     if (!profile || profile.status !== "active") {
       return json(403, { error: "Membership not active" });
     }
+
+    // A desk booking belongs to the desk, not to whichever assistant keyed it:
+    // any colleague on the same desk may act on it, provided every passenger
+    // is someone they are allowed to see
+    const deskColleagueMayAct = async (booking: { corporate: string | null; name: string | null }) => {
+      if (!booking.corporate || profile.corporate !== booking.corporate) return false;
+      const groups = Array.isArray(profile.corporate_groups) ? (profile.corporate_groups as string[]) : null;
+      if (!groups || groups.length === 0) return true;
+      const { data: people } = await admin
+        .from("corporate_passengers")
+        .select("name")
+        .eq("corporate", booking.corporate)
+        .in("grp", groups);
+      const visible = new Set((people ?? []).map((p) => p.name as string));
+      const names = String(booking.name ?? "")
+        .split(",")
+        .map((n) => n.trim().replace(/\s+x\d+$/i, ""))
+        .filter(Boolean);
+      return names.length > 0 && names.every((n) => visible.has(n));
+    };
 
     const body = await req.json();
 
@@ -78,7 +98,7 @@ serve(async (req) => {
         )
         .eq("reference", reference)
         .maybeSingle();
-      if (!booking || booking.user_id !== user.id) {
+      if (!booking || (booking.user_id !== user.id && !(await deskColleagueMayAct(booking)))) {
         return json(404, { error: "Booking not found" });
       }
       if (booking.status === "Cancelled") {
@@ -208,7 +228,7 @@ serve(async (req) => {
     // The caller's own bookings, plus (view-only) their family members' bookings
     const { data: matchedBookings, error: ownError } = await admin
       .from("bookings")
-      .select("reference, user_id")
+      .select("reference, user_id, corporate, name")
       .in("reference", references);
     if (ownError) throw ownError;
 
@@ -218,9 +238,11 @@ serve(async (req) => {
       .eq("primary_member_id", user.id);
     const familyIds = new Set((familyProfiles ?? []).map((p) => p.id as string));
 
-    const ownRefs = (matchedBookings ?? [])
-      .filter((b) => b.user_id === user.id || (b.user_id && familyIds.has(b.user_id as string)))
-      .map((b) => b.reference as string);
+    const ownRefs: string[] = [];
+    for (const b of matchedBookings ?? []) {
+      const own = b.user_id === user.id || (b.user_id && familyIds.has(b.user_id as string));
+      if (own || (await deskColleagueMayAct(b))) ownRefs.push(b.reference as string);
+    }
     if (ownRefs.length === 0) return json(200, { statuses: [] });
 
     // Ask Dispatch for current status of these bookings

@@ -303,6 +303,20 @@ serve(async (req) => {
       return (data ?? []) as unknown as Record<string, unknown>[];
     };
 
+    // A desk booking is visible to a limited assistant only if every
+    // passenger on it is one of their own people; unrestricted staff see all
+    const visibleNames = groupScope && groupScope.length > 0
+      ? new Set((await scopedPassengers("name", true)).map((r) => r.name as string))
+      : null;
+    const rowVisible = (row: { name?: string | null }) => {
+      if (!visibleNames) return true;
+      const names = String(row.name ?? "")
+        .split(",")
+        .map((n) => n.trim().replace(/\s+x\d+$/i, ""))
+        .filter(Boolean);
+      return names.length > 0 && names.every((n) => visibleNames.has(n));
+    };
+
     const body = await req.json();
     const action = typeof body.action === "string" ? body.action : "submit";
 
@@ -486,6 +500,35 @@ serve(async (req) => {
 
     // --- Match-day schedule: every desk booking for a date, with live
     // driver and vehicle details from Dispatch where allocated ---
+    // The desk's recent requests: everyone's, not just the caller's, within
+    // what the caller may see. Amend and cancel work from this list.
+    if (action === "recent") {
+      const { data: rows, error: recentError } = await supabase
+        .from("bookings")
+        .select(
+          "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops, journey_type, as_directed_hours, notes, children, client_car, user_id, created_at"
+        )
+        .eq("corporate", corporate)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (recentError) throw recentError;
+      const visible = (rows ?? []).filter(rowVisible).slice(0, 15);
+      // Who keyed each one, so colleagues know who to ask
+      const bookerIds = [...new Set(visible.map((r) => r.user_id).filter(Boolean))] as string[];
+      const { data: bookers } = bookerIds.length
+        ? await supabase.from("profiles").select("id, full_name").in("id", bookerIds)
+        : { data: [] as { id: string; full_name: string }[] };
+      const bookerName = new Map((bookers ?? []).map((b) => [b.id as string, (b.full_name as string) || ""]));
+      return json(200, {
+        success: true,
+        recent: visible.map((r) => ({
+          ...r,
+          booked_by: r.user_id ? bookerName.get(r.user_id as string) || "" : "",
+          mine: r.user_id === userData.user.id,
+        })),
+      });
+    }
+
     if (action === "schedule") {
       const d = typeof body.date === "string" ? body.date.trim() : "";
       const dTo = typeof body.dateTo === "string" && body.dateTo.trim() ? body.dateTo.trim() : d;
@@ -518,18 +561,7 @@ serve(async (req) => {
       );
 
       // A limited assistant sees only journeys made up of their own people
-      if (groupScope && groupScope.length > 0) {
-        const visible = new Set(
-          (await scopedPassengers("name", true)).map((r) => r.name as string)
-        );
-        active = active.filter((r) => {
-          const names = String(r.name ?? "")
-            .split(",")
-            .map((n) => n.trim())
-            .filter(Boolean);
-          return names.length > 0 && names.every((n) => visible.has(n));
-        });
-      }
+      active = active.filter(rowVisible);
 
       const live: Record<string, unknown> = {};
       const refs = active.map((r) => r.reference as string).filter(Boolean);
@@ -618,10 +650,11 @@ serve(async (req) => {
       }
       const { data: existing } = await supabase
         .from("bookings")
-        .select("reference, user_id, corporate, status")
+        .select("reference, user_id, corporate, status, name")
         .eq("reference", amendReference)
         .maybeSingle();
-      if (!existing || existing.user_id !== userData.user.id || existing.corporate !== corporate) {
+      // The booking belongs to the desk: any colleague who may see it may change it
+      if (!existing || existing.corporate !== corporate || !rowVisible(existing)) {
         return json(403, { success: false, error: "Booking not found" });
       }
       if (existing.status === "Cancelled") {
