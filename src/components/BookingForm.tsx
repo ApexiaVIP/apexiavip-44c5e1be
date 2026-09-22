@@ -59,7 +59,7 @@ const looseAddressSchema = z.object({
   country: z.string().trim().max(100).default("United Kingdom"),
 });
 
-export const MIN_HIRE_HOURS = 4;
+export const MIN_HIRE_HOURS = 3;
 export const MAX_HIRE_HOURS = 12;
 const MAX_STOPS = 5;
 
@@ -104,6 +104,9 @@ export const bookingSchema = z
     bags: z.number().min(0).max(30),
     journeyType: z.enum(["destination", "hourly", "client_car"]),
     asDirectedHours: z.string().default(""),
+    returnJourney: z.boolean().default(false),
+    returnDate: z.date().optional(),
+    returnTime: z.string().default(""),
     pickupAddress: addressSchema,
     dropoffAddress: looseAddressSchema,
     viaStops: z.array(looseAddressSchema).max(MAX_STOPS),
@@ -129,6 +132,30 @@ export const bookingSchema = z
     } else if (!v.vehicle) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["vehicle"], message: "Please select a vehicle" });
     }
+    // A return needs a when, and it has to be after we set off
+    if (v.returnJourney && v.journeyType !== "hourly") {
+      if (!v.returnDate) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["returnDate"], message: "Please choose the return date" });
+      }
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(v.returnTime)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["returnTime"], message: "Please choose the return time" });
+      }
+      if (v.returnDate && v.travelDate && /^([01]\d|2[0-3]):[0-5]\d$/.test(v.returnTime) && /^([01]\d|2[0-3]):[0-5]\d$/.test(v.collectionTime)) {
+        const out = new Date(v.travelDate);
+        const [oh, om] = v.collectionTime.split(":").map(Number);
+        out.setHours(oh, om, 0, 0);
+        const back = new Date(v.returnDate);
+        const [rh, rm] = v.returnTime.split(":").map(Number);
+        back.setHours(rh, rm, 0, 0);
+        if (back.getTime() <= out.getTime()) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["returnTime"],
+            message: "The return must be after the outward journey",
+          });
+        }
+      }
+    }
     if (v.bookingType === "business" && !v.business.company) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["business", "company"], message: "Company name is required" });
     }
@@ -152,6 +179,7 @@ type BookingFormValues = z.infer<typeof bookingSchema>;
 const BookingForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submittedReturn, setSubmittedReturn] = useState(false);
   const [honeypot, setHoneypot] = useState("");
   const [countryCode, setCountryCode] = useState("+44");
   const [searchParams, setSearchParams] = useSearchParams();
@@ -173,6 +201,9 @@ const BookingForm = () => {
       bags: 1,
       journeyType: "destination",
       asDirectedHours: "",
+      returnJourney: false,
+      returnDate: undefined,
+      returnTime: "",
       pickupAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
       dropoffAddress: { line1: "", line2: "", town: "", postcode: "", country: "United Kingdom" },
       viaStops: [],
@@ -191,6 +222,7 @@ const BookingForm = () => {
   } = useFieldArray({ control: form.control, name: "children" });
   const journeyType = form.watch("journeyType");
   const bookingType = form.watch("bookingType");
+  const returnJourney = form.watch("returnJourney");
   const childAges = form.watch("children");
 
   const { profile } = useAuth();
@@ -370,6 +402,19 @@ const BookingForm = () => {
             pickupAddress: data.pickupAddress,
             dropoffAddress: data.journeyType !== "hourly" ? data.dropoffAddress : undefined,
             viaStops: data.journeyType !== "hourly" ? data.viaStops : [],
+            returnJourney: data.returnJourney && data.journeyType !== "hourly",
+            ...(data.returnJourney && data.journeyType !== "hourly" && data.returnDate
+              ? (() => {
+                  const [rh, rm] = data.returnTime.split(":").map(Number);
+                  const back = new Date(data.returnDate);
+                  back.setHours(rh, rm, 0, 0);
+                  return {
+                    returnCollectionAt: back.toISOString(),
+                    returnTravelDate: `${format(data.returnDate, "PPP")} at ${data.returnTime}`,
+                    returnTravelDateRaw: `${format(data.returnDate, "dd-MMM-yyyy")} ${data.returnTime}`,
+                  };
+                })()
+              : {}),
             notes: data.notes || undefined,
             children: data.children,
             bookingType: data.bookingType,
@@ -383,6 +428,7 @@ const BookingForm = () => {
       if (error) throw error;
 
       setSubmitted(true);
+      setSubmittedReturn(data.returnJourney && data.journeyType !== "hourly");
       toast({
         title: result?.handedToOps
           ? "Changes sent to our team"
@@ -390,11 +436,13 @@ const BookingForm = () => {
             ? "Booking Updated"
             : "Enquiry Sent",
         description:
-          result?.handedToOps
+          result?.handedToOps || result?.returnHandedToOps
             ? result.message
             : editing
               ? "Your changes have been sent to our team."
-              : "We will text you as soon as your chauffeur is confirmed.",
+              : result?.returnBooked
+                ? "Both journeys are with us. We will text you as soon as each chauffeur is confirmed."
+                : "We will text you as soon as your chauffeur is confirmed.",
       });
     } catch (err) {
       console.error(err);
@@ -420,7 +468,9 @@ const BookingForm = () => {
         <p className="text-smoke text-sm font-light max-w-sm mx-auto leading-relaxed">
           {editing
             ? "Your changes have been sent to our team, who will confirm them shortly."
-            : "Your booking has been sent to Apexia VIP. All bookings are subject to availability; we will confirm by text once your chauffeur is assigned, and you can follow progress in My Bookings."}
+            : `Your booking has been sent to Apexia VIP.${
+                submittedReturn ? " Your return journey has been booked as a second car." : ""
+              } All bookings are subject to availability; we will confirm by text once your chauffeur is assigned, and you can follow progress in My Bookings.`}
         </p>
       </div>
     );
@@ -1030,6 +1080,114 @@ const BookingForm = () => {
               </button>
             )}
           </>
+        )}
+
+        {/* Return journey: a second car later, rather than holding the first */}
+        {journeyType !== "hourly" && !editing && (
+          <div className="space-y-4">
+            <FormField
+              control={form.control}
+              name="returnJourney"
+              render={({ field }) => (
+                <FormItem>
+                  <button
+                    type="button"
+                    onClick={() => field.onChange(!field.value)}
+                    aria-pressed={field.value}
+                    className={cn(
+                      "w-full border p-4 text-left transition-all duration-500 flex items-start gap-4",
+                      field.value ? "border-champagne" : "border-border hover:border-champagne-muted"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 w-5 h-5 flex-none border flex items-center justify-center transition-colors",
+                        field.value ? "border-champagne bg-champagne" : "border-champagne-muted"
+                      )}
+                    >
+                      {field.value && <Check className="w-3.5 h-3.5 text-background" />}
+                    </span>
+                    <span>
+                      <span className="block text-foreground text-sm tracking-wide">
+                        This is a return journey
+                      </span>
+                      <span className="block text-smoke text-xs font-light mt-1">
+                        We will send a car back the other way at a time you choose, so you do not
+                        need to make a second booking or hold a chauffeur in between.
+                      </span>
+                    </span>
+                  </button>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {returnJourney && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border border-border p-4 md:p-6">
+                <FormField
+                  control={form.control}
+                  name="returnDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                        Return Date
+                      </FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full justify-start text-left font-light rounded-none h-11 bg-transparent border-border hover:border-champagne-muted hover:bg-transparent",
+                                !field.value && "text-muted-foreground"
+                              )}
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4 opacity-50" />
+                              {field.value ? format(field.value, "PPP") : <span>Select date</span>}
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={field.value}
+                            onSelect={field.onChange}
+                            disabled={(date) => date < new Date()}
+                            initialFocus
+                            className={cn("p-3 pointer-events-auto")}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="returnTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
+                        Return Time
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type="time"
+                          className="bg-transparent border-border focus:border-champagne-muted rounded-none h-11 text-foreground placeholder:text-muted-foreground text-sm"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <p className="text-smoke/70 text-xs font-light md:col-span-2">
+                  The return runs the journey the other way round, from your destination back to
+                  your pickup address.
+                </p>
+              </div>
+            )}
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-6">

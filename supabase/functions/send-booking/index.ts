@@ -186,13 +186,28 @@ serve(async (req) => {
       });
     }
     const clientCar = journeyType === "client_car" ? parseClientCar(body.clientCar) : null;
+
+    // A return journey is a second car later the same trip, not a longer hire:
+    // it becomes its own booking so it has its own chauffeur and its own
+    // confirmation. Never on an hourly hire (the car is already waiting).
+    const wantsReturn =
+      body.returnJourney === true && journeyType !== "hourly" && !body.amendReference;
+    const returnCollectionAt =
+      wantsReturn && typeof body.returnCollectionAt === "string" && !Number.isNaN(Date.parse(body.returnCollectionAt))
+        ? new Date(body.returnCollectionAt).toISOString()
+        : null;
+    if (wantsReturn && !returnCollectionAt) {
+      return new Response(JSON.stringify({ success: false, error: "Please give the date and time of the return journey" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     if (journeyType === "client_car" && !clientCar) {
       return new Response(JSON.stringify({ success: false, error: "Please give the car's make, model and registration" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (journeyType === "hourly" && (!Number.isFinite(asDirectedHours) || asDirectedHours! < 4 || asDirectedHours! > 24)) {
-      return new Response(JSON.stringify({ success: false, error: "Invalid hire duration (minimum 4 hours)" }), {
+    if (journeyType === "hourly" && (!Number.isFinite(asDirectedHours) || asDirectedHours! < 3 || asDirectedHours! > 24)) {
+      return new Response(JSON.stringify({ success: false, error: "Invalid hire duration (minimum 3 hours)" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -329,13 +344,35 @@ serve(async (req) => {
         .update({ business_defaults: business })
         .eq("id", userData.user.id);
     }
+    // The return leg: the same journey the other way round, at the later time
+    const returnReference = wantsReturn ? `${bookingReference}-R` : null;
+    const returnTravelDate =
+      typeof body.returnTravelDate === "string" ? body.returnTravelDate.trim().slice(0, 50) : "";
+    const returnRow = wantsReturn
+      ? {
+          ...bookingRow,
+          travel_date: returnTravelDate || bookingRow.travel_date,
+          collection_at: returnCollectionAt,
+          pickup: dropoffAddress,
+          dropoff: pickupAddress,
+          // Coming back the way we went: the stops run in reverse
+          via: viaStops.length > 0 ? [...viaStops].reverse() : null,
+          return_of: bookingReference,
+        }
+      : null;
+
     if (!amendReference) {
-      const { error: dbError } = await supabase.from("bookings").insert({
-        ...bookingRow,
-        user_id: userData.user.id,
-        reference: bookingReference,
-        status: "Requested",
-      });
+      const { error: dbError } = await supabase.from("bookings").insert([
+        {
+          ...bookingRow,
+          user_id: userData.user.id,
+          reference: bookingReference,
+          status: "Requested",
+        },
+        ...(returnRow
+          ? [{ ...returnRow, user_id: userData.user.id, reference: returnReference, status: "Requested" }]
+          : []),
+      ]);
       if (dbError) {
         console.error("DB insert error:", dbError);
       }
@@ -405,11 +442,45 @@ serve(async (req) => {
       ),
     };
 
+    // Same journey, reversed: swap the ends and run the stops the other way.
+    // Dispatch takes several bookings in one transfer, so both legs go together.
+    const returnPayload = wantsReturn
+      ? {
+          ...dispatchPayload,
+          Reference: returnReference!,
+          CollectionDateTime: buildCollectionDateTime(
+            typeof body.returnTravelDateRaw === "string" ? body.returnTravelDateRaw : "",
+            returnTravelDate
+          ),
+          BookingNotes: `RETURN LEG of ${bookingReference}. ${dispatchNotes}`,
+          PickUpAddress: dispatchPayload.DropOffAddress,
+          DropOffAddress: dispatchPayload.PickUpAddress,
+          ...Object.fromEntries(
+            [...viaStops].reverse().map((stop, i) => [
+              `ViaAddress${i + 1}`,
+              {
+                Line1: stop.line1?.trim() || "",
+                Line2: stop.line2?.trim() || "",
+                Town: stop.town?.trim() || "",
+                Postcode: stop.postcode?.trim() || "",
+                Country: stop.country?.trim() || "United Kingdom",
+              },
+            ])
+          ),
+        }
+      : null;
+
+    const legs: { reference: string; payload: Record<string, unknown> }[] = [
+      { reference: bookingReference, payload: dispatchPayload },
+      ...(returnPayload ? [{ reference: returnReference!, payload: returnPayload }] : []),
+    ];
+
     const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
 
     const dispatchUrl = `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`;
 
     let dispatchFailureMessage: string | null = null;
+    let returnFailureMessage: string | null = null;
 
     try {
       const dispatchRes = await fetch(dispatchUrl, {
@@ -418,20 +489,25 @@ serve(async (req) => {
           "Content-Type": "application/json",
           Authorization: `Basic ${dispatchAuth}`,
         },
-        body: JSON.stringify({ Bookings: [dispatchPayload] }),
+        body: JSON.stringify({ Bookings: legs.map((l) => l.payload) }),
       });
 
       const dispatchData = await dispatchRes.json();
       console.log("Dispatch API response:", JSON.stringify(dispatchData));
 
       const dispatchResult = Array.isArray(dispatchData?.Result) ? dispatchData.Result[0] : dispatchData;
-      const dispatchBooking = Array.isArray(dispatchResult?.Bookings) ? dispatchResult.Bookings[0] : undefined;
+      const resultBookings = Array.isArray(dispatchResult?.Bookings) ? dispatchResult.Bookings : [];
+      const matchFor = (reference: string, index: number) =>
+        resultBookings.find(
+          (b: Record<string, unknown>) => b.BookingReference === reference || b.Reference === reference
+        ) ?? resultBookings[index];
+      const dispatchBooking = matchFor(bookingReference, 0);
 
       if (!dispatchRes.ok) {
         dispatchFailureMessage = `Dispatch API returned HTTP ${dispatchRes.status}`;
       } else if (dispatchResult?.TransferStatus === "Failed") {
         dispatchFailureMessage = dispatchResult?.Message || "Dispatch transfer failed";
-      } else if (dispatchBooking?.Status === "Failed") {
+      } else if (!dispatchBooking || dispatchBooking?.Status === "Failed") {
         dispatchFailureMessage = dispatchBooking?.Message || "Dispatch booking failed";
       }
 
@@ -454,6 +530,25 @@ serve(async (req) => {
           })
           .eq("reference", bookingReference);
       }
+
+      // The return leg stands or falls on its own: an outbound car is still
+      // worth having if the return needs the office to key it by hand
+      if (returnReference && !dispatchFailureMessage) {
+        const returnMatch = matchFor(returnReference, 1);
+        if (!returnMatch || returnMatch.Status === "Failed") {
+          returnFailureMessage = returnMatch?.Message || "Dispatch booking failed";
+          console.error("Return leg failed:", returnFailureMessage);
+        } else {
+          await supabase
+            .from("bookings")
+            .update({
+              assigned_booking_id: returnMatch?.AssignedBookingID ?? null,
+              assigned_reference: returnMatch?.AssignedBookingReference ?? null,
+              status: "Confirmed",
+            })
+            .eq("reference", returnReference);
+        }
+      }
     } catch (dispatchErr) {
       console.error("Dispatch API call failed:", dispatchErr);
       dispatchFailureMessage = "Dispatch API call failed";
@@ -462,10 +557,14 @@ serve(async (req) => {
     // A failed amendment leaves the original booking standing, so only new
     // bookings are marked Failed
     if (dispatchFailureMessage && !amendReference) {
+      const failed = [bookingReference, ...(returnReference ? [returnReference] : [])];
+      await supabase.from("bookings").update({ status: "Failed" }).in("reference", failed);
+    } else if (returnFailureMessage && returnReference) {
+      // Our record keeps the details; the ops email carries them too
       await supabase
         .from("bookings")
-        .update({ status: "Failed" })
-        .eq("reference", bookingReference);
+        .update({ status: "Amendment requested" })
+        .eq("reference", returnReference);
     }
 
     // --- Send email notification ---
@@ -493,6 +592,15 @@ serve(async (req) => {
         : "",
       notes
         ? `<tr><td style="${rowStyle}">Notes</td><td style="padding: 12px 0; white-space: pre-wrap;">${sanitize(notes)}</td></tr>`
+        : "",
+      wantsReturn
+        ? `<tr><td style="${rowStyle}">Return</td><td style="padding: 12px 0; color: #e0c341;">${sanitize(
+            returnTravelDate
+          )} &nbsp;|&nbsp; ${safeDropoff} &rarr; ${safePickup}${
+            returnFailureMessage
+              ? '<br/><strong style="color: #d06060;">The return leg did not transfer. Please enter it by hand.</strong>'
+              : ""
+          }</td></tr>`
         : "",
     ].join("");
     const stopsRows = viaStops
@@ -540,7 +648,7 @@ serve(async (req) => {
             : "Booking Enquiry"
         }: ${safeName} (${safeVehicle})${clientCar ? " - CLIENT'S OWN CAR" : ""}${
           children.length > 0 ? " - CHILD SEATS" : ""
-        }`,
+        }${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}`,
         html: htmlBody,
         reply_to: email.trim(),
       }),
@@ -584,10 +692,24 @@ serve(async (req) => {
       );
     }
 
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        success: true,
+        ...(returnFailureMessage
+          ? {
+              returnHandedToOps: true,
+              message:
+                "Your outward journey is booked. Your return has been sent to our team, who will confirm it shortly.",
+            }
+          : wantsReturn
+            ? { returnBooked: true }
+            : {}),
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   } catch (error: unknown) {
     console.error("Error sending booking email:", error);
     return new Response(

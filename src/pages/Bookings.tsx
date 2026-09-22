@@ -48,6 +48,7 @@ interface BookingRow {
   booking_type: string | null;
   business: { company?: string; department?: string } | null;
   client_car: { make_model?: string; registration?: string; client_travelling?: boolean } | null;
+  return_of: string | null;
 }
 
 const seatFor = (age: number) =>
@@ -228,6 +229,11 @@ const Bookings = () => {
             {familyName && (
               <p className="text-champagne text-xs tracking-[0.15em] uppercase mt-1">
                 For {familyName}
+              </p>
+            )}
+            {b.return_of && (
+              <p className="text-champagne text-xs tracking-[0.15em] uppercase mt-1">
+                Return journey
               </p>
             )}
           </div>
