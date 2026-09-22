@@ -38,6 +38,7 @@ export type Database = {
           phone: string
           pickup: Json | null
           reference: string | null
+          return_of: string | null
           status: string
           status_checked_at: string | null
           stops: Json | null
@@ -69,6 +70,7 @@ export type Database = {
           phone: string
           pickup?: Json | null
           reference?: string | null
+          return_of?: string | null
           status?: string
           status_checked_at?: string | null
           stops?: Json | null
@@ -100,6 +102,7 @@ export type Database = {
           phone?: string
           pickup?: Json | null
           reference?: string | null
+          return_of?: string | null
           status?: string
           status_checked_at?: string | null
           stops?: Json | null
