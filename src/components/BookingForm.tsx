@@ -59,6 +59,20 @@ const looseAddressSchema = z.object({
   country: z.string().trim().max(100).default("United Kingdom"),
 });
 
+/**
+ * How much warning we need for a car. Below this the app sends people to the
+ * office, who can see which chauffeurs are actually free. Change this one
+ * number to change the rule everywhere.
+ */
+export const MIN_NOTICE_MINUTES = 90;
+
+/** Midnight today: the earliest day that can be chosen. */
+const startOfToday = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
 export const MIN_HIRE_HOURS = 3;
 export const MAX_HIRE_HOURS = 12;
 const MAX_STOPS = 5;
@@ -132,6 +146,22 @@ export const bookingSchema = z
     } else if (!v.vehicle) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["vehicle"], message: "Please select a vehicle" });
     }
+    // Enough warning to find a chauffeur. This also stops a time earlier
+    // today being chosen, which the date picker alone cannot catch.
+    if (v.travelDate && /^([01]\d|2[0-3]):[0-5]\d$/.test(v.collectionTime)) {
+      const pickup = new Date(v.travelDate);
+      const [h, m] = v.collectionTime.split(":").map(Number);
+      pickup.setHours(h, m, 0, 0);
+      const earliest = new Date(Date.now() + MIN_NOTICE_MINUTES * 60 * 1000);
+      if (pickup < earliest) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["collectionTime"],
+          message: `We need at least ${MIN_NOTICE_MINUTES} minutes' notice. For a car sooner, please call us.`,
+        });
+      }
+    }
+
     // A return needs a when, and it has to be after we set off
     if (v.returnJourney && v.journeyType !== "hourly") {
       if (!v.returnDate) {
@@ -738,7 +768,7 @@ const BookingForm = () => {
                       mode="single"
                       selected={field.value}
                       onSelect={field.onChange}
-                      disabled={(date) => date < new Date()}
+                      disabled={(date) => date < startOfToday()}
                       initialFocus
                       className={cn("p-3 pointer-events-auto")}
                     />
@@ -1152,7 +1182,7 @@ const BookingForm = () => {
                             mode="single"
                             selected={field.value}
                             onSelect={field.onChange}
-                            disabled={(date) => date < new Date()}
+                            disabled={(date) => date < startOfToday()}
                             initialFocus
                             className={cn("p-3 pointer-events-auto")}
                           />

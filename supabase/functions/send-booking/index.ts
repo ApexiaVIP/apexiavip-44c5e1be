@@ -23,6 +23,9 @@ import {
 
 const CLIENT_CAR_VEHICLE = "Client's own car";
 
+/** Minimum warning for a new booking; must match the form's rule. */
+const MIN_NOTICE_MINUTES = 90;
+
 const vehicleToBookingClass: Record<string, string> = {
   "Range Rover": "Executive",
   "S-Class": "Executive",
@@ -186,6 +189,25 @@ serve(async (req) => {
       });
     }
     const clientCar = journeyType === "client_car" ? parseClientCar(body.clientCar) : null;
+
+    // The same notice rule the form applies, enforced here too: an older app
+    // or a direct call must not slip a car in for ten minutes' time
+    const collectionAtRaw =
+      typeof body.collectionAt === "string" && !Number.isNaN(Date.parse(body.collectionAt))
+        ? new Date(body.collectionAt)
+        : null;
+    if (!amendReference && collectionAtRaw) {
+      const noticeMinutes = (collectionAtRaw.getTime() - Date.now()) / 60000;
+      if (noticeMinutes < MIN_NOTICE_MINUTES) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `We need at least ${MIN_NOTICE_MINUTES} minutes' notice. For a car sooner, please call us.`,
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
     // A return journey is a second car later the same trip, not a longer hire:
     // it becomes its own booking so it has its own chauffeur and its own
