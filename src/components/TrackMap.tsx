@@ -60,11 +60,23 @@ const TrackMap = ({ lat, lng, pickupPostcode }: TrackMapProps) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Follow the driver as fresh positions arrive
+  // Follow the driver as fresh positions arrive. Once the pickup marker was
+  // placed this used to stop panning, so the car drove out of frame and the
+  // map looked frozen until the page was reloaded.
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
     driverRef.current?.setLatLng([lat, lng]);
-    if (mapRef.current && !pickupRef.current) {
-      mapRef.current.panTo([lat, lng]);
+
+    const position = L.latLng(lat, lng);
+    // Keep the driver comfortably inside the view rather than hugging an edge
+    if (!map.getBounds().pad(-0.2).contains(position)) {
+      const pickup = pickupRef.current?.getLatLng();
+      if (pickup) {
+        map.fitBounds(L.latLngBounds(position, pickup), { padding: [40, 40], maxZoom: 15 });
+      } else {
+        map.panTo(position);
+      }
     }
   }, [lat, lng]);
 

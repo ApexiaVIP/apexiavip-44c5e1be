@@ -4,6 +4,7 @@ import { ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
 import MemberLayout from "@/components/MemberLayout";
 import { GET_APP_URL, isInstalledApp } from "@/lib/appLinks";
 import TrackMap from "@/components/TrackMap";
+import { locationFreshness } from "@/lib/locationAge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
@@ -392,6 +393,16 @@ const Bookings = () => {
           </div>
         )}
 
+        {isUpcoming &&
+          live?.bookingStatus &&
+          ACTIVE_STATUSES.includes(live.bookingStatus) &&
+          !mapVisible && (
+            <p className="text-smoke/70 text-xs tracking-[0.1em] border border-border px-4 py-3">
+              Your chauffeur is on the way. The map appears once their phone reports its position;
+              if it does not, they are still coming and you can call them above.
+            </p>
+          )}
+
         {mapVisible && (
           <div className="space-y-2">
             <TrackMap
@@ -399,11 +410,22 @@ const Bookings = () => {
               lng={driverLng}
               pickupPostcode={b.pickup?.postcode}
             />
-            <p className="text-smoke/70 text-xs tracking-[0.1em]">
-              Live driver location
-              {live?.locationDateTime ? ` · updated ${live.locationDateTime}` : ""}
-              {" · refreshes automatically"}
-            </p>
+            {(() => {
+              const fresh = locationFreshness(live?.locationDateTime ?? null);
+              return (
+                <p
+                  className={`text-xs tracking-[0.1em] ${
+                    fresh.stale ? "text-champagne" : "text-smoke/70"
+                  }`}
+                >
+                  Live driver location
+                  {fresh.text ? ` · ${fresh.text}` : ""}
+                  {fresh.stale
+                    ? " · your chauffeur's phone may have lost signal"
+                    : " · refreshes automatically"}
+                </p>
+              );
+            })()}
           </div>
         )}
       </div>
