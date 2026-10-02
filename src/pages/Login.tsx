@@ -61,11 +61,14 @@ const Login = () => {
   const destinationAfterVerify = async () => {
     const { data } = await supabase.auth.getUser();
     if (!data.user) return redirectTo;
+    // is_driver lands with the drivers migration; the generated types follow
     const { data: prof } = await supabase
       .from("profiles")
       .select("profile_completed")
       .eq("id", data.user.id)
-      .maybeSingle();
+      .maybeSingle<{ profile_completed: boolean; is_driver?: boolean }>();
+    // A chauffeur has no booking screens to complete a profile for
+    if (prof?.is_driver) return "/driver";
     return prof && !prof.profile_completed ? "/profile?welcome=1" : redirectTo;
   };
 

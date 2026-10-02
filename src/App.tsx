@@ -16,6 +16,7 @@ import Admin from "./pages/Admin";
 import Privacy from "./pages/Privacy";
 import GetApp from "./pages/GetApp";
 import Apply from "./pages/Apply";
+import Driver from "./pages/Driver";
 import AppSidebar from "@/components/AppSidebar";
 import NativeTabBar from "@/components/NativeTabBar";
 import Book from "./pages/Book";
@@ -51,9 +52,12 @@ const AuthLinkRedirect = () => {
 // The store apps open on the member's bookings, or on sign-in, never on the
 // marketing site
 const NativeHome = () => {
-  const { user, mfaVerified, mfaResolved, loading } = useAuth();
+  const { user, profile, mfaVerified, mfaResolved, loading } = useAuth();
   if (loading || (user && !mfaResolved)) return null;
-  return <Navigate to={user && mfaVerified ? "/bookings" : "/login"} replace />;
+  if (!user || !mfaVerified) return <Navigate to="/login" replace />;
+  // A chauffeur opens their own day, not the booking screens
+  const isDriver = (profile as { is_driver?: boolean } | null)?.is_driver === true;
+  return <Navigate to={isDriver ? "/driver" : "/bookings"} replace />;
 };
 
 const App = () => (
@@ -82,6 +86,7 @@ const App = () => (
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/app" element={<GetApp />} />
             <Route path="/apply" element={<Apply />} />
+            <Route path="/driver" element={<Driver />} />
             <Route path="/book" element={<Book />} />
             <Route path="/mcfc" element={<McfcPortal />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

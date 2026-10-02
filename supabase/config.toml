@@ -41,3 +41,6 @@ verify_jwt = false
 
 [functions.membership-application]
 verify_jwt = false
+
+[functions.driver]
+verify_jwt = false

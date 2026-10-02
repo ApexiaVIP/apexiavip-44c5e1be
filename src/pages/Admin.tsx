@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, UserPlus } from "lucide-react";
+import { Loader2, UserPlus, Check } from "lucide-react";
 import MemberLayout from "@/components/MemberLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -76,6 +76,7 @@ const Admin = () => {
   const queryClient = useQueryClient();
 
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [isDriver, setIsDriver] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [countryCode, setCountryCode] = useState("+44");
@@ -99,16 +100,20 @@ const Admin = () => {
         phone: phone.trim()
           ? `${countryCode}${phone.replace(/[\s\-()]/g, "").replace(/^0+/, "")}`
           : "",
+        is_driver: isDriver,
       }),
     onSuccess: () => {
       toast({
-        title: "Member invited",
-        description: `${fullName || "The new member"} can now sign in with their ${phone.trim() ? "mobile number" : "email address"}.`,
+        title: isDriver ? "Driver invited" : "Member invited",
+        description: isDriver
+          ? `${fullName || "The new driver"} can sign in with their mobile and will see their own jobs.`
+          : `${fullName || "The new member"} can now sign in with their ${phone.trim() ? "mobile number" : "email address"}.`,
       });
       setInviteOpen(false);
       setFullName("");
       setEmail("");
       setPhone("");
+      setIsDriver(false);
       queryClient.invalidateQueries({ queryKey: ["admin-members"] });
     },
     onError: (err: Error) => {
@@ -251,9 +256,37 @@ const Admin = () => {
                     className="flex-1"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDriver(!isDriver)}
+                  aria-pressed={isDriver}
+                  className={`w-full border p-3 text-left flex items-start gap-3 transition-colors ${
+                    isDriver ? "border-champagne" : "border-border hover:border-champagne-muted"
+                  }`}
+                >
+                  <span
+                    className={`mt-0.5 w-4 h-4 flex-none border flex items-center justify-center ${
+                      isDriver ? "border-champagne bg-champagne" : "border-champagne-muted"
+                    }`}
+                  >
+                    {isDriver && <Check className="w-3 h-3 text-background" />}
+                  </span>
+                  <span>
+                    <span className="block text-foreground text-sm">Invite as a driver</span>
+                    <span className="block text-smoke text-xs mt-0.5">
+                      They see their own jobs and the shift clock instead of the booking screens.
+                      A mobile number is required, as it is how Dispatch matches jobs to them.
+                    </span>
+                  </span>
+                </button>
+
                 <Button
                   type="submit"
-                  disabled={invite.isPending || (!phone.trim() && !email.trim())}
+                  disabled={
+                    invite.isPending ||
+                    (!phone.trim() && !email.trim()) ||
+                    (isDriver && !phone.trim())
+                  }
                   className="w-full tracking-[0.15em] uppercase"
                 >
                   {invite.isPending ? (

@@ -112,6 +112,8 @@ serve(async (req) => {
       const fullName = typeof body.full_name === "string" ? body.full_name.trim() : "";
       const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
       const phone = typeof body.phone === "string" ? body.phone.replace(/[\s\-()]/g, "") : "";
+      // A chauffeur rather than a member: same sign-in, different app
+      const isDriver = body.is_driver === true;
 
       // A mobile OR an email is enough to invite; the member signs in with
       // whichever they were given (code by SMS or by email) and completes the
@@ -125,6 +127,12 @@ serve(async (req) => {
       }
       if (!phone && !email) {
         return json(400, { error: "A mobile number or an email address is required" });
+      }
+      // Jobs reach a chauffeur by matching the mobile Dispatch holds for them
+      if (isDriver && !phone) {
+        return json(400, {
+          error: "A driver needs a mobile number: it is how their jobs are matched to them",
+        });
       }
 
       // Sign-in never uses this address; it only anchors the auth account
@@ -154,6 +162,7 @@ serve(async (req) => {
         phone,
         status: "active",
         invited_by: caller.id,
+        is_driver: isDriver,
       });
       if (profileError) throw profileError;
 
@@ -168,7 +177,9 @@ serve(async (req) => {
       if (phone) {
         await trySendSms(
           phone,
-          "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed. The app is at apexiavip.com/app"
+          isDriver
+            ? "APEXIA VIP: Your driver account is ready. Get the app at apexiavip.com/app and sign in with this mobile number - we will text you a code. No password needed."
+            : "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed. The app is at apexiavip.com/app"
         );
       }
 

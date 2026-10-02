@@ -14,10 +14,12 @@ const tabs = [
  * signed in, and never on the website.
  */
 const NativeTabBar = () => {
-  const { user, mfaVerified, isAdmin } = useAuth();
+  const { user, profile, mfaVerified, isAdmin } = useAuth();
   const { pathname } = useLocation();
   if (!isInstalledApp() || !user || !mfaVerified) return null;
   if (pathname === "/login" || pathname.startsWith("/mcfc")) return null;
+  // Chauffeurs have one screen, so the bar would only get in the way
+  if ((profile as { is_driver?: boolean } | null)?.is_driver === true) return null;
 
   // Admins get a fourth tab; members never see it
   const visible = isAdmin ? [...tabs, { to: "/admin", label: "Admin", icon: ShieldCheck }] : tabs;
