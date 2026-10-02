@@ -27,6 +27,7 @@ export type Database = {
           collection_at: string | null
           corporate: string | null
           created_at: string
+          declined_reason: string | null
           dropoff: Json | null
           email: string
           id: string
@@ -42,6 +43,7 @@ export type Database = {
           status: string
           status_checked_at: string | null
           stops: Json | null
+          subject_to_availability: boolean
           travel_date: string
           user_id: string | null
           vehicle: string
@@ -59,6 +61,7 @@ export type Database = {
           collection_at?: string | null
           corporate?: string | null
           created_at?: string
+          declined_reason?: string | null
           dropoff?: Json | null
           email: string
           id?: string
@@ -74,6 +77,7 @@ export type Database = {
           status?: string
           status_checked_at?: string | null
           stops?: Json | null
+          subject_to_availability?: boolean
           travel_date: string
           user_id?: string | null
           vehicle: string
@@ -91,6 +95,7 @@ export type Database = {
           collection_at?: string | null
           corporate?: string | null
           created_at?: string
+          declined_reason?: string | null
           dropoff?: Json | null
           email?: string
           id?: string
@@ -106,6 +111,7 @@ export type Database = {
           status?: string
           status_checked_at?: string | null
           stops?: Json | null
+          subject_to_availability?: boolean
           travel_date?: string
           user_id?: string | null
           vehicle?: string
