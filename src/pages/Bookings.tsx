@@ -49,6 +49,7 @@ interface BookingRow {
   business: { company?: string; department?: string } | null;
   client_car: { make_model?: string; registration?: string; client_travelling?: boolean } | null;
   return_of: string | null;
+  subject_to_availability: boolean | null;
 }
 
 const seatFor = (age: number) =>
@@ -82,8 +83,10 @@ const statusVariant = (status: string): "secondary" | "outline" | "destructive" 
 // "Confirmed" is reserved for a chauffeur actually being assigned. Before
 // that the booking has only been received, and inside the hour it is
 // subject to availability.
-const displayStatus = (status: string) => {
-  if (status === "Pending" || status === "Requested" || status === "Confirmed") return "Received";
+const displayStatus = (status: string, provisional = false) => {
+  if (status === "Pending" || status === "Requested" || status === "Confirmed") {
+    return provisional ? "Awaiting availability" : "Received";
+  }
   if (status === "Amendment requested") return "Change requested";
   if (status === "Dispatched") return "Confirmed";
   if (status === "En route to pickup") return "On the way";
@@ -231,6 +234,11 @@ const Bookings = () => {
                 For {familyName}
               </p>
             )}
+            {b.subject_to_availability && !ACTIVE_STATUSES.includes(effectiveStatus) && !FINAL_STATUSES.includes(effectiveStatus) && (
+              <p className="text-smoke text-xs mt-1 max-w-sm">
+                Subject to availability. We will text you as soon as a chauffeur is assigned.
+              </p>
+            )}
             {b.return_of && (
               <p className="text-champagne text-xs tracking-[0.15em] uppercase mt-1">
                 Return journey
@@ -245,7 +253,7 @@ const Bookings = () => {
                 : undefined
             }
           >
-            {displayStatus(effectiveStatus)}
+            {displayStatus(effectiveStatus, b.subject_to_availability === true && !ACTIVE_STATUSES.includes(effectiveStatus))}
           </Badge>
         </div>
 

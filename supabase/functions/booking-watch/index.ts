@@ -122,7 +122,7 @@ serve(async (req) => {
     const { data: watched } = await admin
       .from("bookings")
       .select(
-        "reference, user_id, corporate, name, phone, status, notified_status, collection_at, vehicle"
+        "reference, user_id, corporate, name, phone, status, notified_status, collection_at, vehicle, subject_to_availability"
       )
       .not("reference", "is", null)
       .not("collection_at", "is", null)
@@ -227,7 +227,13 @@ serve(async (req) => {
               ? `APEXIA VIP: ${driver || "Your chauffeur"} has arrived for your ${when} collection${
                   carText ? `, ${carText}` : ""
                 }.`
-              : `APEXIA VIP: Your booking for ${when} has been cancelled. Please contact us if this is unexpected.`;
+              : b.subject_to_availability
+                // A journey we never promised, now cancelled by the office:
+                // say plainly that we could not cover it
+                ? `APEXIA VIP: We are very sorry, we have not been able to cover your journey on ${when}. Please reply or email info@apexiavip.com and we will help you find another option.`
+                // Cancelled by our team rather than by the member, who would
+                // have been cancelling from the app
+                : `APEXIA VIP: Your booking for ${when} has been cancelled by our team. If this is unexpected, please email info@apexiavip.com and we will put it right.`;
 
       // Who hears about it: the member, or for a desk booking the assistant who
       // arranged it plus any passenger who asked to be told directly

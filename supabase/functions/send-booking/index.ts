@@ -12,6 +12,10 @@ const DEFAULT_COLLECTION_TIME = { hours: "09", minutes: "00" };
 
 // Map vehicle names to Dispatch booking classes
 import {
+  MIN_NOTICE_MINUTES,
+  availabilityReason,
+} from "../_shared/availability.ts";
+import {
   parseNotes,
   parseChildren,
   parseBusiness,
@@ -23,8 +27,7 @@ import {
 
 const CLIENT_CAR_VEHICLE = "Client's own car";
 
-/** Minimum warning for a new booking; must match the form's rule. */
-const MIN_NOTICE_MINUTES = 90;
+
 
 const vehicleToBookingClass: Record<string, string> = {
   "Range Rover": "Executive",
@@ -202,12 +205,15 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({
             success: false,
-            error: `We need at least ${MIN_NOTICE_MINUTES} minutes' notice. For a car sooner, please call us.`,
+            error: `Please choose a pickup time at least ${MIN_NOTICE_MINUTES} minutes from now, or call us for a car sooner.`,
           }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
     }
+
+    // Taken, but not promised: inside two hours, or an overnight pickup
+    const availability = collectionAtRaw ? availabilityReason(collectionAtRaw) : null;
 
     // A return journey is a second car later the same trip, not a longer hire:
     // it becomes its own booking so it has its own chauffeur and its own
@@ -354,6 +360,7 @@ serve(async (req) => {
       as_directed_hours: asDirectedHours,
       via: viaStops.length > 0 ? viaStops : null,
       notes,
+      subject_to_availability: availability !== null,
       children: children.length > 0 ? children : null,
       booking_type: bookingType,
       business,
@@ -650,6 +657,17 @@ serve(async (req) => {
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Dropoff</td><td style="padding: 12px 0;">${safeDropoff}</td></tr>
           ${detailRows}
         </table>
+        ${
+          availability
+            ? `<p style="margin-top: 24px; padding: 14px 16px; background: #2E2515; border-left: 3px solid #e0c341; color: #e0c341; font-size: 13px;">
+                 <strong>SUBJECT TO AVAILABILITY</strong> &mdash; ${
+                   availability === "short-notice"
+                     ? "booked inside two hours."
+                     : "pickup is between midnight and 6am."
+                 }<br/>The member has been told this is not yet confirmed. Please cover it or cancel it in Dispatch, which tells them straight away.
+               </p>`
+            : ""
+        }
       </div>
     `;
 
@@ -670,7 +688,9 @@ serve(async (req) => {
             : "Booking Enquiry"
         }: ${safeName} (${safeVehicle})${clientCar ? " - CLIENT'S OWN CAR" : ""}${
           children.length > 0 ? " - CHILD SEATS" : ""
-        }${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}`,
+        }${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}${
+          availability ? " - SUBJECT TO AVAILABILITY" : ""
+        }`,
         html: htmlBody,
         reply_to: email.trim(),
       }),

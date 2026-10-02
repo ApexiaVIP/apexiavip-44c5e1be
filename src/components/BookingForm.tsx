@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { format } from "date-fns";
-import { CalendarIcon, Check, Users, Luggage, Minus, Plus, X, Baby } from "lucide-react";
+import { CalendarIcon, Check, Users, Luggage, Minus, Plus, X, Baby, Clock } from "lucide-react";
 import { z } from "zod";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -25,6 +25,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
+import {
+  MIN_NOTICE_MINUTES,
+  availabilityReason,
+  availabilityNotice,
+} from "@/lib/availability";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import LocationSearch from "@/components/LocationSearch";
@@ -58,13 +63,6 @@ const looseAddressSchema = z.object({
   postcode: z.string().trim().max(20).default(""),
   country: z.string().trim().max(100).default("United Kingdom"),
 });
-
-/**
- * How much warning we need for a car. Below this the app sends people to the
- * office, who can see which chauffeurs are actually free. Change this one
- * number to change the rule everywhere.
- */
-export const MIN_NOTICE_MINUTES = 90;
 
 /** Midnight today: the earliest day that can be chosen. */
 const startOfToday = () => {
@@ -146,8 +144,8 @@ export const bookingSchema = z
     } else if (!v.vehicle) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["vehicle"], message: "Please select a vehicle" });
     }
-    // Enough warning to find a chauffeur. This also stops a time earlier
-    // today being chosen, which the date picker alone cannot catch.
+    // The journey has to be ahead of us. Short notice is taken, not refused:
+    // it is flagged as subject to availability instead.
     if (v.travelDate && /^([01]\d|2[0-3]):[0-5]\d$/.test(v.collectionTime)) {
       const pickup = new Date(v.travelDate);
       const [h, m] = v.collectionTime.split(":").map(Number);
@@ -157,7 +155,7 @@ export const bookingSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["collectionTime"],
-          message: `We need at least ${MIN_NOTICE_MINUTES} minutes' notice. For a car sooner, please call us.`,
+          message: `Please choose a pickup time at least ${MIN_NOTICE_MINUTES} minutes from now, or call us for a car sooner.`,
         });
       }
     }
@@ -210,6 +208,8 @@ const BookingForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submittedReturn, setSubmittedReturn] = useState(false);
+  const [submittedProvisional, setSubmittedProvisional] =
+    useState<ReturnType<typeof availabilityReason>>(null);
   const [honeypot, setHoneypot] = useState("");
   const [countryCode, setCountryCode] = useState("+44");
   const [searchParams, setSearchParams] = useSearchParams();
@@ -253,6 +253,17 @@ const BookingForm = () => {
   const journeyType = form.watch("journeyType");
   const bookingType = form.watch("bookingType");
   const returnJourney = form.watch("returnJourney");
+  const watchedDate = form.watch("travelDate");
+  const watchedTime = form.watch("collectionTime");
+
+  // Tell them before they submit, not after
+  const pendingReason = (() => {
+    if (!watchedDate || !/^([01]\d|2[0-3]):[0-5]\d$/.test(watchedTime)) return null;
+    const pickup = new Date(watchedDate);
+    const [h, m] = watchedTime.split(":").map(Number);
+    pickup.setHours(h, m, 0, 0);
+    return availabilityReason(pickup);
+  })();
   const childAges = form.watch("children");
 
   const { profile } = useAuth();
@@ -459,6 +470,7 @@ const BookingForm = () => {
 
       setSubmitted(true);
       setSubmittedReturn(data.returnJourney && data.journeyType !== "hourly");
+      setSubmittedProvisional(availabilityReason(collectionAt));
       toast({
         title: result?.handedToOps
           ? "Changes sent to our team"
@@ -493,14 +505,18 @@ const BookingForm = () => {
           <Check className="w-5 h-5 text-champagne" />
         </div>
         <h3 className="font-display text-2xl tracking-wider text-foreground mb-3">
-          {editing ? "Booking Updated" : "Booking Received"}
+          {editing ? "Booking Updated" : submittedProvisional ? "Request Received" : "Booking Received"}
         </h3>
         <p className="text-smoke text-sm font-light max-w-sm mx-auto leading-relaxed">
           {editing
             ? "Your changes have been sent to our team, who will confirm them shortly."
-            : `Your booking has been sent to Apexia VIP.${
-                submittedReturn ? " Your return journey has been booked as a second car." : ""
-              } All bookings are subject to availability; we will confirm by text once your chauffeur is assigned, and you can follow progress in My Bookings.`}
+            : submittedProvisional
+              ? `${availabilityNotice(submittedProvisional)}${
+                  submittedReturn ? " Your return journey has been requested as a second car." : ""
+                }`
+              : `Your booking has been sent to Apexia VIP.${
+                  submittedReturn ? " Your return journey has been booked as a second car." : ""
+                } We will confirm by text once your chauffeur is assigned, and you can follow progress in My Bookings.`}
         </p>
       </div>
     );
@@ -1372,6 +1388,15 @@ const BookingForm = () => {
             </FormItem>
           )}
         />
+
+        {pendingReason && (
+          <div className="border border-champagne-muted bg-champagne/5 px-4 py-3 flex gap-3">
+            <Clock className="w-4 h-4 text-champagne flex-none mt-0.5" strokeWidth={1.5} />
+            <p className="text-smoke text-xs font-light leading-relaxed">
+              {availabilityNotice(pendingReason)}
+            </p>
+          </div>
+        )}
 
         <div className="pt-4">
           <Button
