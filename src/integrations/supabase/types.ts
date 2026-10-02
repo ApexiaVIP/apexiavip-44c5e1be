@@ -462,6 +462,63 @@ export type Database = {
         }
         Relationships: []
       }
+      membership_applications: {
+        Row: {
+          address_line1: string
+          address_line2: string
+          country: string
+          created_at: string
+          email: string
+          full_name: string
+          handled_at: string | null
+          handled_by: string | null
+          heard_from: string
+          id: string
+          message: string
+          notes: string | null
+          phone: string
+          postcode: string
+          status: string
+          town: string
+        }
+        Insert: {
+          address_line1?: string
+          address_line2?: string
+          country?: string
+          created_at?: string
+          email: string
+          full_name: string
+          handled_at?: string | null
+          handled_by?: string | null
+          heard_from?: string
+          id?: string
+          message?: string
+          notes?: string | null
+          phone: string
+          postcode?: string
+          status?: string
+          town?: string
+        }
+        Update: {
+          address_line1?: string
+          address_line2?: string
+          country?: string
+          created_at?: string
+          email?: string
+          full_name?: string
+          handled_at?: string | null
+          handled_by?: string | null
+          heard_from?: string
+          id?: string
+          message?: string
+          notes?: string | null
+          phone?: string
+          postcode?: string
+          status?: string
+          town?: string
+        }
+        Relationships: []
+      }
       mfa_codes: {
         Row: {
           attempts: number

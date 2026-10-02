@@ -8,6 +8,13 @@
       "when": 1790963151392,
       "tag": "0000_availability_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790963542309,
+      "tag": "0001_membership_applications",
+      "breakpoints": true
     }
   ]
 }
