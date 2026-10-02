@@ -33,6 +33,9 @@ const Privacy = () => (
         Booking details you submit: journey addresses, dates and times,
         passenger counts and luggage. Security data: one-time sign-in codes
         (stored only in protected form) and records of verified sessions.
+        If you enquire about membership, the details you give on that form:
+        name, email address, phone number and postal address, together with
+        anything you choose to tell us.
       </p>
 
       <h2 className={h2}>How we use it</h2>
@@ -70,6 +73,14 @@ const Privacy = () => (
         is used to follow you across other websites.
       </p>
 
+      <h2 className={h2}>Membership enquiries</h2>
+      <p className={p}>
+        We use the details on a membership enquiry only to consider it and to
+        contact you about it. We do not add you to a mailing list and we never
+        sell or share your details. If we do not take the enquiry forward, ask
+        us and we will delete it.
+      </p>
+
       <h2 className={h2}>How long we keep it</h2>
       <p className={p}>
         Membership details are kept while your membership is active. Booking
@@ -91,7 +102,7 @@ const Privacy = () => (
           info@apexiavip.com
         </a>
       </p>
-      <p className="text-smoke/60 text-xs font-light mt-8">Last updated: 11 September 2026</p>
+      <p className="text-smoke/60 text-xs font-light mt-8">Last updated: 2 October 2026</p>
     </div>
   </div>
 );

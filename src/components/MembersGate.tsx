@@ -61,6 +61,15 @@ const MembersGate = ({ children }: { children: ReactNode }) => {
         >
           Member Sign In
         </Link>
+        <p className="text-smoke/70 text-xs font-light mt-6">
+          Not a member yet?{" "}
+          <Link
+            to="/apply"
+            className="text-champagne hover:text-foreground transition-colors underline underline-offset-4"
+          >
+            Request an account
+          </Link>
+        </p>
       </div>
     );
   }

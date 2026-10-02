@@ -35,6 +35,14 @@ const Header = () => {
                 >
                   App
                 </Link>
+                {!user && (
+                  <Link
+                    to="/apply"
+                    className="hidden md:inline text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
+                  >
+                    Apply
+                  </Link>
+                )}
               </>
             )}
             {isAdmin && !native && (

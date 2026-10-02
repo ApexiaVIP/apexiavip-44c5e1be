@@ -38,9 +38,9 @@ const AuthShell = ({ eyebrow = "Members Only", title, subtitle, children }: Auth
         Apexia VIP is an invitation-only service.
         <br />
         To enquire about membership, please{" "}
-        <a href="mailto:info@apexiavip.com" className="text-champagne hover:underline">
-          contact us
-        </a>
+        <Link to="/apply" className="text-champagne hover:underline">
+          request an account
+        </Link>
         .
       </p>
     </div>
