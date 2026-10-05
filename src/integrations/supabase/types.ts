@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      booking_waypoints: {
+        Row: {
+          booking_reference: string
+          driver_id: string
+          id: string
+          kind: string
+          note: string
+          place: string
+          recorded_at: string
+        }
+        Insert: {
+          booking_reference: string
+          driver_id: string
+          id?: string
+          kind: string
+          note?: string
+          place?: string
+          recorded_at?: string
+        }
+        Update: {
+          booking_reference?: string
+          driver_id?: string
+          id?: string
+          kind?: string
+          note?: string
+          place?: string
+          recorded_at?: string
+        }
+        Relationships: []
+      }
       bookings: {
         Row: {
           as_directed_hours: number | null
@@ -280,6 +310,30 @@ export type Database = {
           notify_target?: string
           phone?: string
           sort?: number
+        }
+        Relationships: []
+      }
+      driver_shifts: {
+        Row: {
+          created_at: string
+          driver_id: string
+          ended_at: string | null
+          id: string
+          started_at: string
+        }
+        Insert: {
+          created_at?: string
+          driver_id: string
+          ended_at?: string | null
+          id?: string
+          started_at?: string
+        }
+        Update: {
+          created_at?: string
+          driver_id?: string
+          ended_at?: string | null
+          id?: string
+          started_at?: string
         }
         Relationships: []
       }
@@ -584,6 +638,7 @@ export type Database = {
           full_name: string
           id: string
           invited_by: string | null
+          is_driver: boolean
           phone: string
           postcode: string
           primary_member_id: string | null
@@ -607,6 +662,7 @@ export type Database = {
           full_name?: string
           id: string
           invited_by?: string | null
+          is_driver?: boolean
           phone?: string
           postcode?: string
           primary_member_id?: string | null
@@ -630,6 +686,7 @@ export type Database = {
           full_name?: string
           id?: string
           invited_by?: string | null
+          is_driver?: boolean
           phone?: string
           postcode?: string
           primary_member_id?: string | null
