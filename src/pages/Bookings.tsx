@@ -188,14 +188,20 @@ const Bookings = () => {
     queryKey: ["booking-statuses", checkRefs.join(",")],
     queryFn: () => checkBookingStatuses(checkRefs.slice(0, 10)),
     enabled: !!user && mfaVerified && checkRefs.length > 0,
-    // Every 30s while a driver is actively on a job, every 60s near pickup
+    // Every 15s while a driver is actively on a job, which is exactly when
+    // the map is on screen, and every 30s in the run up to a pickup. Asking
+    // more often than this gains nothing: the ceiling is how often Dispatch
+    // refreshes the chauffeur's position, which the age under the map shows.
     refetchInterval: (query) => {
       const anyActive = (query.state.data ?? []).some(
         (s) => s.bookingStatus && ACTIVE_STATUSES.includes(s.bookingStatus)
       );
-      if (anyActive) return 30_000;
-      return liveRefs.length > 0 ? 60_000 : false;
+      if (anyActive) return 15_000;
+      return liveRefs.length > 0 ? 30_000 : false;
     },
+    // Coming back to the app should show the current position, not the one
+    // from when it was last put down
+    refetchOnWindowFocus: true,
   });
 
   const liveFor = (reference: string | null): LiveBookingStatus | undefined =>
