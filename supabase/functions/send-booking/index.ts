@@ -193,6 +193,12 @@ serve(async (req) => {
     }
     const clientCar = journeyType === "client_car" ? parseClientCar(body.clientCar) : null;
 
+    // Amending? Reuse the original reference so Dispatch overwrites the booking.
+    // Declared here because the notice rule below needs it: an amendment is
+    // allowed to keep a pickup time that has already come close.
+    const amendReference =
+      typeof body.amendReference === "string" && body.amendReference ? body.amendReference : null;
+
     // The same notice rule the form applies, enforced here too: an older app
     // or a direct call must not slip a car in for ten minutes' time
     const collectionAtRaw =
@@ -323,9 +329,6 @@ serve(async (req) => {
     // Record this request for rate limiting
     await supabase.from("rate_limits").insert({ ip_address: ip, endpoint: "send-booking" });
 
-    // Amending? Reuse the original reference so Dispatch overwrites the booking
-    const amendReference =
-      typeof body.amendReference === "string" && body.amendReference ? body.amendReference : null;
     if (amendReference) {
       const { data: existing } = await supabase
         .from("bookings")
@@ -714,8 +717,24 @@ serve(async (req) => {
 
     const data = await res.json();
 
-    if (!res.ok) {
-      throw new Error(`Resend API error [${res.status}]: ${JSON.stringify(data)}`);
+    // By now the booking is in our records and, unless Dispatch refused it, in
+    // Dispatch too. A failed email must not tell the member their car failed,
+    // or they will book the same journey a second time.
+    const emailFailed = !res.ok;
+    if (emailFailed) {
+      console.error(`Resend API error [${res.status}]: ${JSON.stringify(data)}`);
+    }
+
+    // Only when both the transfer and the email failed is the booking really
+    // with nobody, and that is the one case worth asking them to call about.
+    if (emailFailed && dispatchFailureMessage) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "We have your booking on file but could not reach our office. Please call us to confirm it.",
+        }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     if (dispatchFailureMessage && amendReference) {
