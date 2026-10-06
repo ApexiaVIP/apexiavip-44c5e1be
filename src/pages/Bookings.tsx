@@ -89,6 +89,8 @@ const displayStatus = (status: string, provisional = false) => {
     return provisional ? "Awaiting availability" : "Received";
   }
   if (status === "Amendment requested") return "Change requested";
+  // Our record is complete; the office is entering it in Dispatch by hand
+  if (status === "Awaiting office") return provisional ? "Awaiting availability" : "Received";
   if (status === "Dispatched") return "Confirmed";
   if (status === "En route to pickup") return "On the way";
   if (status === "At Pickup") return "Arrived";

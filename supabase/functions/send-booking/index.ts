@@ -586,8 +586,13 @@ serve(async (req) => {
     // A failed amendment leaves the original booking standing, so only new
     // bookings are marked Failed
     if (dispatchFailureMessage && !amendReference) {
-      const failed = [bookingReference, ...(returnReference ? [returnReference] : [])];
-      await supabase.from("bookings").update({ status: "Failed" }).in("reference", failed);
+      // The office has the booking by email, so it is waiting on them rather
+      // than lost. "Failed" would show the member a dead end in red.
+      const handed = [bookingReference, ...(returnReference ? [returnReference] : [])];
+      await supabase
+        .from("bookings")
+        .update({ status: "Awaiting office" })
+        .in("reference", handed);
     } else if (returnFailureMessage && returnReference) {
       // Our record keeps the details; the ops email carries them too
       await supabase
@@ -658,6 +663,15 @@ serve(async (req) => {
           ${detailRows}
         </table>
         ${
+          dispatchFailureMessage && !amendReference
+            ? `<p style="margin-top: 24px; padding: 14px 16px; background: #3A1A1A; border-left: 3px solid #e05a5a; color: #ffb4b4; font-size: 13px;">
+                 <strong>THIS BOOKING IS NOT IN DISPATCH</strong> &mdash; please enter it by hand.<br/>
+                 Reason given: ${sanitize(dispatchFailureMessage)}<br/>
+                 The member has been told we have their booking and will confirm it shortly.
+               </p>`
+            : ""
+        }
+        ${
           availability
             ? `<p style="margin-top: 24px; padding: 14px 16px; background: #2E2515; border-left: 3px solid #e0c341; color: #e0c341; font-size: 13px;">
                  <strong>SUBJECT TO AVAILABILITY</strong> &mdash; ${
@@ -685,7 +699,9 @@ serve(async (req) => {
             ? dispatchFailureMessage
               ? "ACTION NEEDED - Booking AMENDED (APPLY BY HAND)"
               : "Booking AMENDED"
-            : "Booking Enquiry"
+            : dispatchFailureMessage
+              ? "ACTION NEEDED - NOT IN DISPATCH (ENTER BY HAND)"
+              : "Booking Enquiry"
         }: ${safeName} (${safeVehicle})${clientCar ? " - CLIENT'S OWN CAR" : ""}${
           children.length > 0 ? " - CHILD SEATS" : ""
         }${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}${
@@ -722,15 +738,17 @@ serve(async (req) => {
     }
 
     if (dispatchFailureMessage) {
+      // The booking system refused the transfer, but the ops email above
+      // carries every detail, so the office can enter it by hand. The member
+      // is told we have it rather than being sent away to try again.
       return new Response(
         JSON.stringify({
-          success: false,
-          error: "We couldn't send your booking to the booking system. Please try again or contact us directly.",
+          success: true,
+          handedToOps: true,
+          message:
+            "Your booking has been sent to our team, who will confirm it shortly.",
         }),
-        {
-          status: 502,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 

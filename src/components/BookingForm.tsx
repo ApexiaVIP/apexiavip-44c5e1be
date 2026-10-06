@@ -490,7 +490,9 @@ const BookingForm = () => {
       setSubmittedProvisional(availabilityReason(collectionAt));
       toast({
         title: result?.handedToOps
-          ? "Changes sent to our team"
+          ? editing
+            ? "Changes sent to our team"
+            : "Booking Received"
           : editing
             ? "Booking Updated"
             : "Enquiry Sent",
