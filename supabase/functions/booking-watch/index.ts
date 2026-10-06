@@ -231,7 +231,7 @@ serve(async (req) => {
             // booking system's tracker
             ? `APEXIA VIP: ${driver || "Your chauffeur"} is on the way for your ${when} collection${
                 carText ? `, ${carText}` : ""
-              }. Follow the car: apexiavip.com/bookings`
+              }. Follow the car: www.apexiavip.com/bookings`
             : moment === "arrived"
               ? `APEXIA VIP: ${driver || "Your chauffeur"} has arrived for your ${when} collection${
                   carText ? `, ${carText}` : ""

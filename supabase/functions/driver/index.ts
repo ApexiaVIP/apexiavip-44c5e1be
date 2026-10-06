@@ -141,7 +141,9 @@ Deno.serve(async (req) => {
         // The link is ours. On a phone with the app it opens there, and on
         // any other phone it opens the same live map on the website. A
         // passenger is never sent to the booking system's own tracker.
-        const follow = "apexiavip.com/bookings";
+        // It has to be the www host: the apex redirects, and neither Apple
+        // nor Android follows a redirect when checking who owns a domain.
+        const follow = "www.apexiavip.com/bookings";
         const message =
           moment === "onroute"
             ? `APEXIA VIP: ${who} is on the way for your ${when} collection${car ? `, ${car}` : ""}. Follow the car: ${follow}`
