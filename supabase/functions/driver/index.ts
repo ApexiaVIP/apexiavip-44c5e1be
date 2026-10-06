@@ -138,9 +138,13 @@ Deno.serve(async (req) => {
         const who = (profile.full_name as string)?.trim() || "Your chauffeur";
         const when = ukWhen(job.collection_at as string | null);
         const car = (job.vehicle as string) || "";
+        // The link is ours. On a phone with the app it opens there, and on
+        // any other phone it opens the same live map on the website. A
+        // passenger is never sent to the booking system's own tracker.
+        const follow = "apexiavip.com/bookings";
         const message =
           moment === "onroute"
-            ? `APEXIA VIP: ${who} is on the way for your ${when} collection${car ? `, ${car}` : ""}. Follow the car in the app.`
+            ? `APEXIA VIP: ${who} is on the way for your ${when} collection${car ? `, ${car}` : ""}. Follow the car: ${follow}`
             : `APEXIA VIP: ${who} has arrived for your ${when} collection${car ? `, ${car}` : ""} and is waiting for you.`;
         let sentAny = false;
         for (const to of await recipientsFor(admin, job)) {

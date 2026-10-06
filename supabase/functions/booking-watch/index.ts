@@ -227,9 +227,11 @@ serve(async (req) => {
               carText ? `, ${carText}` : ""
             }. We will text again when he sets off.`
           : moment === "onroute"
+            // Our own link, so the passenger lands on our map rather than the
+            // booking system's tracker
             ? `APEXIA VIP: ${driver || "Your chauffeur"} is on the way for your ${when} collection${
                 carText ? `, ${carText}` : ""
-              }.`
+              }. Follow the car: apexiavip.com/bookings`
             : moment === "arrived"
               ? `APEXIA VIP: ${driver || "Your chauffeur"} has arrived for your ${when} collection${
                   carText ? `, ${carText}` : ""

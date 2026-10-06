@@ -415,13 +415,6 @@ const Bookings = () => {
                   Call
                 </a>
               )}
-              {live?.trackDriverUrl && (
-                <a href={live.trackDriverUrl} target="_blank" rel="noreferrer">
-                  <Button size="sm" className="tracking-[0.15em] uppercase">
-                    Track Driver
-                  </Button>
-                </a>
-              )}
             </div>
           </div>
         )}
