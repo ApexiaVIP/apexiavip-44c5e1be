@@ -20,6 +20,8 @@ export type Database = {
           driver_id: string
           id: string
           kind: string
+          lat: number | null
+          lng: number | null
           note: string
           place: string
           recorded_at: string
@@ -29,6 +31,8 @@ export type Database = {
           driver_id: string
           id?: string
           kind: string
+          lat?: number | null
+          lng?: number | null
           note?: string
           place?: string
           recorded_at?: string
@@ -38,6 +42,8 @@ export type Database = {
           driver_id?: string
           id?: string
           kind?: string
+          lat?: number | null
+          lng?: number | null
           note?: string
           place?: string
           recorded_at?: string
@@ -58,6 +64,11 @@ export type Database = {
           corporate: string | null
           created_at: string
           declined_reason: string | null
+          driver_id: string | null
+          driver_moment: string | null
+          driver_name: string | null
+          driver_status: string | null
+          driver_status_at: string | null
           dropoff: Json | null
           email: string
           id: string
@@ -92,6 +103,11 @@ export type Database = {
           corporate?: string | null
           created_at?: string
           declined_reason?: string | null
+          driver_id?: string | null
+          driver_moment?: string | null
+          driver_name?: string | null
+          driver_status?: string | null
+          driver_status_at?: string | null
           dropoff?: Json | null
           email: string
           id?: string
@@ -126,6 +142,11 @@ export type Database = {
           corporate?: string | null
           created_at?: string
           declined_reason?: string | null
+          driver_id?: string | null
+          driver_moment?: string | null
+          driver_name?: string | null
+          driver_status?: string | null
+          driver_status_at?: string | null
           dropoff?: Json | null
           email?: string
           id?: string
