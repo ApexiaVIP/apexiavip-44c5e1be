@@ -1,7 +1,19 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, MapPin, ArrowRight, Clock, UserMinus, UserPlus, StickyNote } from "lucide-react";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import {
+  Loader2,
+  MapPin,
+  ArrowRight,
+  Clock,
+  UserMinus,
+  UserPlus,
+  Car,
+  CheckCheck,
+  PauseCircle,
+  Navigation,
+  Flag,
+} from "lucide-react";
 import Header from "@/components/Header";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,6 +21,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { isInstalledApp } from "@/lib/appLinks";
+import { currentPlace } from "@/lib/whereAmI";
+
+type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
 
 interface Job {
   reference: string;
@@ -24,6 +39,7 @@ interface Job {
   children: { age: number }[] | null;
   passengers: number | null;
   corporate: string | null;
+  driver_status: Step | null;
   dispatchStatus: string | null;
   vehicleRegistration: string;
 }
@@ -31,7 +47,7 @@ interface Job {
 interface Waypoint {
   id: string;
   booking_reference: string;
-  kind: "set_down" | "collected" | "waiting" | "note";
+  kind: Step | "set_down" | "collected" | "note";
   place: string;
   note: string;
   recorded_at: string;
@@ -66,43 +82,71 @@ const ukTime = (iso: string | null) =>
     : "";
 
 const ukDay = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleDateString("en-GB", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-        timeZone: "Europe/London",
-      })
-    : "";
+  new Date(iso ?? Date.now()).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Europe/London",
+  });
 
-const addressLine = (a: Job["pickup"]) =>
-  [a?.line1, a?.town].filter(Boolean).join(", ") || "";
+const addressLine = (a: Job["pickup"]) => [a?.line1, a?.town].filter(Boolean).join(", ") || "";
 
-const kindLabel: Record<Waypoint["kind"], string> = {
+const stepLabel: Record<string, string> = {
+  en_route: "En route",
+  arrived: "Arrived",
+  pob: "Passenger on board",
+  waiting: "Waiting",
+  clear: "Cleared",
   set_down: "Set down",
   collected: "Collected",
-  waiting: "Waiting",
   note: "Note",
 };
+
+/** Where a job has got to, in the chauffeur's own words. */
+const whereItIs = (status: Step | null) =>
+  status ? stepLabel[status] : "Not started";
 
 const Driver = () => {
   const { user, profile, mfaVerified, mfaResolved, loading } = useAuth();
   const queryClient = useQueryClient();
-  const [noteFor, setNoteFor] = useState<string | null>(null);
-  const [placeText, setPlaceText] = useState("");
+  const [waitFor, setWaitFor] = useState<string | null>(null);
+  const [waitPlace, setWaitPlace] = useState("");
+  const [waitFix, setWaitFix] = useState<{ lat?: number; lng?: number }>({});
+  const [locating, setLocating] = useState(false);
+  const [showEarlier, setShowEarlier] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["driver-day"],
     queryFn: () => callDriver({ action: "today" }),
     enabled: !!user && mfaVerified,
     refetchInterval: 60_000,
+    // A job must never blink out of existence while the screen refreshes
+    placeholderData: keepPreviousData,
   });
 
   const act = useMutation({
     mutationFn: (body: Record<string, unknown>) => callDriver(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["driver-day"] }),
-    onError: (err: Error) =>
-      toast({ title: "Not saved", description: err.message, variant: "destructive" }),
+    // Show the next step straight away; the refetch only confirms it
+    onMutate: async (body) => {
+      if (body.action !== "progress") return;
+      await queryClient.cancelQueries({ queryKey: ["driver-day"] });
+      const previous = queryClient.getQueryData(["driver-day"]);
+      queryClient.setQueryData(["driver-day"], (old: { jobs?: Job[] } | undefined) => {
+        if (!old?.jobs) return old;
+        return {
+          ...old,
+          jobs: old.jobs.map((j) =>
+            j.reference === body.reference ? { ...j, driver_status: body.kind as Step } : j
+          ),
+        };
+      });
+      return { previous };
+    },
+    onError: (err: Error, _body, context) => {
+      if (context?.previous) queryClient.setQueryData(["driver-day"], context.previous);
+      toast({ title: "Not saved", description: err.message, variant: "destructive" });
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["driver-day"] }),
   });
 
   if (loading || (user && !mfaResolved)) {
@@ -118,14 +162,180 @@ const Driver = () => {
   }
 
   const shift = data?.shift as { id: string; started_at: string } | null | undefined;
-  const jobs = (data?.jobs ?? []) as Job[];
+  const allJobs = (data?.jobs ?? []) as Job[];
   const waypoints = (data?.waypoints ?? []) as Waypoint[];
 
   const onShift = !!shift;
-  const shiftSince = shift ? ukTime(shift.started_at) : "";
+  const live = allJobs.filter((j) => j.driver_status !== "clear");
+  const done = allJobs.filter((j) => j.driver_status === "clear");
+  const current = live[0] ?? null;
+  const next = live[1] ?? null;
 
-  const log = (reference: string, kind: Waypoint["kind"], place = "") =>
-    act.mutate({ action: "waypoint_add", reference, kind, place });
+  const step = (job: Job, kind: Step, place = "", fix: { lat?: number; lng?: number } = {}) =>
+    act.mutate({ action: "progress", reference: job.reference, kind, place, ...fix });
+
+  /** Fetch a position, then let the chauffeur correct it before it is saved. */
+  const openWait = async (job: Job) => {
+    setWaitFor(job.reference);
+    setWaitPlace("");
+    setWaitFix({});
+    setLocating(true);
+    const found = await currentPlace();
+    setLocating(false);
+    setWaitPlace(found.place);
+    setWaitFix({ lat: found.lat, lng: found.lng });
+    if (found.problem) {
+      toast({ title: "Where are you?", description: found.problem });
+    }
+  };
+
+  /** Clearing records where the car finished without asking anything. */
+  const clearJob = async (job: Job) => {
+    setLocating(true);
+    const found = await currentPlace();
+    setLocating(false);
+    step(job, "clear", found.place, { lat: found.lat, lng: found.lng });
+  };
+
+  const bigButtons = (job: Job) => {
+    const busy = act.isPending || locating;
+    const status = job.driver_status ?? null;
+
+    if (waitFor === job.reference) {
+      return (
+        <div className="space-y-3">
+          <p className="text-smoke text-xs tracking-[0.2em] uppercase">Where are you waiting?</p>
+          <Input
+            autoFocus
+            value={waitPlace}
+            onChange={(e) => setWaitPlace(e.target.value)}
+            placeholder={locating ? "Finding you..." : "e.g. Spinningfields, M3 3AQ"}
+            className="h-14 rounded-none text-base"
+            maxLength={200}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              variant="outline"
+              className="h-16 rounded-none tracking-[0.15em] uppercase"
+              onClick={() => setWaitFor(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={busy}
+              className="h-16 rounded-none tracking-[0.15em] uppercase text-base"
+              onClick={() => {
+                step(job, "waiting", waitPlace.trim(), waitFix);
+                setWaitFor(null);
+              }}
+            >
+              Start waiting
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    const primary = (label: string, kind: Step, Icon: typeof Car) => (
+      <Button
+        disabled={busy}
+        onClick={() => step(job, kind)}
+        className="w-full h-24 rounded-none text-xl tracking-[0.2em] uppercase font-light"
+      >
+        {busy ? <Loader2 className="w-6 h-6 animate-spin" /> : <Icon className="w-6 h-6 mr-3" />}
+        {label}
+      </Button>
+    );
+
+    if (status === null) return primary("En route", "en_route", Navigation);
+    if (status === "en_route") return primary("Arrived", "arrived", MapPin);
+    if (status === "arrived") return primary("Passenger on board", "pob", Car);
+
+    // On board, or waiting for the passenger to come back
+    return (
+      <div className="space-y-3">
+        {status === "waiting"
+          ? primary("Passenger back on board", "pob", Car)
+          : (
+            <Button
+              disabled={busy}
+              variant="outline"
+              onClick={() => openWait(job)}
+              className="w-full h-20 rounded-none text-lg tracking-[0.2em] uppercase font-light"
+            >
+              <PauseCircle className="w-5 h-5 mr-3" />
+              Wait
+            </Button>
+          )}
+        <Button
+          disabled={busy}
+          variant={status === "waiting" ? "outline" : "default"}
+          onClick={() => clearJob(job)}
+          className="w-full h-20 rounded-none text-lg tracking-[0.2em] uppercase font-light"
+        >
+          {locating ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Flag className="w-5 h-5 mr-3" />}
+          Clear
+        </Button>
+      </div>
+    );
+  };
+
+  const jobHead = (job: Job) => {
+    const asDirected = job.journey_type === "hourly";
+    return (
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <p className="font-mono text-champagne text-lg">{ukTime(job.collection_at)}</p>
+            <p className="text-foreground text-2xl font-light tracking-wide">
+              {job.name || "Passenger"}
+            </p>
+            <p className="text-smoke text-xs mt-1">
+              {job.vehicle}
+              {job.vehicleRegistration ? ` · ${job.vehicleRegistration}` : ""}
+              {job.passengers ? ` · ${job.passengers} up` : ""}
+            </p>
+          </div>
+          <span className="text-[10px] tracking-[0.15em] uppercase border border-champagne-muted text-champagne px-2 py-1">
+            {whereItIs(job.driver_status)}
+          </span>
+        </div>
+
+        <div className="text-sm text-smoke space-y-1">
+          <p className="flex items-start gap-2">
+            <MapPin className="w-4 h-4 text-champagne flex-none mt-0.5" />
+            {addressLine(job.pickup) || "Pickup"}
+            {job.pickup?.postcode ? ` · ${job.pickup.postcode}` : ""}
+          </p>
+          {asDirected ? (
+            <p className="flex items-start gap-2 text-champagne">
+              <Clock className="w-4 h-4 flex-none mt-0.5" />
+              At your passenger's direction
+              {job.as_directed_hours ? ` · ${job.as_directed_hours} hours` : ""}
+            </p>
+          ) : (
+            <p className="flex items-start gap-2">
+              <ArrowRight className="w-4 h-4 flex-none mt-0.5" />
+              {addressLine(job.dropoff) || "Destination"}
+              {job.dropoff?.postcode ? ` · ${job.dropoff.postcode}` : ""}
+            </p>
+          )}
+        </div>
+
+        {(job.notes || (job.children?.length ?? 0) > 0) && (
+          <div className="border border-champagne-muted bg-champagne/5 px-3 py-2 text-xs text-smoke space-y-1">
+            {(job.children?.length ?? 0) > 0 && (
+              <p className="text-champagne">
+                {job.children!.length} child{job.children!.length > 1 ? "ren" : ""} aboard, ages{" "}
+                {job.children!.map((c) => c.age).join(", ")}
+              </p>
+            )}
+            {job.notes && <p className="whitespace-pre-wrap">{job.notes}</p>}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -133,16 +343,17 @@ const Driver = () => {
       <main
         className={
           isInstalledApp()
-            ? "pt-[calc(env(safe-area-inset-top)+8.5rem)] pb-[calc(env(safe-area-inset-bottom)+5.5rem)]"
-            : "pt-40 md:pt-44 pb-16"
+            ? "pt-[calc(env(safe-area-inset-top)+8.5rem)] pb-[calc(env(safe-area-inset-bottom)+6rem)]"
+            : "pt-40 md:pt-44 pb-28"
         }
       >
-        <div className="container mx-auto px-8 max-w-2xl space-y-6">
-          <div>
-            <p className="text-champagne text-xs tracking-[0.4em] uppercase mb-2">Chauffeur</p>
-            <h1 className="font-display text-3xl font-light tracking-wider text-foreground">
-              {jobs.length > 0 ? ukDay(jobs[0].collection_at) : "Your day"}
-            </h1>
+        <div className="container mx-auto px-6 max-w-2xl space-y-5">
+          {/* Who and when, kept to one quiet line */}
+          <div className="flex items-baseline gap-3">
+            <p className="text-champagne text-xs tracking-[0.4em] uppercase">Chauffeur</p>
+            <p className="text-smoke text-xs tracking-[0.15em]">
+              {ukDay(current?.collection_at ?? null)}
+            </p>
           </div>
 
           {/* Shift clock */}
@@ -152,7 +363,7 @@ const Driver = () => {
                 {onShift ? "On duty" : "Off duty"}
               </p>
               <p className="text-smoke text-xs mt-0.5">
-                {onShift ? `Signed on at ${shiftSince}` : "Sign on when you start your day"}
+                {onShift ? `Signed on at ${ukTime(shift!.started_at)}` : "Sign on when you start"}
               </p>
             </div>
             <Button
@@ -180,176 +391,79 @@ const Driver = () => {
             <div className="py-16 text-center">
               <Loader2 className="w-6 h-6 animate-spin text-champagne mx-auto" />
             </div>
-          ) : jobs.length === 0 ? (
+          ) : !current ? (
             <div className="border border-border p-8 text-center">
-              <p className="text-foreground text-sm mb-2">No jobs assigned to you yet</p>
+              <p className="text-foreground text-sm mb-2">No jobs assigned to you</p>
               <p className="text-smoke text-xs font-light leading-relaxed max-w-sm mx-auto">
-                Jobs appear here once the office assigns you to them in Dispatch. If you are expecting
-                one, check with the office that your mobile number matches the one they hold.
+                Jobs appear here once the office assigns you in Dispatch. If you are expecting one,
+                check with them that your mobile number matches the one they hold.
               </p>
             </div>
           ) : (
-            jobs.map((job) => {
-              const asDirected = job.journey_type === "hourly";
-              const mine = waypoints.filter((w) => w.booking_reference === job.reference);
-              return (
-                <div key={job.reference} className="border border-border p-5 space-y-4">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div>
-                      <p className="font-mono text-champagne text-sm">{ukTime(job.collection_at)}</p>
-                      <p className="text-foreground text-lg font-light tracking-wide">
-                        {job.name || "Passenger"}
-                      </p>
-                      <p className="text-smoke text-xs mt-0.5">
-                        {job.vehicle}
-                        {job.vehicleRegistration ? ` · ${job.vehicleRegistration}` : ""}
-                        {job.passengers ? ` · ${job.passengers} up` : ""}
-                      </p>
-                    </div>
-                    {job.dispatchStatus && (
-                      <span className="text-[10px] tracking-[0.15em] uppercase border border-champagne-muted text-champagne px-2 py-1">
-                        {job.dispatchStatus}
-                      </span>
-                    )}
-                  </div>
+            <>
+              {/* The job in hand, then the buttons, which is most of the screen */}
+              <div className="border border-border p-5">{jobHead(current)}</div>
+              <div>{bigButtons(current)}</div>
 
-                  <div className="text-sm text-smoke space-y-1">
-                    <p className="flex items-start gap-2">
-                      <MapPin className="w-3.5 h-3.5 text-champagne flex-none mt-1" />
-                      {addressLine(job.pickup) || "Pickup"}
-                    </p>
-                    {asDirected ? (
-                      <p className="flex items-start gap-2 text-champagne">
-                        <Clock className="w-3.5 h-3.5 flex-none mt-1" />
-                        At your passenger's direction
-                        {job.as_directed_hours ? ` · ${job.as_directed_hours} hours` : ""}
-                      </p>
-                    ) : (
-                      <p className="flex items-start gap-2">
-                        <ArrowRight className="w-3.5 h-3.5 flex-none mt-1" />
-                        {addressLine(job.dropoff) || "Destination"}
-                      </p>
-                    )}
-                  </div>
+              {/* What has happened on this job so far */}
+              {(() => {
+                const mine = waypoints.filter((w) => w.booking_reference === current.reference);
+                if (mine.length === 0) return null;
+                return (
+                  <ul className="space-y-1.5 pt-1">
+                    {mine.map((w) => (
+                      <li key={w.id} className="flex items-baseline gap-3 text-xs">
+                        <span className="font-mono text-smoke/70 flex-none">
+                          {ukTime(w.recorded_at)}
+                        </span>
+                        <span className="text-champagne flex-none">{stepLabel[w.kind]}</span>
+                        <span className="text-smoke">{[w.place, w.note].filter(Boolean).join(" · ")}</span>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()}
 
-                  {(job.notes || (job.children?.length ?? 0) > 0) && (
-                    <div className="border border-champagne-muted bg-champagne/5 px-3 py-2 text-xs text-smoke space-y-1">
-                      {(job.children?.length ?? 0) > 0 && (
-                        <p className="text-champagne">
-                          {job.children!.length} child
-                          {job.children!.length > 1 ? "ren" : ""} aboard, ages{" "}
-                          {job.children!.map((c) => c.age).join(", ")}
-                        </p>
-                      )}
-                      {job.notes && <p className="whitespace-pre-wrap">{job.notes}</p>}
-                    </div>
+              {done.length > 0 && (
+                <div className="pt-2">
+                  <button
+                    onClick={() => setShowEarlier((v) => !v)}
+                    className="text-smoke text-[10px] tracking-[0.2em] uppercase flex items-center gap-2"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5" />
+                    {done.length} finished {done.length === 1 ? "job" : "jobs"}
+                  </button>
+                  {showEarlier && (
+                    <ul className="mt-3 space-y-2">
+                      {done.map((j) => (
+                        <li key={j.reference} className="border border-border/60 px-3 py-2 text-xs text-smoke">
+                          <span className="font-mono text-smoke/70">{ukTime(j.collection_at)}</span>
+                          <span className="text-foreground ml-3">{j.name}</span>
+                          <span className="ml-3">{addressLine(j.dropoff)}</span>
+                        </li>
+                      ))}
+                    </ul>
                   )}
-
-                  {/* The log Dispatch cannot keep: stops within one job */}
-                  <div className="border-t border-border pt-4 space-y-3">
-                    <p className="text-smoke text-[10px] tracking-[0.2em] uppercase">
-                      {asDirected ? "Stops on this job" : "Job log"}
-                    </p>
-
-                    {mine.length > 0 && (
-                      <ul className="space-y-1.5">
-                        {mine.map((w) => (
-                          <li key={w.id} className="flex items-baseline gap-3 text-xs">
-                            <span className="font-mono text-smoke/70 flex-none">
-                              {ukTime(w.recorded_at)}
-                            </span>
-                            <span className="text-champagne flex-none">{kindLabel[w.kind]}</span>
-                            <span className="text-smoke">
-                              {[w.place, w.note].filter(Boolean).join(" · ")}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    {noteFor === job.reference ? (
-                      <div className="flex gap-2">
-                        <Input
-                          autoFocus
-                          value={placeText}
-                          onChange={(e) => setPlaceText(e.target.value)}
-                          placeholder="Where? e.g. Spinningfields"
-                          className="h-10 rounded-none text-sm"
-                          maxLength={200}
-                        />
-                        <Button
-                          size="sm"
-                          disabled={act.isPending}
-                          onClick={() => {
-                            log(job.reference, "set_down", placeText.trim());
-                            setPlaceText("");
-                            setNoteFor(null);
-                          }}
-                          className="tracking-[0.15em] uppercase flex-none"
-                        >
-                          Save
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setPlaceText("");
-                            setNoteFor(null);
-                          }}
-                          className="flex-none"
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={act.isPending}
-                          onClick={() => {
-                            setPlaceText("");
-                            setNoteFor(job.reference);
-                          }}
-                          className="tracking-[0.15em] uppercase"
-                        >
-                          Set down
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={act.isPending}
-                          onClick={() => log(job.reference, "collected")}
-                          className="tracking-[0.15em] uppercase"
-                        >
-                          Collected
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={act.isPending}
-                          onClick={() => log(job.reference, "waiting")}
-                          className="tracking-[0.15em] uppercase text-smoke"
-                        >
-                          <StickyNote className="w-3.5 h-3.5 mr-1.5" />
-                          Waiting
-                        </Button>
-                      </div>
-                    )}
-
-                    {asDirected && mine.length === 0 && (
-                      <p className="text-smoke/60 text-xs font-light">
-                        Tap Set down each time your passenger leaves the car, and Collected when they
-                        return. The office can then see the whole day.
-                      </p>
-                    )}
-                  </div>
                 </div>
-              );
-            })
+              )}
+            </>
           )}
         </div>
       </main>
+
+      {/* The job after this one, kept to a thin line along the bottom */}
+      {next && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-md border-t border-border pb-[env(safe-area-inset-bottom)]">
+          <div className="container mx-auto px-6 max-w-2xl py-3 flex items-center gap-3 text-xs">
+            <span className="text-champagne tracking-[0.2em] uppercase text-[10px] flex-none">Next</span>
+            <span className="font-mono text-smoke/80 flex-none">{ukTime(next.collection_at)}</span>
+            <span className="text-foreground truncate">{next.name}</span>
+            <span className="text-smoke ml-auto flex-none">
+              {next.pickup?.postcode || addressLine(next.pickup)}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

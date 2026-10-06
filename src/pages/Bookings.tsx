@@ -51,6 +51,8 @@ interface BookingRow {
   client_car: { make_model?: string; registration?: string; client_travelling?: boolean } | null;
   return_of: string | null;
   subject_to_availability: boolean | null;
+  /** Where the chauffeur says they have got to, from their own app */
+  driver_status: string | null;
 }
 
 const seatFor = (age: number) =>
@@ -74,6 +76,17 @@ const childrenLine = (children: { age: number }[]) => {
 const FINAL_STATUSES = ["Clear/Completed", "Completed", "Cancelled", "No Show", "Invoice", "Failed"];
 /** Statuses meaning a driver is actively working the job */
 const ACTIVE_STATUSES = ["Dispatched", "En route to pickup", "At Pickup", "Passenger on board", "Soon to clear"];
+
+// What the chauffeur presses in their own app, said in the same words Dispatch
+// uses. Their app reports in seconds, where Dispatch is polled, so when the
+// chauffeur has told us something it is the newer answer and it wins.
+const DRIVER_STATUS_AS_DISPATCH: Record<string, string> = {
+  en_route: "En route to pickup",
+  arrived: "At Pickup",
+  pob: "Passenger on board",
+  waiting: "Passenger on board",
+  clear: "Clear/Completed",
+};
 
 const statusVariant = (status: string): "secondary" | "outline" | "destructive" => {
   if (status === "Cancelled" || status === "No Show" || status === "Failed") return "destructive";
@@ -140,13 +153,17 @@ const Bookings = () => {
       const { data, error } = await supabase
         .from("bookings")
         .select(
-          "id, user_id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, journey_type, as_directed_hours, via, status"
+          "id, user_id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, journey_type, as_directed_hours, via, status, driver_status"
         )
         .order("collection_at", { ascending: false, nullsFirst: false });
       if (error) throw error;
       return data as unknown as BookingRow[];
     },
     enabled: !!user && mfaVerified,
+    // The chauffeur's app reports progress here, so the member sees "on the
+    // way" without having to pull the screen down
+    refetchInterval: 20_000,
+    refetchOnWindowFocus: true,
   });
 
   // Names for family members' bookings (visible to the primary account holder)
@@ -220,7 +237,8 @@ const Bookings = () => {
 
   const renderCard = (b: BookingRow, isUpcoming: boolean) => {
     const live = isUpcoming ? liveFor(b.reference) : undefined;
-    const effectiveStatus = live?.bookingStatus ?? b.status;
+    const fromChauffeur = b.driver_status ? DRIVER_STATUS_AS_DISPATCH[b.driver_status] : undefined;
+    const effectiveStatus = fromChauffeur ?? live?.bookingStatus ?? b.status;
     const driverVisible = isUpcoming && live && (live.driver?.name || live.vehicle?.description);
     const isOwn = b.user_id === user.id;
     const familyName = !isOwn && b.user_id ? familyNames?.get(b.user_id) : undefined;
@@ -228,8 +246,7 @@ const Bookings = () => {
     const driverLng = live?.longitude ? parseFloat(live.longitude) : NaN;
     const mapVisible =
       isUpcoming &&
-      live?.bookingStatus &&
-      ACTIVE_STATUSES.includes(live.bookingStatus) &&
+      ACTIVE_STATUSES.includes(effectiveStatus) &&
       Number.isFinite(driverLat) &&
       Number.isFinite(driverLng);
     return (
@@ -402,8 +419,7 @@ const Bookings = () => {
         )}
 
         {isUpcoming &&
-          live?.bookingStatus &&
-          ACTIVE_STATUSES.includes(live.bookingStatus) &&
+          ACTIVE_STATUSES.includes(effectiveStatus) &&
           !mapVisible && (
             <p className="text-smoke/70 text-xs tracking-[0.1em] border border-border px-4 py-3">
               Your chauffeur is on the way. The map appears once their phone reports its position;

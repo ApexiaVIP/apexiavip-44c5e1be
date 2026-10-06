@@ -6,6 +6,8 @@
 	<string>$(CAPACITOR_DEBUG)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Apexia VIP uses the camera only if you choose to take a new photo for your member profile picture, for example when setting up your account. The photo is stored on your membership record so our chauffeurs can recognise you, and is never shared with anyone else.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Used only while you are signed on as a chauffeur, to record where a passenger was set down and where a journey finished.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Apexia VIP accesses your photo library only when you choose an existing photo as your member profile picture. The photo is stored on your membership record so our chauffeurs can recognise you, and is never shared with anyone else.</string>
 	<key>CFBundleDevelopmentRegion</key>

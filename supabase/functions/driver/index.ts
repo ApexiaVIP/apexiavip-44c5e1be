@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
+import { recipientsFor, trySendSms, ukWhen } from "../_shared/notify.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,6 +24,17 @@ const phoneKey = (raw: string | null | undefined): string => {
   const digits = (raw ?? "").replace(/\D/g, "");
   return digits.length >= 9 ? digits.slice(-9) : "";
 };
+
+/** The steps a chauffeur works through, in the order they happen. */
+const PROGRESS_KINDS = ["en_route", "arrived", "pob", "waiting", "clear"] as const;
+type Progress = (typeof PROGRESS_KINDS)[number];
+
+/** How long a finished job stays on the chauffeur's screen. */
+const KEEP_CLEARED_HOURS = 12;
+
+/** How far either side of now a job is worth picking up from Dispatch. */
+const DISCOVER_BEHIND_HOURS = 12;
+const DISCOVER_AHEAD_HOURS = 48;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -79,22 +91,69 @@ Deno.serve(async (req) => {
       return json(200, { success: true, shift: null });
     }
 
-    // --- Record a stop within a job ---
-    if (action === "waypoint_add") {
+    // --- Moving a job on: en route, arrived, on board, waiting, clear ---
+    if (action === "progress") {
       const reference = typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
       const kind = typeof body.kind === "string" ? body.kind : "";
       if (!reference) return json(400, { error: "Which job?" });
-      if (!["set_down", "collected", "waiting", "note"].includes(kind)) {
-        return json(400, { error: "Unknown kind of stop" });
+      if (!PROGRESS_KINDS.includes(kind as Progress)) {
+        return json(400, { error: "Unknown step" });
       }
-      const { error } = await admin.from("booking_waypoints").insert({
+
+      // Only the chauffeur the job belongs to may move it on
+      const { data: job } = await admin
+        .from("bookings")
+        .select("reference, driver_id, driver_moment, corporate, user_id, name, phone, collection_at, vehicle")
+        .eq("reference", reference)
+        .maybeSingle();
+      if (!job || job.driver_id !== user.id) {
+        return json(403, { error: "That job is not assigned to you" });
+      }
+
+      const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
+      const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
+
+      const { error: logError } = await admin.from("booking_waypoints").insert({
         booking_reference: reference,
         driver_id: user.id,
         kind,
         place: typeof body.place === "string" ? body.place.trim().slice(0, 200) : "",
         note: typeof body.note === "string" ? body.note.trim().slice(0, 500) : "",
+        lat,
+        lng,
       });
-      if (error) throw error;
+      if (logError) throw logError;
+
+      const { error: statusError } = await admin
+        .from("bookings")
+        .update({ driver_status: kind, driver_status_at: new Date().toISOString() })
+        .eq("reference", reference);
+      if (statusError) throw statusError;
+
+      // The two moments a passenger wants to hear about. Sent from here rather
+      // than left to the Dispatch watcher, which only runs every five minutes
+      // and would have the passenger still waiting indoors.
+      const moment = kind === "en_route" ? "onroute" : kind === "arrived" ? "arrived" : null;
+      if (moment && job.driver_moment !== moment) {
+        const who = (profile.full_name as string)?.trim() || "Your chauffeur";
+        const when = ukWhen(job.collection_at as string | null);
+        const car = (job.vehicle as string) || "";
+        const message =
+          moment === "onroute"
+            ? `APEXIA VIP: ${who} is on the way for your ${when} collection${car ? `, ${car}` : ""}. Follow the car in the app.`
+            : `APEXIA VIP: ${who} has arrived for your ${when} collection${car ? `, ${car}` : ""} and is waiting for you.`;
+        let sentAny = false;
+        for (const to of await recipientsFor(admin, job)) {
+          if (await trySendSms(to, message)) sentAny = true;
+        }
+        if (sentAny) {
+          await admin
+            .from("bookings")
+            .update({ driver_moment: moment })
+            .eq("reference", reference);
+        }
+      }
+
       return json(200, { success: true });
     }
 
@@ -112,7 +171,7 @@ Deno.serve(async (req) => {
       return json(200, { success: true });
     }
 
-    // --- The driver's day ---
+    // --- The chauffeur's day ---
     const open = await admin
       .from("driver_shifts")
       .select("id, started_at")
@@ -120,72 +179,110 @@ Deno.serve(async (req) => {
       .is("ended_at", null)
       .maybeSingle();
 
-    // Everything that could still be driven: from six hours ago to the end of
-    // tomorrow, so an overnight job and tomorrow's early start both appear
-    const from = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
-    const to = new Date(Date.now() + 42 * 3600 * 1000).toISOString();
-    const { data: candidates } = await admin
-      .from("bookings")
-      .select(
-        "reference, name, vehicle, collection_at, travel_date, pickup, dropoff, via, stops, journey_type, as_directed_hours, notes, children, client_car, passengers, status, corporate"
-      )
-      .not("reference", "is", null)
-      .not("collection_at", "is", null)
-      .gte("collection_at", from)
-      .lte("collection_at", to)
-      .not("status", "in", '("Cancelled","Failed")')
-      .order("collection_at");
+    const myKey = phoneKey(profile.phone as string);
+    const columns =
+      "reference, name, vehicle, collection_at, travel_date, pickup, dropoff, via, stops, journey_type, as_directed_hours, notes, children, client_car, passengers, status, corporate, driver_id, driver_status, driver_status_at";
 
-    const refs = (candidates ?? []).map((b) => b.reference as string);
-    const mine: Record<string, unknown>[] = [];
+    // 1. Pick up anything Dispatch has newly put in this chauffeur's name.
+    //    Once seen it is written down, so the job survives a bad answer from
+    //    Dispatch, or the office moving its time without telling us.
+    const dispatchStatus = new Map<string, Record<string, unknown>>();
+    if (myKey && DISPATCH_TRANSFER_REFERENCE) {
+      const from = new Date(Date.now() - DISCOVER_BEHIND_HOURS * 3600 * 1000).toISOString();
+      const to = new Date(Date.now() + DISCOVER_AHEAD_HOURS * 3600 * 1000).toISOString();
+      const { data: candidates } = await admin
+        .from("bookings")
+        .select("reference, driver_id")
+        .not("reference", "is", null)
+        .not("collection_at", "is", null)
+        .gte("collection_at", from)
+        .lte("collection_at", to)
+        .not("status", "in", '("Cancelled","Failed")')
+        .order("collection_at");
 
-    if (refs.length > 0 && DISPATCH_TRANSFER_REFERENCE) {
-      // Dispatch knows who is driving; we match on the mobile it reports
-      const auth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
-      try {
-        const res = await fetch(
-          `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(
-            DISPATCH_TRANSFER_REFERENCE
-          )}&CheckBookingStatus=true`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
-            body: JSON.stringify({ Bookings: refs.map((reference) => ({ Reference: reference })) }),
+      const refs = (candidates ?? []).map((b) => b.reference as string);
+      if (refs.length > 0) {
+        const auth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
+        try {
+          const res = await fetch(
+            `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(
+              DISPATCH_TRANSFER_REFERENCE
+            )}&CheckBookingStatus=true`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+              body: JSON.stringify({ Bookings: refs.map((reference) => ({ Reference: reference })) }),
+            }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const result = Array.isArray(data?.Result) ? data.Result[0] : data;
+            for (const b of Array.isArray(result?.Bookings) ? result.Bookings : []) {
+              if (b?.Reference) dispatchStatus.set(b.Reference, b);
+            }
+            const newlyMine: string[] = [];
+            let driverName = "";
+            for (const candidate of candidates ?? []) {
+              const live = dispatchStatus.get(candidate.reference as string);
+              const driver = live?.Driver as { Mobile?: string; Name?: string } | undefined;
+              if (!driver?.Mobile || phoneKey(driver.Mobile) !== myKey) continue;
+              if (candidate.driver_id === user.id) continue;
+              newlyMine.push(candidate.reference as string);
+              driverName = driver.Name?.trim() || driverName;
+            }
+            if (newlyMine.length > 0) {
+              await admin
+                .from("bookings")
+                .update({
+                  driver_id: user.id,
+                  driver_name: driverName || (profile.full_name as string) || null,
+                })
+                .in("reference", newlyMine);
+            }
+          } else {
+            console.error("Dispatch status HTTP", res.status, await res.text());
           }
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const result = Array.isArray(data?.Result) ? data.Result[0] : data;
-          const live = new Map<string, Record<string, unknown>>();
-          for (const b of Array.isArray(result?.Bookings) ? result.Bookings : []) {
-            if (b?.Reference) live.set(b.Reference, b);
-          }
-          const myKey = phoneKey(profile.phone as string);
-          for (const booking of candidates ?? []) {
-            const l = live.get(booking.reference as string);
-            const driverPhone = phoneKey((l?.Driver as { Mobile?: string })?.Mobile);
-            if (!myKey || !driverPhone || driverPhone !== myKey) continue;
-            mine.push({
-              ...booking,
-              dispatchStatus: l?.BookingStatus ?? null,
-              vehicleDescription: (l?.Vehicle as { Description?: string })?.Description ?? "",
-              vehicleRegistration: (l?.Vehicle as { Registration?: string })?.Registration ?? "",
-            });
-          }
-        } else {
-          console.error("Dispatch status HTTP", res.status, await res.text());
+        } catch (e) {
+          // A bad answer from Dispatch costs us new jobs, never the ones the
+          // chauffeur already has
+          console.error("Dispatch lookup failed:", e);
         }
-      } catch (e) {
-        console.error("Dispatch lookup failed:", e);
       }
     }
 
-    // The stops already logged against those jobs
-    const myRefs = mine.map((b) => b.reference as string);
+    // 2. The day itself comes from our own records, so nothing disappears
+    const clearedSince = new Date(Date.now() - KEEP_CLEARED_HOURS * 3600 * 1000).toISOString();
+    const { data: assigned } = await admin
+      .from("bookings")
+      .select(columns)
+      .eq("driver_id", user.id)
+      .not("status", "in", '("Cancelled","Failed")')
+      .order("collection_at", { nullsFirst: false });
+
+    const jobs = (assigned ?? [])
+      .filter((b) => {
+        // A finished job stays on screen for the rest of the shift, then goes
+        if (b.driver_status !== "clear") return true;
+        return !!b.driver_status_at && b.driver_status_at > clearedSince;
+      })
+      .map((b) => {
+        const live = dispatchStatus.get(b.reference as string);
+        const vehicle = live?.Vehicle as { Description?: string; Registration?: string } | undefined;
+        const driver = live?.Driver as { Name?: string; Mobile?: string } | undefined;
+        return {
+          ...b,
+          dispatchStatus: live?.BookingStatus ?? null,
+          vehicleDescription: vehicle?.Description ?? "",
+          vehicleRegistration: vehicle?.Registration ?? "",
+          driverName: driver?.Name ?? "",
+        };
+      });
+
+    const myRefs = jobs.map((b) => b.reference as string);
     const { data: waypoints } = myRefs.length
       ? await admin
           .from("booking_waypoints")
-          .select("id, booking_reference, kind, place, note, recorded_at")
+          .select("id, booking_reference, kind, place, note, recorded_at, lat, lng")
           .in("booking_reference", myRefs)
           .order("recorded_at")
       : { data: [] as Record<string, unknown>[] };
@@ -194,7 +291,7 @@ Deno.serve(async (req) => {
       success: true,
       driver: { name: profile.full_name, phone: profile.phone },
       shift: open.data ?? null,
-      jobs: mine,
+      jobs,
       waypoints: waypoints ?? [],
     });
   } catch (error) {

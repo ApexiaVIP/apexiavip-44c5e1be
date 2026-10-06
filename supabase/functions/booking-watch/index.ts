@@ -122,7 +122,7 @@ serve(async (req) => {
     const { data: watched } = await admin
       .from("bookings")
       .select(
-        "reference, user_id, corporate, name, phone, status, notified_status, collection_at, vehicle, subject_to_availability"
+        "reference, user_id, corporate, name, phone, status, notified_status, collection_at, vehicle, subject_to_availability, driver_moment"
       )
       .not("reference", "is", null)
       .not("collection_at", "is", null)
@@ -204,6 +204,13 @@ serve(async (req) => {
       }
       if (status === b.notified_status) {
         details.push({ reference: b.reference, status, outcome: "already texted" });
+        continue;
+      }
+      // The chauffeur's own app texts the passenger the moment they set off
+      // and the moment they arrive. Dispatch reaching the same point later
+      // must not say it again.
+      if (moment && moment === b.driver_moment) {
+        details.push({ reference: b.reference, status, outcome: "chauffeur already texted" });
         continue;
       }
 
