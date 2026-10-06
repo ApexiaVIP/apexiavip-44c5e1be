@@ -22,6 +22,13 @@
       "when": 1791233351868,
       "tag": "0002_drivers",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791318749397,
+      "tag": "0003_driver_progress",
+      "breakpoints": true
     }
   ]
 }
