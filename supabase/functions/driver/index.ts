@@ -113,6 +113,15 @@ Deno.serve(async (req) => {
       const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
       const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
 
+      // Where the job has got to is what the chauffeur's screen and the
+      // passenger both depend on, so it is written first. A problem keeping
+      // the history must never stop someone finishing a job.
+      const { error: statusError } = await admin
+        .from("bookings")
+        .update({ driver_status: kind, driver_status_at: new Date().toISOString() })
+        .eq("reference", reference);
+      if (statusError) throw statusError;
+
       const { error: logError } = await admin.from("booking_waypoints").insert({
         booking_reference: reference,
         driver_id: user.id,
@@ -122,13 +131,7 @@ Deno.serve(async (req) => {
         lat,
         lng,
       });
-      if (logError) throw logError;
-
-      const { error: statusError } = await admin
-        .from("bookings")
-        .update({ driver_status: kind, driver_status_at: new Date().toISOString() })
-        .eq("reference", reference);
-      if (statusError) throw statusError;
+      if (logError) console.error("Could not record the stop:", logError);
 
       // The two moments a passenger wants to hear about. Sent from here rather
       // than left to the Dispatch watcher, which only runs every five minutes
@@ -160,7 +163,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      return json(200, { success: true });
+      return json(200, { success: true, reference, driver_status: kind });
     }
 
     if (action === "waypoint_undo") {

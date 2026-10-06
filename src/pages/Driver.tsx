@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { isInstalledApp } from "@/lib/appLinks";
 import { currentPlace } from "@/lib/whereAmI";
+import { splitJobs } from "@/lib/driverQueue";
 
 type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
 
@@ -114,6 +115,9 @@ const Driver = () => {
   const [waitFix, setWaitFix] = useState<{ lat?: number; lng?: number }>({});
   const [locating, setLocating] = useState(false);
   const [showEarlier, setShowEarlier] = useState(false);
+  // Jobs cleared in this session. A refresh that has not caught up yet must
+  // never put a finished job back in the chauffeur's hands.
+  const [clearedHere, setClearedHere] = useState<string[]>([]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["driver-day"],
@@ -142,6 +146,13 @@ const Driver = () => {
       });
       return { previous };
     },
+    onSuccess: (_data, body) => {
+      if (body.action === "progress" && body.kind === "clear") {
+        setClearedHere((refs) =>
+          refs.includes(body.reference as string) ? refs : [...refs, body.reference as string]
+        );
+      }
+    },
     onError: (err: Error, _body, context) => {
       if (context?.previous) queryClient.setQueryData(["driver-day"], context.previous);
       toast({ title: "Not saved", description: err.message, variant: "destructive" });
@@ -166,10 +177,10 @@ const Driver = () => {
   const waypoints = (data?.waypoints ?? []) as Waypoint[];
 
   const onShift = !!shift;
-  const live = allJobs.filter((j) => j.driver_status !== "clear");
-  const done = allJobs.filter((j) => j.driver_status === "clear");
-  const current = live[0] ?? null;
-  const next = live[1] ?? null;
+  // One job in hand, the rest waiting, the finished ones out of the way. A job
+  // cleared here stays cleared even if a refresh has not caught up.
+  const { current, queue, done } = splitJobs(allJobs, clearedHere);
+  const next = queue[0] ?? null;
 
   const step = (job: Job, kind: Step, place = "", fix: { lat?: number; lng?: number } = {}) =>
     act.mutate({ action: "progress", reference: job.reference, kind, place, ...fix });
@@ -200,6 +211,8 @@ const Driver = () => {
   const bigButtons = (job: Job) => {
     const busy = act.isPending || locating;
     const status = job.driver_status ?? null;
+    // Nothing is pressable on a finished job, whatever else happens
+    if (status === "clear" || clearedHere.includes(job.reference)) return null;
 
     if (waitFor === job.reference) {
       return (
@@ -391,57 +404,110 @@ const Driver = () => {
             <div className="py-16 text-center">
               <Loader2 className="w-6 h-6 animate-spin text-champagne mx-auto" />
             </div>
-          ) : !current ? (
-            <div className="border border-border p-8 text-center">
-              <p className="text-foreground text-sm mb-2">No jobs assigned to you</p>
-              <p className="text-smoke text-xs font-light leading-relaxed max-w-sm mx-auto">
-                Jobs appear here once the office assigns you in Dispatch. If you are expecting one,
-                check with them that your mobile number matches the one they hold.
-              </p>
-            </div>
           ) : (
             <>
-              {/* The job in hand, then the buttons, which is most of the screen */}
-              <div className="border border-border p-5">{jobHead(current)}</div>
-              <div>{bigButtons(current)}</div>
+              {current ? (
+                <>
+                  {/* The job in hand, then the buttons, which is most of the screen */}
+                  <div className="border border-border p-5">{jobHead(current)}</div>
+                  <div>{bigButtons(current)}</div>
 
-              {/* What has happened on this job so far */}
-              {(() => {
-                const mine = waypoints.filter((w) => w.booking_reference === current.reference);
-                if (mine.length === 0) return null;
-                return (
-                  <ul className="space-y-1.5 pt-1">
-                    {mine.map((w) => (
-                      <li key={w.id} className="flex items-baseline gap-3 text-xs">
+                  {/* What has happened on this job so far */}
+                  {(() => {
+                    const mine = waypoints.filter((w) => w.booking_reference === current.reference);
+                    if (mine.length === 0) return null;
+                    return (
+                      <ul className="space-y-1.5 pt-1">
+                        {mine.map((w) => (
+                          <li key={w.id} className="flex items-baseline gap-3 text-xs">
+                            <span className="font-mono text-smoke/70 flex-none">
+                              {ukTime(w.recorded_at)}
+                            </span>
+                            <span className="text-champagne flex-none">{stepLabel[w.kind]}</span>
+                            <span className="text-smoke">
+                              {[w.place, w.note].filter(Boolean).join(" · ")}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  })()}
+                </>
+              ) : done.length > 0 ? (
+                <div className="border border-border p-8 text-center">
+                  <CheckCheck className="w-6 h-6 text-champagne mx-auto mb-3" strokeWidth={1.5} />
+                  <p className="text-foreground text-sm mb-2">Every job finished</p>
+                  <p className="text-smoke text-xs font-light leading-relaxed max-w-sm mx-auto">
+                    Nothing else is assigned to you. Sign off above when you are done for the day.
+                  </p>
+                </div>
+              ) : (
+                <div className="border border-border p-8 text-center">
+                  <p className="text-foreground text-sm mb-2">No jobs assigned to you</p>
+                  <p className="text-smoke text-xs font-light leading-relaxed max-w-sm mx-auto">
+                    Jobs appear here once the office assigns you in Dispatch. If you are expecting
+                    one, check with them that your mobile number matches the one they hold.
+                  </p>
+                </div>
+              )}
+
+              {/* Still to come. Shown, but not workable until its turn. */}
+              {queue.length > 0 && (
+                <div className="pt-2">
+                  <p className="text-smoke text-[10px] tracking-[0.2em] uppercase mb-3">
+                    {queue.length} still to come
+                  </p>
+                  <ul className="space-y-2">
+                    {queue.map((j) => (
+                      <li
+                        key={j.reference}
+                        className="border border-border/60 px-3 py-2.5 flex items-baseline gap-3 text-xs"
+                      >
                         <span className="font-mono text-smoke/70 flex-none">
-                          {ukTime(w.recorded_at)}
+                          {ukTime(j.collection_at)}
                         </span>
-                        <span className="text-champagne flex-none">{stepLabel[w.kind]}</span>
-                        <span className="text-smoke">{[w.place, w.note].filter(Boolean).join(" · ")}</span>
+                        <span className="text-foreground truncate">{j.name}</span>
+                        <span className="text-smoke ml-auto flex-none">
+                          {j.pickup?.postcode || addressLine(j.pickup)}
+                        </span>
                       </li>
                     ))}
                   </ul>
-                );
-              })()}
+                </div>
+              )}
 
+              {/* Finished, and out of the way */}
               {done.length > 0 && (
                 <div className="pt-2">
                   <button
                     onClick={() => setShowEarlier((v) => !v)}
                     className="text-smoke text-[10px] tracking-[0.2em] uppercase flex items-center gap-2"
                   >
-                    <CheckCheck className="w-3.5 h-3.5" />
+                    <CheckCheck className="w-3.5 h-3.5 text-champagne" />
                     {done.length} finished {done.length === 1 ? "job" : "jobs"}
                   </button>
                   {showEarlier && (
                     <ul className="mt-3 space-y-2">
-                      {done.map((j) => (
-                        <li key={j.reference} className="border border-border/60 px-3 py-2 text-xs text-smoke">
-                          <span className="font-mono text-smoke/70">{ukTime(j.collection_at)}</span>
-                          <span className="text-foreground ml-3">{j.name}</span>
-                          <span className="ml-3">{addressLine(j.dropoff)}</span>
-                        </li>
-                      ))}
+                      {done.map((j) => {
+                        const clearedAt = waypoints
+                          .filter((w) => w.booking_reference === j.reference && w.kind === "clear")
+                          .at(-1);
+                        return (
+                          <li
+                            key={j.reference}
+                            className="border border-border/40 px-3 py-2.5 flex items-baseline gap-3 text-xs opacity-60"
+                          >
+                            <CheckCheck className="w-3.5 h-3.5 text-champagne flex-none" />
+                            <span className="font-mono text-smoke/70 flex-none">
+                              {ukTime(j.collection_at)}
+                            </span>
+                            <span className="text-foreground truncate">{j.name}</span>
+                            <span className="text-smoke ml-auto flex-none">
+                              {clearedAt ? `Cleared ${ukTime(clearedAt.recorded_at)}` : "Cleared"}
+                            </span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
