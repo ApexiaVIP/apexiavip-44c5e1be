@@ -466,7 +466,24 @@ const BookingForm = () => {
         }
       );
 
-      if (error) throw error;
+      // A refusal carries a reason; dig it out of the response body so the
+      // member is told what to change instead of "something went wrong"
+      if (error) {
+        let reason = "";
+        const ctx = (error as { context?: Response }).context;
+        if (ctx) {
+          try {
+            const parsed = await ctx.json();
+            if (parsed?.error) reason = String(parsed.error);
+          } catch {
+            /* fall back to the generic message */
+          }
+        }
+        throw new Error(reason || (error as Error).message || "");
+      }
+      if (result?.success === false && result?.error) {
+        throw new Error(String(result.error));
+      }
 
       setSubmitted(true);
       setSubmittedReturn(data.returnJourney && data.journeyType !== "hourly");
@@ -488,9 +505,13 @@ const BookingForm = () => {
       });
     } catch (err) {
       console.error(err);
+      const reason =
+        err instanceof Error && err.message && err.message !== "Something went wrong"
+          ? err.message
+          : "";
       toast({
-        title: "Something went wrong",
-        description: "Please try again or contact us directly.",
+        title: reason ? "We could not book that" : "Something went wrong",
+        description: reason || "Please try again, or call us and we will sort it.",
         variant: "destructive",
       });
     } finally {
