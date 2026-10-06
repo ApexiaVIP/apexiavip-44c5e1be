@@ -150,12 +150,20 @@ const Bookings = () => {
   const { data: bookings, isLoading } = useQuery({
     queryKey: ["my-bookings"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("bookings")
-        .select(
-          "id, user_id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, journey_type, as_directed_hours, via, status, driver_status"
-        )
-        .order("collection_at", { ascending: false, nullsFirst: false });
+      const columns =
+        "id, user_id, reference, vehicle, travel_date, collection_at, passengers, bags, pickup, dropoff, journey_type, as_directed_hours, via, status";
+      const ask = (select: string) =>
+        supabase
+          .from("bookings")
+          .select(select)
+          .order("collection_at", { ascending: false, nullsFirst: false });
+
+      // The chauffeur column arrives with its migration, which lands after the
+      // site does. Until then the member's bookings must still open.
+      let { data, error } = await ask(`${columns}, driver_status`);
+      if (error) {
+        ({ data, error } = await ask(columns));
+      }
       if (error) throw error;
       return data as unknown as BookingRow[];
     },
