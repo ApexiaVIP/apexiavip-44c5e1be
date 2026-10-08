@@ -8,6 +8,7 @@ import {
   ACTIVE_STATUSES,
   DRIVER_STATUS_AS_DISPATCH,
   FINAL_STATUSES,
+  chauffeurPosition,
   stillRunning,
 } from "@/lib/bookingLive";
 import { locationFreshness } from "@/lib/locationAge";
@@ -59,6 +60,10 @@ interface BookingRow {
   subject_to_availability: boolean | null;
   /** Where the chauffeur says they have got to, from their own app */
   driver_status: string | null;
+  /** Where the chauffeur's own app last said the car was */
+  driver_lat?: number | null;
+  driver_lng?: number | null;
+  driver_position_at?: string | null;
 }
 
 const seatFor = (age: number) =>
@@ -150,7 +155,7 @@ const Bookings = () => {
 
       // The chauffeur column arrives with its migration, which lands after the
       // site does. Until then the member's bookings must still open.
-      let { data, error } = await ask(`${columns}, driver_status`);
+      let { data, error } = await ask(`${columns}, driver_status, driver_lat, driver_lng, driver_position_at`);
       if (error) {
         ({ data, error } = await ask(columns));
       }
@@ -158,9 +163,15 @@ const Bookings = () => {
       return data as unknown as BookingRow[];
     },
     enabled: !!user && mfaVerified,
-    // The chauffeur's app reports progress here, so the member sees "on the
-    // way" without having to pull the screen down
-    refetchInterval: 20_000,
+    // The chauffeur's app reports progress and position here, so the member
+    // sees the car move without having to pull the screen down. The chauffeur
+    // reports every twenty seconds, so asking every ten keeps the map close
+    // to live while a car is out, and backs off when none is.
+    refetchInterval: (query) => {
+      const rows = (query.state.data ?? []) as BookingRow[];
+      const working = rows.some((b) => b.driver_status && b.driver_status !== "clear");
+      return working ? 10_000 : 20_000;
+    },
     refetchOnWindowFocus: true,
   });
 
@@ -240,13 +251,12 @@ const Bookings = () => {
     const driverVisible = isUpcoming && live && (live.driver?.name || live.vehicle?.description);
     const isOwn = b.user_id === user.id;
     const familyName = !isOwn && b.user_id ? familyNames?.get(b.user_id) : undefined;
-    const driverLat = live?.latitude ? parseFloat(live.latitude) : NaN;
-    const driverLng = live?.longitude ? parseFloat(live.longitude) : NaN;
-    const mapVisible =
-      isUpcoming &&
-      ACTIVE_STATUSES.includes(effectiveStatus) &&
-      Number.isFinite(driverLat) &&
-      Number.isFinite(driverLng);
+    // The chauffeur's own app reports every twenty seconds; Dispatch is the
+    // fallback for a chauffeur working their system instead of ours
+    const fix = chauffeurPosition(b, live, now);
+    const driverLat = fix?.lat ?? NaN;
+    const driverLng = fix?.lng ?? NaN;
+    const mapVisible = isUpcoming && ACTIVE_STATUSES.includes(effectiveStatus) && !!fix;
     return (
       <div key={b.id} className="border border-border p-6 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -426,7 +436,16 @@ const Bookings = () => {
               pickupPostcode={b.pickup?.postcode}
             />
             {(() => {
-              const fresh = locationFreshness(live?.locationDateTime ?? null);
+              // Our own app knows exactly how old its last report is; for a
+              // chauffeur on Dispatch we can only go by what Dispatch says
+              const mins = fix?.fromOurApp ? Math.floor(fix.ageMs / 60000) : null;
+              const fresh =
+                mins === null
+                  ? locationFreshness(live?.locationDateTime ?? null)
+                  : {
+                      text: mins < 1 ? "updated just now" : `updated ${mins} min ago`,
+                      stale: mins >= 5,
+                    };
               return (
                 <p
                   className={`text-xs tracking-[0.1em] ${

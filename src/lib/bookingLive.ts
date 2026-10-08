@@ -85,3 +85,51 @@ export const stillRunning = (b: LiveBooking, now: number = Date.now()): boolean 
   if (pickup === null) return true;
   return pickup > now - expectedRunHours(b) * 3600 * 1000;
 };
+
+/** How fresh our own position has to be before we trust it over Dispatch's. */
+export const OUR_POSITION_FRESH_MS = 2 * 60 * 1000;
+
+export interface Positioned {
+  driver_lat?: number | null;
+  driver_lng?: number | null;
+  driver_position_at?: string | null;
+}
+
+export interface Fix {
+  lat: number;
+  lng: number;
+  /** True when this came from the chauffeur's own app rather than Dispatch */
+  fromOurApp: boolean;
+  /** Milliseconds old, when we know. Dispatch reports its own age separately. */
+  ageMs: number;
+}
+
+/**
+ * Where to draw the car.
+ *
+ * Our own app reports every twenty seconds while a job is running, where
+ * Dispatch refreshes rarely enough that a passenger sees a car that never
+ * moves. So a recent position of ours wins. Dispatch is the fallback, and a
+ * stale position of ours still beats showing nothing at all.
+ */
+export const chauffeurPosition = (
+  booking: Positioned,
+  dispatch?: { latitude?: string | null; longitude?: string | null } | null,
+  now: number = Date.now()
+): Fix | null => {
+  const reportedAt = booking.driver_position_at ? Date.parse(booking.driver_position_at) : NaN;
+  const age = Number.isNaN(reportedAt) ? Number.POSITIVE_INFINITY : now - reportedAt;
+  const ours =
+    typeof booking.driver_lat === "number" && typeof booking.driver_lng === "number"
+      ? { lat: booking.driver_lat, lng: booking.driver_lng, fromOurApp: true, ageMs: age }
+      : null;
+
+  if (ours && age >= 0 && age < OUR_POSITION_FRESH_MS) return ours;
+
+  const lat = dispatch?.latitude ? parseFloat(dispatch.latitude) : Number.NaN;
+  const lng = dispatch?.longitude ? parseFloat(dispatch.longitude) : Number.NaN;
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { lat, lng, fromOurApp: false, ageMs: Number.NaN };
+  }
+  return ours;
+};

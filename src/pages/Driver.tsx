@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { isInstalledApp } from "@/lib/appLinks";
-import { currentPlace } from "@/lib/whereAmI";
+import { currentPlace, followPosition } from "@/lib/whereAmI";
 import { splitJobs } from "@/lib/driverQueue";
 
 type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
@@ -160,6 +160,26 @@ const Driver = () => {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["driver-day"] }),
   });
 
+  // One job in hand, the rest waiting, the finished ones out of the way. A job
+  // cleared here stays cleared even if a refresh has not caught up.
+  const { current, queue, done } = splitJobs((data?.jobs ?? []) as Job[], clearedHere);
+
+  // While a job is actually running, the phone reports where the car is, so
+  // the passenger sees it move instead of watching a pin that never changes.
+  // Nothing is reported before the chauffeur sets off or after they clear.
+  const reportingFor =
+    current && current.driver_status && current.driver_status !== "clear"
+      ? current.reference
+      : null;
+  useEffect(() => {
+    if (!reportingFor) return;
+    return followPosition((lat, lng) => {
+      void supabase.functions.invoke("driver", {
+        body: { action: "position", reference: reportingFor, lat, lng },
+      });
+    });
+  }, [reportingFor]);
+
   if (loading || (user && !mfaResolved)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -177,9 +197,6 @@ const Driver = () => {
   const waypoints = (data?.waypoints ?? []) as Waypoint[];
 
   const onShift = !!shift;
-  // One job in hand, the rest waiting, the finished ones out of the way. A job
-  // cleared here stays cleared even if a refresh has not caught up.
-  const { current, queue, done } = splitJobs(allJobs, clearedHere);
   const next = queue[0] ?? null;
 
   const step = (job: Job, kind: Step, place = "", fix: { lat?: number; lng?: number } = {}) =>
@@ -410,6 +427,12 @@ const Driver = () => {
                 <>
                   {/* The job in hand, then the buttons, which is most of the screen */}
                   <div className="border border-border p-5">{jobHead(current)}</div>
+                  {reportingFor === current.reference && (
+                    <p className="text-smoke/70 text-[11px] tracking-[0.1em] flex items-center gap-2">
+                      <Navigation className="w-3 h-3 text-champagne" />
+                      Your passenger can see the car on their map until you clear this job
+                    </p>
+                  )}
                   <div>{bigButtons(current)}</div>
 
                   {/* What has happened on this job so far */}

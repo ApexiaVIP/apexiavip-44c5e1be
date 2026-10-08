@@ -57,3 +57,38 @@ export const currentPlace = async (): Promise<Place> => {
     return { place: "", problem };
   }
 };
+
+/**
+ * Follow the phone's position while a job is running.
+ *
+ * The callback fires on a steady beat rather than on every movement, so the
+ * map keeps a fresh time even when the car is sat at lights, and a motorway
+ * run does not send hundreds of updates. Returns a function that stops it.
+ */
+export const followPosition = (
+  onFix: (lat: number, lng: number) => void,
+  everyMs = 20000
+): (() => void) => {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return () => {};
+  let latest: { lat: number; lng: number } | null = null;
+
+  const watch = navigator.geolocation.watchPosition(
+    (position) => {
+      latest = { lat: position.coords.latitude, lng: position.coords.longitude };
+    },
+    () => {
+      // A refused or unavailable position is not worth shouting about here:
+      // the chauffeur is told once, when they press Wait or Clear
+    },
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 }
+  );
+
+  const beat = setInterval(() => {
+    if (latest) onFix(latest.lat, latest.lng);
+  }, everyMs);
+
+  return () => {
+    navigator.geolocation.clearWatch(watch);
+    clearInterval(beat);
+  };
+};

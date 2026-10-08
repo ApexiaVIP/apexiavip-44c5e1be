@@ -18,7 +18,7 @@ await esbuild.build({
   entryPoints: [join(here, "..", "src", "lib", "bookingLive.ts")],
   bundle: true, format: "esm", platform: "node", outfile: out,
 });
-const { stillRunning, effectiveStatus } = await import(pathToFileURL(out).href);
+const { stillRunning, effectiveStatus, chauffeurPosition } = await import(pathToFileURL(out).href);
 
 const NOW = Date.parse("2026-10-08T20:00:00Z");
 const hoursAgo = (h) => new Date(NOW - h * 3600 * 1000).toISOString();
@@ -70,5 +70,21 @@ is("but not before its own hours are up", stillRunning({ ...hire(12, 5) }, NOW),
 is("the chauffeur's word beats a stale Dispatch status", effectiveStatus(
   { status: "Dispatched", driver_status: "pob" }, "Dispatched"), "Passenger on board");
 
-console.log(bad === 0 ? "\ntracking holds until the job is finished" : `\n${bad} FAILED`);
+// --- Where the car is drawn ---
+const minsAgo = (m) => new Date(NOW - m * 60000).toISOString();
+const dispatch = { latitude: "53.4000", longitude: "-2.9000" };
+const ours = (m) => ({ driver_lat: 53.48, driver_lng: -2.24, driver_position_at: minsAgo(m) });
+
+is("a fresh position of ours is used", chauffeurPosition(ours(0.5), dispatch, NOW).fromOurApp, true);
+is("and it is our coordinates", chauffeurPosition(ours(0.5), dispatch, NOW).lat, 53.48);
+is("a stale one of ours gives way to Dispatch", chauffeurPosition(ours(30), dispatch, NOW).fromOurApp, false);
+is("with Dispatch's coordinates", chauffeurPosition(ours(30), dispatch, NOW).lat, 53.4);
+is("a stale one of ours still beats nothing", chauffeurPosition(ours(30), null, NOW).fromOurApp, true);
+is("Dispatch alone is used when we have none", chauffeurPosition({}, dispatch, NOW).fromOurApp, false);
+is("nothing anywhere draws nothing", chauffeurPosition({}, null, NOW), null);
+is("a half written position is ignored", chauffeurPosition({ driver_lat: 53.48, driver_position_at: minsAgo(0.1) }, dispatch, NOW).fromOurApp, false);
+is("the age of ours is reported", Math.round(chauffeurPosition(ours(1), dispatch, NOW).ageMs / 1000), 60);
+
+console.log(bad === 0 ? "\nposition source chosen correctly" : `\n${bad} FAILED`);
+console.log(bad === 0 ? "\ntracking and position source hold" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

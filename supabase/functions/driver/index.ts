@@ -118,7 +118,14 @@ Deno.serve(async (req) => {
       // the history must never stop someone finishing a job.
       const { error: statusError } = await admin
         .from("bookings")
-        .update({ driver_status: kind, driver_status_at: new Date().toISOString() })
+        .update({
+          driver_status: kind,
+          driver_status_at: new Date().toISOString(),
+          // A finished job keeps no record of where the chauffeur is
+          ...(kind === "clear"
+            ? { driver_lat: null, driver_lng: null, driver_position_at: null }
+            : {}),
+        })
         .eq("reference", reference);
       if (statusError) throw statusError;
 
@@ -164,6 +171,31 @@ Deno.serve(async (req) => {
       }
 
       return json(200, { success: true, reference, driver_status: kind });
+    }
+
+    // --- Where the car is, while a job is running ---
+    if (action === "position") {
+      const reference = typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
+      const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
+      const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
+      if (!reference || lat === null || lng === null) return json(400, { error: "No position" });
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return json(400, { error: "Position out of range" });
+      }
+      // Only the chauffeur on the job, and only while it is still running, so
+      // nothing is recorded once a job is finished
+      const { error } = await admin
+        .from("bookings")
+        .update({
+          driver_lat: lat,
+          driver_lng: lng,
+          driver_position_at: new Date().toISOString(),
+        })
+        .eq("reference", reference)
+        .eq("driver_id", user.id)
+        .neq("driver_status", "clear");
+      if (error) throw error;
+      return json(200, { success: true });
     }
 
     if (action === "waypoint_undo") {
