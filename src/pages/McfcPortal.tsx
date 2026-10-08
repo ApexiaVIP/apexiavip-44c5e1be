@@ -1442,8 +1442,11 @@ const McfcPortal = () => {
                   <option value="">No fixture (general travel)</option>
                   {fixtures.map((f) => (
                     <option key={f.id} value={f.id}>
-                      {f.home_team} v {f.away_team} ({f.is_home ? "H" : "A"}),{" "}
-                      {ukDateLong(f.kickoff_utc)}, KO {ukTime(f.kickoff_utc)}
+                      {f.home_team} v {f.away_team} ({f.is_home ? "H" : "A"}){" "}
+                      {f.competition && f.competition !== "Premier League"
+                        ? `[${f.competition}] `
+                        : ""}
+                      &middot; {ukDateLong(f.kickoff_utc)}, KO {ukTime(f.kickoff_utc)}
                     </option>
                   ))}
                 </select>
@@ -2455,6 +2458,14 @@ const McfcPortal = () => {
                       </td>
                       <td className="px-4 py-3">
                         {f.home_team} v {f.away_team}
+                        {f.competition && f.competition !== "Premier League" && (
+                          <span
+                            className="block text-[11px] tracking-[0.12em] uppercase mt-0.5"
+                            style={{ color: SKY }}
+                          >
+                            {f.competition}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span

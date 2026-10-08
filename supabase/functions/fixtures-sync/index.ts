@@ -13,9 +13,28 @@ const json = (status: number, body: Record<string, unknown>) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-/** Desks that track a club's fixture list. */
-const DESKS: Record<string, { club: string; feedSlug: string; competition: string }> = {
-  mcfc: { club: "Man City", feedSlug: "man-city", competition: "Premier League" },
+/** A competition a club plays in, and the feed that publishes it. */
+interface Competition {
+  /** As stored and shown to the desk */
+  name: string;
+  /** The fixture feed's name for it, which the season year is appended to */
+  feed: string;
+}
+
+/**
+ * Desks that track a club's fixture list. A club plays in more than one
+ * competition and the desk books cars for all of them, so following the
+ * league alone left European nights missing from the schedule.
+ */
+const DESKS: Record<string, { club: string; feedSlug: string; competitions: Competition[] }> = {
+  mcfc: {
+    club: "Man City",
+    feedSlug: "man-city",
+    competitions: [
+      { name: "Premier League", feed: "epl" },
+      { name: "Champions League", feed: "champions-league" },
+    ],
+  },
 };
 
 interface FeedRow {
@@ -96,172 +115,177 @@ serve(async (req) => {
 
     for (const corporate of desksToSync) {
       const desk = DESKS[corporate];
-      const feedUrl = `https://fixturedownload.com/feed/json/epl-${startYear}/${desk.feedSlug}`;
 
-      let rows: FeedRow[] = [];
-      try {
-        const feedRes = await fetch(feedUrl, { headers: { Accept: "application/json" } });
-        if (!feedRes.ok) {
-          console.error("Fixture feed HTTP", feedRes.status, feedUrl);
-          results.push({ corporate, error: `Feed returned HTTP ${feedRes.status}` });
-          continue;
-        }
-        const parsed = await feedRes.json();
-        rows = Array.isArray(parsed) ? parsed : [];
-      } catch (feedErr) {
-        console.error("Fixture feed failed:", feedErr);
-        results.push({ corporate, error: "Could not reach the fixture feed" });
-        continue;
-      }
+      // Every competition the club plays in, each from its own feed
+      for (const competition of desk.competitions) {
+        const feedUrl = `https://fixturedownload.com/feed/json/${competition.feed}-${startYear}/${desk.feedSlug}`;
 
-      if (rows.length === 0) {
-        results.push({ corporate, error: "Feed returned no fixtures" });
-        continue;
-      }
-
-      const { data: existingRows } = await supabase
-        .from("fixtures")
-        .select("id, match_number, kickoff_utc, venue, opponent, is_home, round_number")
-        .eq("corporate", corporate)
-        .eq("season", season)
-        .eq("competition", desk.competition);
-      const existing = new Map(
-        (existingRows ?? []).map((r) => [r.match_number as number, r])
-      );
-
-      const changes: { fixture_id: string; corporate: string; field: string; old_value: string; new_value: string }[] = [];
-      const changeSummaries: string[] = [];
-      let added = 0;
-
-      for (const row of rows) {
-        const kickoff = parseFeedDate(row.DateUtc);
-        if (!kickoff || typeof row.MatchNumber !== "number") continue;
-        const isHome = row.HomeTeam === desk.club;
-        const opponent = isHome ? row.AwayTeam : row.HomeTeam;
-        const venue = (row.Location ?? "").trim();
-
-        const values = {
-          corporate,
-          club: desk.club,
-          competition: desk.competition,
-          season,
-          match_number: row.MatchNumber,
-          round_number: row.RoundNumber,
-          kickoff_utc: kickoff,
-          home_team: row.HomeTeam,
-          away_team: row.AwayTeam,
-          opponent,
-          is_home: isHome,
-          venue,
-          last_synced_at: new Date().toISOString(),
-        };
-
-        const prior = existing.get(row.MatchNumber);
-        if (!prior) {
-          const { data: inserted, error: insertError } = await supabase
-            .from("fixtures")
-            .insert(values)
-            .select("id")
-            .single();
-          if (insertError) {
-            console.error("Fixture insert failed:", insertError);
+        let rows: FeedRow[] = [];
+        try {
+          const feedRes = await fetch(feedUrl, { headers: { Accept: "application/json" } });
+          if (!feedRes.ok) {
+            console.error("Fixture feed HTTP", feedRes.status, feedUrl);
+            results.push({ corporate, competition: competition.name, error: `Feed returned HTTP ${feedRes.status}` });
             continue;
           }
-          added += 1;
-          if (inserted?.id) {
-            // A brand new fixture on an established list is worth flagging
-            if ((existingRows?.length ?? 0) > 0) {
-              changes.push({
-                fixture_id: inserted.id,
-                corporate,
-                field: "added",
-                old_value: "",
-                new_value: `${row.HomeTeam} v ${row.AwayTeam}, ${formatUk(kickoff)}`,
-              });
-              changeSummaries.push(
-                `ADDED: ${row.HomeTeam} v ${row.AwayTeam}, ${formatUk(kickoff)}`
-              );
-            }
-          }
+          const parsed = await feedRes.json();
+          rows = Array.isArray(parsed) ? parsed : [];
+        } catch (feedErr) {
+          console.error("Fixture feed failed:", feedErr);
+          results.push({ corporate, competition: competition.name, error: "Could not reach the fixture feed" });
           continue;
         }
 
-        const priorKickoff = new Date(prior.kickoff_utc as string).toISOString();
-        if (priorKickoff !== kickoff) {
-          changes.push({
-            fixture_id: prior.id as string,
-            corporate,
-            field: "kickoff",
-            old_value: priorKickoff,
-            new_value: kickoff,
-          });
-          changeSummaries.push(
-            `MOVED: ${row.HomeTeam} v ${row.AwayTeam}, was ${formatUk(priorKickoff)}, now ${formatUk(kickoff)}`
-          );
-        }
-        if ((prior.venue as string) !== venue) {
-          changes.push({
-            fixture_id: prior.id as string,
-            corporate,
-            field: "venue",
-            old_value: (prior.venue as string) ?? "",
-            new_value: venue,
-          });
-          changeSummaries.push(
-            `VENUE: ${row.HomeTeam} v ${row.AwayTeam}, was ${prior.venue || "unset"}, now ${venue || "unset"}`
-          );
+        if (rows.length === 0) {
+          results.push({ corporate, competition: competition.name, error: "Feed returned no fixtures" });
+          continue;
         }
 
-        const { error: updateError } = await supabase
+        const { data: existingRows } = await supabase
           .from("fixtures")
-          .update(values)
-          .eq("id", prior.id as string);
-        if (updateError) console.error("Fixture update failed:", updateError);
-      }
+          .select("id, match_number, kickoff_utc, venue, opponent, is_home, round_number")
+          .eq("corporate", corporate)
+          .eq("season", season)
+          .eq("competition", competition.name);
+        const existing = new Map(
+          (existingRows ?? []).map((r) => [r.match_number as number, r])
+        );
 
-      if (changes.length > 0) {
-        const { error: changeError } = await supabase.from("fixture_changes").insert(changes);
-        if (changeError) console.error("Fixture change log failed:", changeError);
-      }
+        const changes: { fixture_id: string; corporate: string; field: string; old_value: string; new_value: string }[] = [];
+        const changeSummaries: string[] = [];
+        let added = 0;
 
-      results.push({
-        corporate,
-        season,
-        fixtures: rows.length,
-        added,
-        changed: changeSummaries.length,
-      });
+        for (const row of rows) {
+          const kickoff = parseFeedDate(row.DateUtc);
+          if (!kickoff || typeof row.MatchNumber !== "number") continue;
+          const isHome = row.HomeTeam === desk.club;
+          const opponent = isHome ? row.AwayTeam : row.HomeTeam;
+          const venue = (row.Location ?? "").trim();
 
-      // Tell the ops team when a fixture moves: cars are already booked around
-      // these kickoffs
-      const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-      if (RESEND_API_KEY && changeSummaries.length > 0 && (existingRows?.length ?? 0) > 0) {
-        try {
-          await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${RESEND_API_KEY}`,
-            },
-            body: JSON.stringify({
-              from: "Apexia VIP <info@apexiavip.com>",
-              to: ["info@apexiavip.com"],
-              subject: `${corporate.toUpperCase()} fixture changes: ${changeSummaries.length} update(s)`,
-              html: `
-                <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
-                  <h1 style="font-size: 20px; font-weight: 300; letter-spacing: 0.1em; border-bottom: 1px solid #2a2a2a; padding-bottom: 20px; color: #b89b5e;">
-                    ${corporate.toUpperCase()} fixture changes
-                  </h1>
-                  <p style="color: #8a8070; font-size: 13px;">The published schedule changed. Check any cars already booked around these dates.</p>
-                  <ul style="font-size: 13px; line-height: 1.9;">
-                    ${changeSummaries.map((s) => `<li>${sanitize(s)}</li>`).join("")}
-                  </ul>
-                </div>
-              `,
-            }),
-          });
-        } catch (emailErr) {
-          console.error("Fixture change email failed (non-blocking):", emailErr);
+          const values = {
+            corporate,
+            club: desk.club,
+            competition: competition.name,
+            season,
+            match_number: row.MatchNumber,
+            round_number: row.RoundNumber,
+            kickoff_utc: kickoff,
+            home_team: row.HomeTeam,
+            away_team: row.AwayTeam,
+            opponent,
+            is_home: isHome,
+            venue,
+            last_synced_at: new Date().toISOString(),
+          };
+
+          const prior = existing.get(row.MatchNumber);
+          if (!prior) {
+            const { data: inserted, error: insertError } = await supabase
+              .from("fixtures")
+              .insert(values)
+              .select("id")
+              .single();
+            if (insertError) {
+              console.error("Fixture insert failed:", insertError);
+              continue;
+            }
+            added += 1;
+            if (inserted?.id) {
+              // A brand new fixture on an established list is worth flagging
+              if ((existingRows?.length ?? 0) > 0) {
+                changes.push({
+                  fixture_id: inserted.id,
+                  corporate,
+                  field: "added",
+                  old_value: "",
+                  new_value: `${row.HomeTeam} v ${row.AwayTeam}, ${formatUk(kickoff)}`,
+                });
+                changeSummaries.push(
+                  `ADDED: ${row.HomeTeam} v ${row.AwayTeam}, ${formatUk(kickoff)}`
+                );
+              }
+            }
+            continue;
+          }
+
+          const priorKickoff = new Date(prior.kickoff_utc as string).toISOString();
+          if (priorKickoff !== kickoff) {
+            changes.push({
+              fixture_id: prior.id as string,
+              corporate,
+              field: "kickoff",
+              old_value: priorKickoff,
+              new_value: kickoff,
+            });
+            changeSummaries.push(
+              `MOVED: ${row.HomeTeam} v ${row.AwayTeam}, was ${formatUk(priorKickoff)}, now ${formatUk(kickoff)}`
+            );
+          }
+          if ((prior.venue as string) !== venue) {
+            changes.push({
+              fixture_id: prior.id as string,
+              corporate,
+              field: "venue",
+              old_value: (prior.venue as string) ?? "",
+              new_value: venue,
+            });
+            changeSummaries.push(
+              `VENUE: ${row.HomeTeam} v ${row.AwayTeam}, was ${prior.venue || "unset"}, now ${venue || "unset"}`
+            );
+          }
+
+          const { error: updateError } = await supabase
+            .from("fixtures")
+            .update(values)
+            .eq("id", prior.id as string);
+          if (updateError) console.error("Fixture update failed:", updateError);
+        }
+
+        if (changes.length > 0) {
+          const { error: changeError } = await supabase.from("fixture_changes").insert(changes);
+          if (changeError) console.error("Fixture change log failed:", changeError);
+        }
+
+        results.push({
+          corporate,
+          competition: competition.name,
+          season,
+          fixtures: rows.length,
+          added,
+          changed: changeSummaries.length,
+        });
+
+        // Tell the ops team when a fixture moves: cars are already booked around
+        // these kickoffs
+        const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+        if (RESEND_API_KEY && changeSummaries.length > 0 && (existingRows?.length ?? 0) > 0) {
+          try {
+            await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${RESEND_API_KEY}`,
+              },
+              body: JSON.stringify({
+                from: "Apexia VIP <info@apexiavip.com>",
+                to: ["info@apexiavip.com"],
+                subject: `${corporate.toUpperCase()} ${competition.name} changes: ${changeSummaries.length} update(s)`,
+                html: `
+                  <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 40px;">
+                    <h1 style="font-size: 20px; font-weight: 300; letter-spacing: 0.1em; border-bottom: 1px solid #2a2a2a; padding-bottom: 20px; color: #b89b5e;">
+                      ${corporate.toUpperCase()} fixture changes
+                    </h1>
+                    <p style="color: #8a8070; font-size: 13px;">The published schedule changed. Check any cars already booked around these dates.</p>
+                    <ul style="font-size: 13px; line-height: 1.9;">
+                      ${changeSummaries.map((s) => `<li>${sanitize(s)}</li>`).join("")}
+                    </ul>
+                  </div>
+                `,
+              }),
+            });
+          } catch (emailErr) {
+            console.error("Fixture change email failed (non-blocking):", emailErr);
+          }
         }
       }
     }
