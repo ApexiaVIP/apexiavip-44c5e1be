@@ -4,6 +4,12 @@ import { ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
 import MemberLayout from "@/components/MemberLayout";
 import { GET_APP_URL, isInstalledApp } from "@/lib/appLinks";
 import TrackMap from "@/components/TrackMap";
+import {
+  ACTIVE_STATUSES,
+  DRIVER_STATUS_AS_DISPATCH,
+  FINAL_STATUSES,
+  stillRunning,
+} from "@/lib/bookingLive";
 import { locationFreshness } from "@/lib/locationAge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -70,22 +76,6 @@ const childrenLine = (children: { age: number }[]) => {
   return `${children.length} ${children.length === 1 ? "child" : "children"} (age${ages.length > 1 ? "s" : ""} ${ages.join(", ")})${
     seatText ? `, ${seatText}` : ""
   }`;
-};
-
-/** Statuses where the journey is over */
-const FINAL_STATUSES = ["Clear/Completed", "Completed", "Cancelled", "No Show", "Invoice", "Failed"];
-/** Statuses meaning a driver is actively working the job */
-const ACTIVE_STATUSES = ["Dispatched", "En route to pickup", "At Pickup", "Passenger on board", "Soon to clear"];
-
-// What the chauffeur presses in their own app, said in the same words Dispatch
-// uses. Their app reports in seconds, where Dispatch is polled, so when the
-// chauffeur has told us something it is the newer answer and it wins.
-const DRIVER_STATUS_AS_DISPATCH: Record<string, string> = {
-  en_route: "En route to pickup",
-  arrived: "At Pickup",
-  pob: "Passenger on board",
-  waiting: "Passenger on board",
-  clear: "Clear/Completed",
 };
 
 const statusVariant = (status: string): "secondary" | "outline" | "destructive" => {
@@ -189,21 +179,21 @@ const Bookings = () => {
   });
 
   const now = Date.now();
-  const upcoming = (bookings ?? []).filter(
-    (b) =>
-      !FINAL_STATUSES.includes(b.status) &&
-      (!b.collection_at || new Date(b.collection_at).getTime() > now - 6 * 60 * 60 * 1000)
-  );
+  // An as-directed hire that runs over is still running, so the clock cannot
+  // be what decides this
+  const upcoming = (bookings ?? []).filter((b) => stillRunning(b, now));
   const past = (bookings ?? []).filter((b) => !upcoming.includes(b));
 
-  // A journey is "live" from 90 minutes before pickup until it finishes
+  // A journey is "live" from 90 minutes before pickup until it finishes. The
+  // finishing half is already settled by the list above, so only the run up
+  // to the pickup is decided here.
   const liveRefs = upcoming
     .filter((b) => {
       if (!b.reference) return false;
+      if (b.driver_status && b.driver_status !== "clear") return true;
       if (ACTIVE_STATUSES.includes(b.status)) return true;
       if (!b.collection_at) return false;
-      const t = new Date(b.collection_at).getTime();
-      return t - now < 90 * 60 * 1000 && t > now - 6 * 60 * 60 * 1000;
+      return new Date(b.collection_at).getTime() - now < 90 * 60 * 1000;
     })
     .map((b) => b.reference as string);
 

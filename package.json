@@ -15,7 +15,8 @@
     "ios:sync": "npm run build:native && npx cap sync ios",
     "test:booking": "node scripts/booking-smoke/run.mjs",
     "test:timesheets": "node scripts/timesheet-smoke/run.mjs",
-    "test:queue": "node scripts/driver-queue.test.mjs"
+    "test:queue": "node scripts/driver-queue.test.mjs",
+    "test:live": "node scripts/booking-live.test.mjs"
   },
   "dependencies": {
     "@capacitor/cli": "^8.5.0",

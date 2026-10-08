@@ -267,6 +267,8 @@ interface RecentBooking {
   stops: Stop[] | null;
   journey_type: string | null;
   as_directed_hours: number | null;
+  /** Where the chauffeur says they have got to, from their own app */
+  driver_status?: string | null;
   /** Who keyed it; the desk shares bookings, this just says who to ask */
   booked_by?: string;
   mine?: boolean;
@@ -549,14 +551,10 @@ const McfcPortal = () => {
         const rows = (Array.isArray(data?.recent) ? data.recent : []) as RecentBooking[];
         setRecent(rows);
         // Ask the booking system who is driving the ones still to run
+        // A hire that runs over is still running, so this follows the job
+        // rather than the clock
         const refs = rows
-          .filter(
-            (b) =>
-              b.reference &&
-              b.status !== "Cancelled" &&
-              b.status !== "Failed" &&
-              (!b.collection_at || new Date(b.collection_at).getTime() > Date.now() - 6 * 3600 * 1000)
-          )
+          .filter((b) => b.reference && stillRunning(b))
           .map((b) => b.reference as string);
         try {
           const live = await checkBookingStatuses(refs);
