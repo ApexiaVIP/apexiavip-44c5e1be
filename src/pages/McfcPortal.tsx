@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
+import { stillRunning } from "@/lib/bookingLive";
 import { useAuth } from "@/hooks/useAuth";
 import apexiaLogo from "@/assets/apexia-logo.svg";
 import mcfcBadge from "@/assets/mcfc-badge.svg";
