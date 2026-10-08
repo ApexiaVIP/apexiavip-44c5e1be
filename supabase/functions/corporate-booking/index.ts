@@ -1076,6 +1076,9 @@ serve(async (req) => {
       </div>
     `;
 
+    // Whether the office was told. A desk booking that reaches nobody must not
+    // be reported to the assistant as done.
+    let officeTold = false;
     try {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -1101,9 +1104,8 @@ serve(async (req) => {
           ...(bookerEmail ? { reply_to: bookerEmail } : {}),
         }),
       });
-      if (!res.ok) {
-        console.error("Resend API error:", res.status, await res.text());
-      }
+      if (res.ok) officeTold = true;
+      else console.error("Resend API error:", res.status, await res.text());
     } catch (emailErr) {
       console.error("Ops email failed:", emailErr);
     }
@@ -1297,6 +1299,13 @@ serve(async (req) => {
       success: true,
       references: confirmedReferences,
       failed: failedReferences,
+      officeTold,
+      ...(officeTold
+        ? {}
+        : {
+            warning:
+              "We could not email the office about this booking. Please call them to confirm it.",
+          }),
     });
   } catch (error: unknown) {
     console.error("Error processing corporate booking:", error);

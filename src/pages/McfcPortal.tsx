@@ -1216,6 +1216,11 @@ const McfcPortal = () => {
         setAmendRef(null);
         loadRecent();
       } else {
+        // The cars are booked, but if the office was never told the assistant
+        // needs to know to ring them rather than assume it is in hand
+        if (data?.officeTold === false && data?.warning) {
+          setSubmitError(data.warning);
+        }
         setSubmitted({
           cars: cars.length,
           passengers: totalPassengers,
