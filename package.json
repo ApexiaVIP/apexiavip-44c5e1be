@@ -16,7 +16,8 @@
     "test:booking": "node scripts/booking-smoke/run.mjs",
     "test:timesheets": "node scripts/timesheet-smoke/run.mjs",
     "test:queue": "node scripts/driver-queue.test.mjs",
-    "test:live": "node scripts/booking-live.test.mjs"
+    "test:live": "node scripts/booking-live.test.mjs",
+    "test:fixtures": "node scripts/fixture-calendar.test.mjs"
   },
   "dependencies": {
     "@capacitor/cli": "^8.5.0",

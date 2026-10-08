@@ -13,31 +13,135 @@ const json = (status: number, body: Record<string, unknown>) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-/** A competition a club plays in, and the feed that publishes it. */
+/**
+ * Where a competition's fixtures come from.
+ *
+ * The league and the European competitions are published as proper fixture
+ * lists. The domestic cups are not published anywhere as a club fixture list,
+ * because the draw is made round by round, so those are read from the club's
+ * own calendar, where each tie is tagged with its competition.
+ */
+type Source =
+  | { kind: "feed"; slug: string }
+  | { kind: "calendar"; tag: string };
+
 interface Competition {
   /** As stored and shown to the desk */
   name: string;
-  /** The fixture feed's name for it, which the season year is appended to */
-  feed: string;
+  source: Source;
+}
+
+export interface Desk {
+  /** The club as the fixture feed names it, and as we store it */
+  club: string;
+  feedSlug: string;
+  /** The club's calendar, covering every competition it plays in */
+  calendarUrl: string;
+  /** The club as that calendar names it, which is usually the longer form */
+  calendarClub: string;
+  /** Where a home tie is played, since the calendar carries no venue */
+  homeVenue: string;
+  competitions: Competition[];
 }
 
 /**
  * Desks that track a club's fixture list. A club plays in more than one
  * competition and the desk books cars for all of them, so following the
- * league alone left European nights missing from the schedule.
+ * league alone left European nights and cup ties out of the schedule.
  */
-const DESKS: Record<string, { club: string; feedSlug: string; competitions: Competition[] }> = {
+const DESKS: Record<string, Desk> = {
   mcfc: {
     club: "Man City",
     feedSlug: "man-city",
+    calendarUrl: "https://ics.fixtur.es/v2/manchester-city.ics",
+    calendarClub: "Manchester City",
+    homeVenue: "Etihad Stadium",
     competitions: [
-      { name: "Premier League", feed: "epl" },
-      { name: "Champions League", feed: "champions-league" },
+      { name: "Premier League", source: { kind: "feed", slug: "epl" } },
+      { name: "Champions League", source: { kind: "feed", slug: "champions-league" } },
+      { name: "Carabao Cup", source: { kind: "calendar", tag: "LC" } },
+      { name: "FA Cup", source: { kind: "calendar", tag: "FA" } },
     ],
   },
 };
 
-interface FeedRow {
+/**
+ * A stable number for a tie the calendar gives no number for.
+ *
+ * Taken from the competition and the two clubs rather than the calendar's own
+ * id or the date: the calendar sometimes carries two entries for one tie, and
+ * a tie that is moved must keep its number so the move is seen as a change
+ * rather than as a second fixture. Two clubs meeting twice in one cup are a
+ * two legged tie, which swaps who is at home, so they stay distinct.
+ */
+export const numberForTie = (identity: string): number => {
+  let hash = 2166136261;
+  for (let i = 0; i < identity.length; i++) {
+    hash ^= identity.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash | 0) || 1;
+};
+
+/** Turn a club calendar into the same shape a fixture feed gives us. */
+export const calendarRows = (
+  ics: string,
+  tag: string,
+  desk: Desk,
+  seasonFrom: Date,
+  seasonTo: Date
+): FeedRow[] => {
+  // Long values are folded onto continuation lines, so put them back first
+  const unfolded = ics.replace(/\r?\n[ \t]/g, "");
+  const rows: FeedRow[] = [];
+  const seen = new Set<number>();
+
+  for (const block of unfolded.split("BEGIN:VEVENT").slice(1)) {
+    const field = (name: string) =>
+      (new RegExp(`^${name}[^:\\n]*:(.*)$`, "m").exec(block)?.[1] ?? "").trim();
+
+    const summary = field("SUMMARY");
+    if (!new RegExp(`\\[${tag}\\]`).test(summary)) continue;
+
+    const start = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/.exec(field("DTSTART"));
+    if (!start) continue;
+    const [, y, mo, d, h, mi, sec] = start;
+    const kickoff = new Date(`${y}-${mo}-${d}T${h}:${mi}:${sec}Z`);
+    if (Number.isNaN(kickoff.getTime())) continue;
+    if (kickoff < seasonFrom || kickoff >= seasonTo) continue;
+
+    // "Home - Away [LC] (2-1)" once played, "Home - Away [LC]" before
+    const teams = summary
+      .replace(/\s*\[[A-Za-z0-9 ]+\]\s*/g, " ")
+      .replace(/\s*\(\d+\s*-\s*\d+\)\s*$/, "")
+      .trim();
+    const parts = teams.split(" - ");
+    if (parts.length !== 2) continue;
+    const asOurs = (name: string) =>
+      name.trim() === desk.calendarClub ? desk.club : name.trim();
+    const home = asOurs(parts[0]);
+    const away = asOurs(parts[1]);
+    if (home !== desk.club && away !== desk.club) continue;
+
+    const matchNumber = numberForTie(`${tag}|${home}|${away}`);
+    // The calendar sometimes keeps a second copy of a tie once it has been
+    // played; both describe the same fixture, so the first one wins
+    if (seen.has(matchNumber)) continue;
+    seen.add(matchNumber);
+
+    rows.push({
+      MatchNumber: matchNumber,
+      RoundNumber: null,
+      DateUtc: kickoff.toISOString(),
+      Location: home === desk.club ? desk.homeVenue : "",
+      HomeTeam: home,
+      AwayTeam: away,
+    });
+  }
+  return rows;
+};
+
+export interface FeedRow {
   MatchNumber: number;
   RoundNumber: number | null;
   DateUtc: string;
@@ -115,29 +219,67 @@ serve(async (req) => {
 
     for (const corporate of desksToSync) {
       const desk = DESKS[corporate];
+      // A season runs August to August, which bounds the club calendar
+      const seasonFrom = new Date(Date.UTC(startYear, 7, 1));
+      const seasonTo = new Date(Date.UTC(startYear + 1, 7, 1));
+      // The calendar covers every competition, so it is fetched once and then
+      // read by each competition that needs it
+      let calendar: string | null = null;
+      let calendarFailed = false;
 
-      // Every competition the club plays in, each from its own feed
+      // Every competition the club plays in, each from wherever it is published
       for (const competition of desk.competitions) {
-        const feedUrl = `https://fixturedownload.com/feed/json/${competition.feed}-${startYear}/${desk.feedSlug}`;
-
         let rows: FeedRow[] = [];
-        try {
-          const feedRes = await fetch(feedUrl, { headers: { Accept: "application/json" } });
-          if (!feedRes.ok) {
-            console.error("Fixture feed HTTP", feedRes.status, feedUrl);
-            results.push({ corporate, competition: competition.name, error: `Feed returned HTTP ${feedRes.status}` });
+
+        if (competition.source.kind === "feed") {
+          const feedUrl = `https://fixturedownload.com/feed/json/${competition.source.slug}-${startYear}/${desk.feedSlug}`;
+          try {
+            const feedRes = await fetch(feedUrl, { headers: { Accept: "application/json" } });
+            if (!feedRes.ok) {
+              console.error("Fixture feed HTTP", feedRes.status, feedUrl);
+              results.push({ corporate, competition: competition.name, error: `Feed returned HTTP ${feedRes.status}` });
+              continue;
+            }
+            const parsed = await feedRes.json();
+            rows = Array.isArray(parsed) ? parsed : [];
+          } catch (feedErr) {
+            console.error("Fixture feed failed:", feedErr);
+            results.push({ corporate, competition: competition.name, error: "Could not reach the fixture feed" });
             continue;
           }
-          const parsed = await feedRes.json();
-          rows = Array.isArray(parsed) ? parsed : [];
-        } catch (feedErr) {
-          console.error("Fixture feed failed:", feedErr);
-          results.push({ corporate, competition: competition.name, error: "Could not reach the fixture feed" });
-          continue;
+        } else {
+          if (calendar === null && !calendarFailed) {
+            try {
+              const calRes = await fetch(desk.calendarUrl, { headers: { Accept: "text/calendar" } });
+              if (calRes.ok) calendar = await calRes.text();
+              else {
+                calendarFailed = true;
+                console.error("Club calendar HTTP", calRes.status, desk.calendarUrl);
+              }
+            } catch (calErr) {
+              calendarFailed = true;
+              console.error("Club calendar failed:", calErr);
+            }
+          }
+          if (!calendar) {
+            results.push({ corporate, competition: competition.name, error: "Could not reach the club calendar" });
+            continue;
+          }
+          rows = calendarRows(calendar, competition.source.tag, desk, seasonFrom, seasonTo);
         }
 
         if (rows.length === 0) {
-          results.push({ corporate, competition: competition.name, error: "Feed returned no fixtures" });
+          // A cup with no ties yet is the normal state before the draw, not a
+          // fault, so it is reported as such and nothing is touched
+          results.push({
+            corporate,
+            competition: competition.name,
+            fixtures: 0,
+            note:
+              competition.source.kind === "calendar"
+                ? "Not drawn yet"
+                : "The feed returned no fixtures",
+          });
           continue;
         }
 
