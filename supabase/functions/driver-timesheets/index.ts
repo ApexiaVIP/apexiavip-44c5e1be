@@ -28,6 +28,20 @@ const RECIPIENT = Deno.env.get("TIMESHEET_RECIPIENT") ?? "accounts@apexiavip.com
 const WEEK_DAYS = 7;
 
 /**
+ * How long after a chauffeur clears before the office is told. It matches the
+ * window they have to take back a clear pressed by mistake, so the office is
+ * never sent a job that is then undone.
+ */
+const REPORT_AFTER_MINUTES = 30;
+
+/**
+ * The day's wrap up waits until nobody is still working: no open shift and
+ * nothing cleared in the last half hour. A late night finishing at two in the
+ * morning still gets its own day's sheet, just later.
+ */
+const QUIET_MINUTES = REPORT_AFTER_MINUTES;
+
+/**
  * Which day to report on. The daily run fires late in the evening, so the day
  * that has just finished is the one three hours ago: that holds whether the
  * clocks are on BST or GMT.
@@ -154,9 +168,11 @@ serve(async (req) => {
     });
 
     const body = await req.json().catch(() => ({}));
-    const mode = body.mode === "weekly" ? "weekly" : "daily";
+    const mode =
+      body.mode === "weekly" || body.mode === "cleared" ? (body.mode as string) : "daily";
     const day = dayToReport(body.date);
 
+    // --- A job finished: tell the office once the undo window has passed ---
     const { data: drivers } = await admin
       .from("profiles")
       .select("id, full_name, phone")
@@ -165,6 +181,96 @@ serve(async (req) => {
       return json(200, { success: true, mode, day, sent: 0, note: "no chauffeur accounts" });
     }
     const driverIds = drivers.map((d) => d.id as string);
+
+    if (mode === "cleared") {
+      const readyBefore = new Date(Date.now() - REPORT_AFTER_MINUTES * 60 * 1000).toISOString();
+      const { data: finished } = await admin
+        .from("bookings")
+        .select(
+          "reference, name, vehicle, collection_at, pickup, dropoff, journey_type, as_directed_hours, corporate, notes, driver_id, driver_status_at"
+        )
+        .eq("driver_status", "clear")
+        .is("job_report_sent_at", null)
+        .lte("driver_status_at", readyBefore)
+        .order("driver_status_at")
+        .limit(25);
+
+      let reported = 0;
+      for (const job of finished ?? []) {
+        const { data: steps } = await admin
+          .from("booking_waypoints")
+          .select("kind, place, note, recorded_at")
+          .eq("booking_reference", job.reference as string)
+          .order("recorded_at");
+        const driver = (drivers ?? []).find((d) => d.id === job.driver_id);
+        // What the chauffeur paid out or arranged, which is the whole reason
+        // this goes out within the hour rather than overnight
+        const toCharge = (steps ?? [])
+          .filter((w) => w.kind === "clear" && (w.note as string)?.trim())
+          .map((w) => (w.note as string).trim());
+
+        const route =
+          job.journey_type === "hourly"
+            ? `As directed${job.as_directed_hours ? `, ${job.as_directed_hours} hours` : ""}`
+            : `${esc(addressLine(job.pickup as Job["pickup"]))} &rarr; ${esc(
+                addressLine(job.dropoff as Job["dropoff"])
+              )}`;
+
+        const html = SHELL(
+          `Job finished &middot; ${esc(job.name)}`,
+          `
+          <table style="width:100%; border-collapse: collapse; margin-top: 18px;">
+            <tr><th ${TH}>Reference</th><td ${TD}>${esc(job.reference)}</td></tr>
+            <tr><th ${TH}>Chauffeur</th><td ${TD}>${esc(driver?.full_name ?? "Unknown")}</td></tr>
+            <tr><th ${TH}>Passenger</th><td ${TD}>${esc(job.name)}${
+              job.corporate ? ` (${esc(job.corporate)})` : ""
+            }</td></tr>
+            <tr><th ${TH}>Booked for</th><td ${TD}>${ukTimeOf(job.collection_at as string | null)} on ${ukDayName(
+              ukDay(new Date((job.collection_at as string) ?? Date.now()))
+            )}</td></tr>
+            <tr><th ${TH}>Journey</th><td ${TD}>${route}</td></tr>
+            <tr><th ${TH}>Vehicle</th><td ${TD}>${esc(job.vehicle)}</td></tr>
+          </table>
+          ${
+            toCharge.length > 0
+              ? `<p style="margin-top: 20px; padding: 14px 16px; background: #2E2515; border-left: 3px solid #e0c341; color: #e0c341; font-size: 13px; line-height: 1.7;">
+                   <strong>TO CHARGE</strong><br/>${toCharge.map(esc).join("<br/>")}
+                 </p>`
+              : `<p style="margin-top: 20px; color:#6b6355; font-size:12px;">Nothing to charge beyond the journey.</p>`
+          }
+          <table style="width:100%; border-collapse: collapse; margin-top: 24px;">
+            <tr><th ${TH}>Time</th><th ${TH}>Step</th><th ${TH}>Where</th></tr>
+            ${(steps ?? [])
+              .map(
+                (w) =>
+                  `<tr><td ${TD}><span style="font-family:monospace;color:#b89b5e;">${ukTimeOf(
+                    w.recorded_at as string
+                  )}</span></td><td ${TD}>${esc(STEP_LABEL[w.kind as string] ?? w.kind)}</td><td ${TD}>${esc(
+                    (w.place as string) || ""
+                  )}</td></tr>`
+              )
+              .join("")}
+          </table>`
+        );
+
+        if (
+          await sendEmail(
+            `Job finished: ${driver?.full_name ?? "Chauffeur"} &middot; ${job.name}${
+              toCharge.length > 0 ? " - TO CHARGE" : ""
+            }`.replace("&middot;", "-"),
+            html
+          )
+        ) {
+          await admin
+            .from("bookings")
+            .update({ job_report_sent_at: new Date().toISOString() })
+            .eq("reference", job.reference as string);
+          reported++;
+        }
+      }
+      return json(200, { success: true, mode, reported });
+    }
+
 
     const firstDay = mode === "weekly" ? ukDayPlus(day, -(WEEK_DAYS - 1)) : day;
     const from = ukDayStart(firstDay);
@@ -202,6 +308,45 @@ serve(async (req) => {
     let sent = 0;
 
     if (mode === "daily") {
+      // A run with an explicit date is someone asking for that day on purpose,
+      // so it is sent whatever else is happening
+      const forced = typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date);
+
+      if (!forced) {
+        const { data: already } = await admin
+          .from("timesheet_runs")
+          .select("day")
+          .eq("day", day)
+          .eq("kind", "daily")
+          .maybeSingle();
+        if (already) return json(200, { success: true, mode, day, sent: 0, note: "Already sent" });
+
+        // Wait for the last chauffeur to finish. A night that runs past
+        // midnight still gets its own day's sheet, just later.
+        const quietSince = new Date(Date.now() - QUIET_MINUTES * 60 * 1000).toISOString();
+        const { data: openShift } = await admin
+          .from("driver_shifts")
+          .select("id")
+          .in("driver_id", driverIds)
+          .is("ended_at", null)
+          .limit(1);
+        const { data: justCleared } = await admin
+          .from("bookings")
+          .select("reference")
+          .eq("driver_status", "clear")
+          .gte("driver_status_at", quietSince)
+          .limit(1);
+        if ((openShift?.length ?? 0) > 0 || (justCleared?.length ?? 0) > 0) {
+          return json(200, {
+            success: true,
+            mode,
+            day,
+            sent: 0,
+            note: "Someone is still working; the wrap up waits",
+          });
+        }
+      }
+
       for (const driver of drivers) {
         const id = driver.id as string;
         const mine = forDriver(shifts as ({ driver_id: string } & Shift)[], id);
@@ -296,6 +441,10 @@ serve(async (req) => {
           sent++;
       }
 
+      // Remember it went, so a run every half hour does not send it twice
+      if (!forced) {
+        await admin.from("timesheet_runs").insert({ day, kind: "daily" });
+      }
       return json(200, { success: true, mode, day, sent });
     }
 

@@ -255,6 +255,36 @@ serve(async (req) => {
       return json(200, { success: true });
     }
 
+    // Turning the chauffeur screen on or off for someone, including yourself.
+    // The office drive to test, so switching has to be a button rather than a
+    // job for whoever can reach the database.
+    if (action === "set_driver") {
+      const userId = body?.user_id;
+      if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });
+      const isDriver = body?.is_driver === true;
+
+      const { data: target } = await admin
+        .from("profiles")
+        .select("id, phone, status")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!target) return json(404, { error: "No such member" });
+      // Jobs are matched to a chauffeur by the mobile Dispatch reports, so
+      // without one they would sign in to a screen that can never fill
+      if (isDriver && !String(target.phone ?? "").trim()) {
+        return json(400, {
+          error: "That account has no mobile number, which is how Dispatch matches jobs to a chauffeur.",
+        });
+      }
+
+      const { error } = await admin
+        .from("profiles")
+        .update({ is_driver: isDriver })
+        .eq("id", userId);
+      if (error) throw error;
+      return json(200, { success: true, is_driver: isDriver });
+    }
+
     if (action === "approve_family" || action === "reject_family") {
       const userId = body?.user_id;
       if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });

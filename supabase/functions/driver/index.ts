@@ -32,6 +32,13 @@ type Progress = (typeof PROGRESS_KINDS)[number];
 /** How long a finished job stays on the chauffeur's screen. */
 const KEEP_CLEARED_HOURS = 12;
 
+/**
+ * How long a chauffeur has to take back a clear they did not mean. The office
+ * is not told about a job until this has passed, so an undo within it leaves
+ * no trace anywhere but our own log.
+ */
+const UNDO_CLEAR_MINUTES = 30;
+
 /** How far either side of now a job is worth picking up from Dispatch. */
 const DISCOVER_BEHIND_HOURS = 12;
 const DISCOVER_AHEAD_HOURS = 48;
@@ -198,6 +205,60 @@ Deno.serve(async (req) => {
       return json(200, { success: true });
     }
 
+    // --- Taking back a clear pressed by mistake ---
+    if (action === "undo_clear") {
+      const reference = typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
+      if (!reference) return json(400, { error: "Which job?" });
+
+      const { data: job } = await admin
+        .from("bookings")
+        .select("reference, driver_id, driver_status, driver_status_at, job_report_sent_at")
+        .eq("reference", reference)
+        .maybeSingle();
+      if (!job || job.driver_id !== user.id) {
+        return json(403, { error: "That job is not assigned to you" });
+      }
+      if (job.driver_status !== "clear") {
+        return json(400, { error: "That job is not cleared" });
+      }
+      if (job.job_report_sent_at) {
+        return json(400, {
+          error: "The office has already been sent this job. Call them to change it.",
+        });
+      }
+      const clearedAt = job.driver_status_at ? Date.parse(job.driver_status_at as string) : 0;
+      if (!clearedAt || Date.now() - clearedAt > UNDO_CLEAR_MINUTES * 60 * 1000) {
+        return json(400, {
+          error: `A clear can only be taken back within ${UNDO_CLEAR_MINUTES} minutes.`,
+        });
+      }
+
+      await admin
+        .from("booking_waypoints")
+        .delete()
+        .eq("booking_reference", reference)
+        .eq("driver_id", user.id)
+        .eq("kind", "clear");
+
+      // Put the job back to wherever it had got to before it was cleared
+      const { data: remaining } = await admin
+        .from("booking_waypoints")
+        .select("kind, recorded_at")
+        .eq("booking_reference", reference)
+        .eq("driver_id", user.id)
+        .in("kind", PROGRESS_KINDS as unknown as string[])
+        .order("recorded_at", { ascending: false })
+        .limit(1);
+      const back = (remaining?.[0]?.kind as string | undefined) ?? null;
+
+      const { error } = await admin
+        .from("bookings")
+        .update({ driver_status: back, driver_status_at: new Date().toISOString() })
+        .eq("reference", reference);
+      if (error) throw error;
+      return json(200, { success: true, driver_status: back });
+    }
+
     if (action === "waypoint_undo") {
       const id = typeof body.id === "string" ? body.id : "";
       if (!id) return json(400, { error: "Which entry?" });
@@ -222,7 +283,7 @@ Deno.serve(async (req) => {
 
     const myKey = phoneKey(profile.phone as string);
     const columns =
-      "reference, name, vehicle, collection_at, travel_date, pickup, dropoff, via, stops, journey_type, as_directed_hours, notes, children, client_car, passengers, status, corporate, driver_id, driver_status, driver_status_at";
+      "reference, name, vehicle, collection_at, travel_date, pickup, dropoff, via, stops, journey_type, as_directed_hours, notes, children, client_car, passengers, status, corporate, driver_id, driver_status, driver_status_at, job_report_sent_at";
 
     // 1. Pick up anything Dispatch has newly put in this chauffeur's name.
     //    Once seen it is written down, so the job survives a bad answer from

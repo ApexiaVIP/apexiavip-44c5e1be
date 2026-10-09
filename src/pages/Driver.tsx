@@ -19,12 +19,16 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { isInstalledApp } from "@/lib/appLinks";
 import { currentPlace, followPosition } from "@/lib/whereAmI";
 import { splitJobs } from "@/lib/driverQueue";
 
 type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
+
+/** Matches the window the server allows; after this the office has the job. */
+const UNDO_CLEAR_MINUTES = 30;
 
 interface Job {
   reference: string;
@@ -41,6 +45,9 @@ interface Job {
   passengers: number | null;
   corporate: string | null;
   driver_status: Step | null;
+  driver_status_at: string | null;
+  /** Set once the office has been sent this job, after which it cannot be undone */
+  job_report_sent_at: string | null;
   dispatchStatus: string | null;
   vehicleRegistration: string;
 }
@@ -111,6 +118,8 @@ const Driver = () => {
   const { user, profile, mfaVerified, mfaResolved, loading } = useAuth();
   const queryClient = useQueryClient();
   const [waitFor, setWaitFor] = useState<string | null>(null);
+  const [clearFor, setClearFor] = useState<string | null>(null);
+  const [clearNotes, setClearNotes] = useState("");
   const [waitPlace, setWaitPlace] = useState("");
   const [waitFix, setWaitFix] = useState<{ lat?: number; lng?: number }>({});
   const [locating, setLocating] = useState(false);
@@ -151,6 +160,10 @@ const Driver = () => {
         setClearedHere((refs) =>
           refs.includes(body.reference as string) ? refs : [...refs, body.reference as string]
         );
+      }
+      if (body.action === "undo_clear") {
+        setClearedHere((refs) => refs.filter((r) => r !== body.reference));
+        toast({ title: "Clear taken back", description: "The job is back in your hands." });
       }
     },
     onError: (err: Error, _body, context) => {
@@ -217,12 +230,28 @@ const Driver = () => {
     }
   };
 
-  /** Clearing records where the car finished without asking anything. */
-  const clearJob = async (job: Job) => {
+  /** Clearing records where the car finished, and anything to be charged. */
+  const confirmClear = async (job: Job) => {
     setLocating(true);
     const found = await currentPlace();
     setLocating(false);
-    step(job, "clear", found.place, { lat: found.lat, lng: found.lng });
+    act.mutate({
+      action: "progress",
+      reference: job.reference,
+      kind: "clear",
+      place: found.place,
+      note: clearNotes.trim(),
+      ...(found.lat !== undefined ? { lat: found.lat, lng: found.lng } : {}),
+    });
+    setClearFor(null);
+    setClearNotes("");
+  };
+
+  /** How long is left to take back a clear, in minutes. */
+  const undoMinutesLeft = (job: Job) => {
+    if (!job.driver_status_at || job.job_report_sent_at) return 0;
+    const since = (Date.now() - Date.parse(job.driver_status_at)) / 60000;
+    return Math.max(0, Math.ceil(UNDO_CLEAR_MINUTES - since));
   };
 
   const bigButtons = (job: Job) => {
@@ -230,6 +259,40 @@ const Driver = () => {
     const status = job.driver_status ?? null;
     // Nothing is pressable on a finished job, whatever else happens
     if (status === "clear" || clearedHere.includes(job.reference)) return null;
+
+    if (clearFor === job.reference) {
+      return (
+        <div className="space-y-3">
+          <p className="text-smoke text-xs tracking-[0.2em] uppercase">
+            Anything to charge the passenger?
+          </p>
+          <Textarea
+            autoFocus
+            value={clearNotes}
+            onChange={(e) => setClearNotes(e.target.value)}
+            placeholder="Blanket, refreshments, a meal, parking, waiting time. Leave blank if nothing."
+            className="rounded-none text-base min-h-24"
+            maxLength={500}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              variant="outline"
+              className="h-16 rounded-none tracking-[0.15em] uppercase"
+              onClick={() => setClearFor(null)}
+            >
+              Back
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={() => confirmClear(job)}
+              className="h-16 rounded-none tracking-[0.15em] uppercase text-base"
+            >
+              {locating ? <Loader2 className="w-5 h-5 animate-spin" /> : "Finish job"}
+            </Button>
+          </div>
+        </div>
+      );
+    }
 
     if (waitFor === job.reference) {
       return (
@@ -300,10 +363,13 @@ const Driver = () => {
         <Button
           disabled={busy}
           variant={status === "waiting" ? "outline" : "default"}
-          onClick={() => clearJob(job)}
+          onClick={() => {
+            setClearNotes("");
+            setClearFor(job.reference);
+          }}
           className="w-full h-20 rounded-none text-lg tracking-[0.2em] uppercase font-light"
         >
-          {locating ? <Loader2 className="w-5 h-5 animate-spin mr-3" /> : <Flag className="w-5 h-5 mr-3" />}
+          <Flag className="w-5 h-5 mr-3" />
           Clear
         </Button>
       </div>
@@ -515,10 +581,13 @@ const Driver = () => {
                         const clearedAt = waypoints
                           .filter((w) => w.booking_reference === j.reference && w.kind === "clear")
                           .at(-1);
+                        const canUndo = undoMinutesLeft(j) > 0;
                         return (
                           <li
                             key={j.reference}
-                            className="border border-border/40 px-3 py-2.5 flex items-baseline gap-3 text-xs opacity-60"
+                            className={`border px-3 py-2.5 flex items-baseline gap-3 text-xs ${
+                              canUndo ? "border-champagne-muted" : "border-border/40 opacity-60"
+                            }`}
                           >
                             <CheckCheck className="w-3.5 h-3.5 text-champagne flex-none" />
                             <span className="font-mono text-smoke/70 flex-none">
@@ -528,6 +597,17 @@ const Driver = () => {
                             <span className="text-smoke ml-auto flex-none">
                               {clearedAt ? `Cleared ${ukTime(clearedAt.recorded_at)}` : "Cleared"}
                             </span>
+                            {canUndo && (
+                              <button
+                                disabled={act.isPending}
+                                onClick={() =>
+                                  act.mutate({ action: "undo_clear", reference: j.reference })
+                                }
+                                className="flex-none text-champagne tracking-[0.15em] uppercase text-[10px] underline underline-offset-4"
+                              >
+                                Undo
+                              </button>
+                            )}
                           </li>
                         );
                       })}

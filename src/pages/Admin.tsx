@@ -146,6 +146,23 @@ const Admin = () => {
     },
   });
 
+  // The office drive to test the chauffeur app, so switching is a button
+  const setDriver = useMutation({
+    mutationFn: ({ userId, isDriver }: { userId: string; isDriver: boolean }) =>
+      invokeAdmin({ action: "set_driver", user_id: userId, is_driver: isDriver }),
+    onSuccess: (_data, vars) => {
+      toast({
+        title: vars.isDriver ? "Now a chauffeur" : "No longer a chauffeur",
+        description: vars.isDriver
+          ? "They see their own jobs. They will need to sign out and back in."
+          : "They are back to the booking screens. They will need to sign out and back in.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Could not change that", description: err.message, variant: "destructive" }),
+  });
+
   const familyDecision = useMutation({
     mutationFn: ({ userId, action }: { userId: string; action: "approve_family" | "reject_family" }) =>
       invokeAdmin({ action, user_id: userId }),
@@ -249,6 +266,19 @@ const Admin = () => {
                         })}
                       </TableCell>
                       <TableCell className="text-right space-x-2">
+                        {!revoked && !pending && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={setDriver.isPending}
+                            onClick={() =>
+                              setDriver.mutate({ userId: m.id, isDriver: m.is_driver !== true })
+                            }
+                            className="text-smoke hover:text-champagne"
+                          >
+                            {m.is_driver === true ? "Stop driving" : "Make chauffeur"}
+                          </Button>
+                        )}
                         {pending && (
                           <>
                             <Button
