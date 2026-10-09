@@ -19,7 +19,8 @@
     "test:live": "node scripts/booking-live.test.mjs",
     "test:fixtures": "node scripts/fixture-calendar.test.mjs",
     "typecheck": "tsc -b",
-    "check": "npm run typecheck && npm run test:queue && npm run test:live && npm run test:fixtures && npm run test:booking && npm run test:timesheets"
+    "check": "npm run typecheck && npm run test:queue && npm run test:live && npm run test:fixtures && npm run test:signin && npm run test:booking && npm run test:timesheets",
+    "test:signin": "node scripts/signin-smoke/run.mjs"
   },
   "dependencies": {
     "@capacitor/cli": "^8.5.0",

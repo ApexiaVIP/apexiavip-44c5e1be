@@ -41,6 +41,22 @@ const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
   }
 };
 
+/**
+ * Twilio refusals that will never come good by trying again. A member in a
+ * country we are not permitted to text is sent their code by email instead of
+ * being locked out of their own account.
+ */
+const PERMANENT_TWILIO_CODES = new Set([21211, 21214, 21408, 21606, 21610, 21612, 21614]);
+
+const twilioRefusal = (body: string): number | null => {
+  try {
+    const parsed = JSON.parse(body);
+    return typeof parsed?.code === "number" ? parsed.code : null;
+  } catch {
+    return null;
+  }
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -178,10 +194,15 @@ serve(async (req) => {
         if (!twilioRes.ok) {
           const twilioBody = await twilioRes.text();
           console.error("Twilio error:", twilioRes.status, twilioBody);
-          return json(502, { error: "We could not send the SMS. Please try again." });
+          const refusal = twilioRefusal(twilioBody);
+          // A number we are not allowed to text must not lock a member out of
+          // their own account, as long as we hold an email address for them
+          if (!(refusal && PERMANENT_TWILIO_CODES.has(refusal) && RESEND_API_KEY && profile.email)) {
+            return json(502, { error: "We could not send the SMS. Please try again." });
+          }
+        } else {
+          return json(200, { success: true, channel: "sms", sent_to: maskPhone(profile.phone) });
         }
-
-        return json(200, { success: true, channel: "sms", sent_to: maskPhone(profile.phone) });
       }
 
       // Interim channel: email the code via Resend

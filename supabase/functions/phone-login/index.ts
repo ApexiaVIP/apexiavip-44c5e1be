@@ -38,6 +38,31 @@ const maskEmail = (email: string) => {
 const NOT_REGISTERED = "This number is not registered. Access is by invitation only.";
 const NOT_REGISTERED_EMAIL = "This email is not registered. Access is by invitation only.";
 
+/**
+ * Twilio refusals that will never come good by trying again: a country we are
+ * not permitted to text, a number it cannot route to, or one that has opted
+ * out. A member in one of those countries is sent their code by email instead
+ * of being told to try again forever.
+ */
+const PERMANENT_TWILIO_CODES = new Set([
+  21211, // not a valid mobile number
+  21214, // cannot route to this number
+  21408, // not permitted to send to this region
+  21606, // the sending number cannot reach it
+  21610, // the recipient has unsubscribed
+  21612, // unreachable by this route
+  21614, // not a mobile number
+]);
+
+const twilioRefusal = (body: string): number | null => {
+  try {
+    const parsed = JSON.parse(body);
+    return typeof parsed?.code === "number" ? parsed.code : null;
+  } catch {
+    return null;
+  }
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -155,6 +180,10 @@ serve(async (req) => {
         return json(200, { success: true, channel: "sms", sent_to: maskPhone(phone) });
       }
 
+      // Set when the network refuses the number itself, so the code goes by
+      // email rather than nowhere
+      let smsRefused = false;
+
       if (!byEmail && smsConfigured) {
         const params = new URLSearchParams({
           To: phone,
@@ -176,9 +205,17 @@ serve(async (req) => {
         if (!twilioRes.ok) {
           const twilioBody = await twilioRes.text();
           console.error("Twilio error:", twilioRes.status, twilioBody);
-          return json(502, { error: "We could not send the SMS. Please try again." });
+          const refusal = twilioRefusal(twilioBody);
+          // A number we are not allowed to text is not a reason to lock a
+          // member out, as long as we hold an email address for them
+          if (refusal && PERMANENT_TWILIO_CODES.has(refusal) && RESEND_API_KEY && profile.email) {
+            smsRefused = true;
+          } else {
+            return json(502, { error: "We could not send the SMS. Please try again." });
+          }
+        } else {
+          return json(200, { success: true, channel: "sms", sent_to: maskPhone(phone) });
         }
-        return json(200, { success: true, channel: "sms", sent_to: maskPhone(phone) });
       }
 
       const emailRes = await fetch("https://api.resend.com/emails", {
@@ -205,7 +242,14 @@ serve(async (req) => {
         console.error("Resend error:", emailRes.status, await emailRes.text());
         return json(502, { error: "We could not send the code. Please try again." });
       }
-      return json(200, { success: true, channel: "email", sent_to: maskEmail(profile.email) });
+      return json(200, {
+        success: true,
+        channel: "email",
+        sent_to: maskEmail(profile.email),
+        ...(smsRefused
+          ? { note: "We cannot text that number, so your code has been emailed instead." }
+          : {}),
+      });
     }
 
     if (action === "finish") {
