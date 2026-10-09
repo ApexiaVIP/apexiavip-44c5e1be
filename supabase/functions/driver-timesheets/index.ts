@@ -42,6 +42,13 @@ const REPORT_AFTER_MINUTES = 30;
 const QUIET_MINUTES = REPORT_AFTER_MINUTES;
 
 /**
+ * How far back a finished job is still worth reporting one at a time.
+ * Anything older than this belongs to a day the office has already had a
+ * sheet for, and must not arrive as if it had just happened.
+ */
+const REPORT_WITHIN_HOURS = 12;
+
+/**
  * Which day to report on. The daily run fires late in the evening, so the day
  * that has just finished is the one three hours ago: that holds whether the
  * clocks are on BST or GMT.
@@ -184,6 +191,7 @@ serve(async (req) => {
 
     if (mode === "cleared") {
       const readyBefore = new Date(Date.now() - REPORT_AFTER_MINUTES * 60 * 1000).toISOString();
+      const notBefore = new Date(Date.now() - REPORT_WITHIN_HOURS * 3600 * 1000).toISOString();
       const { data: finished } = await admin
         .from("bookings")
         .select(
@@ -192,6 +200,7 @@ serve(async (req) => {
         .eq("driver_status", "clear")
         .is("job_report_sent_at", null)
         .lte("driver_status_at", readyBefore)
+        .gte("driver_status_at", notBefore)
         .order("driver_status_at")
         .limit(25);
 

@@ -25,9 +25,9 @@ const uk = (hhmm) => `${DAY}T${String(Number(hhmm.slice(0, 2)) - 1).padStart(2, 
 
 globalThis.__tables = {
   profiles: [
-    { id: "driver-1", full_name: "Faz Hussain", phone: "+447700900111" },
-    { id: "driver-2", full_name: "Arshad Khan", phone: "+447700900222" },
-    { id: "driver-3", full_name: "Nobody Worked", phone: "+447700900333" },
+    { id: "driver-1", full_name: "Faz Hussain", phone: "+447700900111", is_driver: true },
+    { id: "driver-2", full_name: "Arshad Khan", phone: "+447700900222", is_driver: true },
+    { id: "driver-3", full_name: "Nobody Worked", phone: "+447700900333", is_driver: true },
   ],
   driver_shifts: [
     { driver_id: "driver-1", started_at: uk("07:00"), ended_at: uk("15:30") },
@@ -56,6 +56,13 @@ globalThis.__tables = {
       journey_type: "destination", as_directed_hours: null, vehicle: "S-Class",
       driver_status: "clear", corporate: null, notes: "",
       driver_status_at: new Date(Date.now() - 45 * 60000).toISOString(),
+    },
+    {
+      driver_id: "driver-1", reference: "APEXIA-ANCIENT", name: "Last Week",
+      collection_at: uk("09:00"), pickup: null, dropoff: null,
+      journey_type: "destination", as_directed_hours: null, vehicle: "S-Class",
+      driver_status: "clear", corporate: null, notes: "",
+      driver_status_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
     },
     {
       driver_id: "driver-2", reference: "APEXIA-3", name: "Third Passenger", collection_at: uk("12:00"),
@@ -135,7 +142,7 @@ const arshad = daily.sent.find((e) => e.subject.includes("Arshad"));
 check("the subject names the chauffeur and the day", !!faz && faz.subject.includes("Tuesday 6 October"), faz?.subject);
 check("a full shift is counted correctly", !!faz && faz.html.includes("8h 30m"), "07:00 to 15:30 is 8h 30m");
 check("sign on and sign off times appear", !!faz && faz.html.includes("07:00") && faz.html.includes("15:30"));
-check("jobs are counted and cleared jobs separated", !!faz && faz.html.includes("3 assigned, 2 cleared"));
+check("jobs are counted and cleared jobs separated", !!faz && faz.html.includes("4 assigned, 3 cleared"));
 check("the history of each step is listed", !!faz && faz.html.includes("En route") && faz.html.includes("Cleared"));
 check("where a job was cleared is recorded", !!faz && faz.html.includes("Terminal 2, M90 1QX"));
 check("an as directed hire is described as one", !!faz && faz.html.includes("As directed, 3 hours"));
@@ -151,6 +158,8 @@ check("a finished job is reported on its own", finished.sent.length >= 1, `sent 
 // The stub does not filter, so pick out the job we actually finished
 const jobMail = finished.sent.find((e) => e.html.includes("APEXIA-DONE"));
 check("the finished job is among them", !!jobMail);
+check("a job cleared days ago is not dredged up as new",
+  !finished.sent.some((e) => e.html.includes("APEXIA-ANCIENT")));
 check("it goes to the back office", jobMail?.to[0] === "accounts@apexiavip.com");
 check("the subject flags that there is something to charge", jobMail?.subject.includes("TO CHARGE"), jobMail?.subject);
 check("what the chauffeur laid out is spelled out", jobMail?.html.includes("takeaway for the passenger, 24.50"));
