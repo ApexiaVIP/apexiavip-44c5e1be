@@ -61,10 +61,11 @@ const Login = () => {
   const destinationAfterVerify = async () => {
     const { data } = await supabase.auth.getUser();
     if (!data.user) return redirectTo;
-    // is_driver lands with the drivers migration; the generated types follow
+    // The chauffeur flag has to be asked for, not just declared in the type:
+    // without it in the select a chauffeur never reached their own screen
     const { data: prof } = await supabase
       .from("profiles")
-      .select("profile_completed")
+      .select("profile_completed, is_driver")
       .eq("id", data.user.id)
       .maybeSingle<{ profile_completed: boolean; is_driver?: boolean }>();
     // A chauffeur has no booking screens to complete a profile for

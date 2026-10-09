@@ -1,9 +1,9 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { CalendarPlus, CarFront, ShieldCheck, UserRound } from "lucide-react";
+import { CalendarPlus, CarFront, Navigation, ShieldCheck, UserRound } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { isInstalledApp } from "@/lib/appLinks";
 
-const tabs = [
+const memberTabs = [
   { to: "/book", label: "Book", icon: CalendarPlus },
   { to: "/bookings", label: "Bookings", icon: CarFront },
   { to: "/profile", label: "Account", icon: UserRound },
@@ -18,11 +18,17 @@ const NativeTabBar = () => {
   const { pathname } = useLocation();
   if (!isInstalledApp() || !user || !mfaVerified) return null;
   if (pathname === "/login" || pathname.startsWith("/mcfc")) return null;
-  // Chauffeurs have one screen, so the bar would only get in the way
-  if ((profile as { is_driver?: boolean } | null)?.is_driver === true) return null;
 
-  // Admins get a fourth tab; members never see it
-  const visible = isAdmin ? [...tabs, { to: "/admin", label: "Admin", icon: ShieldCheck }] : tabs;
+  const isChauffeur = (profile as { is_driver?: boolean } | null)?.is_driver === true;
+  // A chauffeur has one screen, so the bar would only get in the way. Someone
+  // who is both, which the office are while they are testing, keeps it.
+  if (isChauffeur && !isAdmin) return null;
+
+  const visible = [
+    ...memberTabs,
+    ...(isChauffeur ? [{ to: "/driver", label: "Driving", icon: Navigation }] : []),
+    ...(isAdmin ? [{ to: "/admin", label: "Admin", icon: ShieldCheck }] : []),
+  ];
 
   return (
     <nav

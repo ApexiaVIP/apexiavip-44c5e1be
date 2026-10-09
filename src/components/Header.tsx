@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { isInstalledApp } from "@/lib/appLinks";
 
 const Header = () => {
-  const { user, isAdmin, signOut } = useAuth();
+  const { user, isAdmin, profile, signOut } = useAuth();
   const native = isInstalledApp();
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md pt-[env(safe-area-inset-top)]">
@@ -44,6 +44,14 @@ const Header = () => {
                   </Link>
                 )}
               </>
+            )}
+            {(profile as { is_driver?: boolean } | null)?.is_driver === true && !native && (
+              <Link
+                to="/driver"
+                className="text-smoke hover:text-foreground transition-colors duration-500 text-xs tracking-[0.2em] uppercase"
+              >
+                Driving
+              </Link>
             )}
             {isAdmin && !native && (
               <Link
