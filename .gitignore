@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 ios/App/build/
+
+# Xcode archives and exported builds: large, rebuildable, never source
+build/
+ios/App/build/
