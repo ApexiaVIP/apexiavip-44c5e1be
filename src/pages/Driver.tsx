@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
   Loader2,
@@ -115,7 +115,7 @@ const whereItIs = (status: Step | null) =>
   status ? stepLabel[status] : "Not started";
 
 const Driver = () => {
-  const { user, profile, mfaVerified, mfaResolved, loading } = useAuth();
+  const { user, profile, mfaVerified, mfaResolved, loading, isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const [waitFor, setWaitFor] = useState<string | null>(null);
   const [clearFor, setClearFor] = useState<string | null>(null);
@@ -444,44 +444,74 @@ const Driver = () => {
         }
       >
         <div className="container mx-auto px-6 max-w-2xl space-y-5">
-          {/* Who and when, kept to one quiet line */}
+          {/* Who and when, and a way back for the office, who drive to test */}
           <div className="flex items-baseline gap-3">
             <p className="text-champagne text-xs tracking-[0.4em] uppercase">Chauffeur</p>
             <p className="text-smoke text-xs tracking-[0.15em]">
               {ukDay(current?.collection_at ?? null)}
             </p>
+            {isAdmin && (
+              <span className="ml-auto flex items-center gap-4">
+                <Link
+                  to="/bookings"
+                  className="text-smoke hover:text-foreground transition-colors text-[10px] tracking-[0.2em] uppercase"
+                >
+                  Member
+                </Link>
+                <Link
+                  to="/admin"
+                  className="text-smoke hover:text-foreground transition-colors text-[10px] tracking-[0.2em] uppercase"
+                >
+                  Admin
+                </Link>
+              </span>
+            )}
           </div>
 
-          {/* Shift clock */}
-          <div className="border border-border p-4 flex items-center justify-between gap-4">
-            <div>
-              <p className={`text-sm ${onShift ? "text-champagne" : "text-smoke"}`}>
-                {onShift ? "On duty" : "Off duty"}
-              </p>
-              <p className="text-smoke text-xs mt-0.5">
-                {onShift ? `Signed on at ${ukTime(shift!.started_at)}` : "Sign on when you start"}
-              </p>
+          {!onShift ? (
+            /* Off duty there is nothing else to do, so signing on is the screen.
+               The clock is the timesheet, so a job worked without it is hours
+               nobody is paid for. */
+            <div className="border border-border p-8 text-center space-y-6">
+              <div>
+                <p className="text-foreground text-lg font-light tracking-wide mb-2">
+                  You are off duty
+                </p>
+                <p className="text-smoke text-xs font-light leading-relaxed max-w-sm mx-auto">
+                  Your jobs appear once you sign on, and the clock starts your timesheet.
+                  Sign off at the end of the day.
+                </p>
+              </div>
+              <Button
+                disabled={act.isPending}
+                onClick={() => act.mutate({ action: "shift_start" })}
+                className="w-full h-24 rounded-none text-xl tracking-[0.2em] uppercase font-light"
+              >
+                {act.isPending ? (
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                ) : (
+                  <UserPlus className="w-6 h-6 mr-3" />
+                )}
+                Sign on
+              </Button>
             </div>
-            <Button
-              variant={onShift ? "outline" : "default"}
-              size="sm"
-              disabled={act.isPending}
-              onClick={() => act.mutate({ action: onShift ? "shift_end" : "shift_start" })}
-              className="tracking-[0.15em] uppercase"
-            >
-              {onShift ? (
-                <>
-                  <UserMinus className="w-4 h-4 mr-2" />
+          ) : (
+            <>
+              {/* On duty, the clock gets out of the way and the jobs take over */}
+              <div className="flex items-center justify-between gap-4 border-b border-border pb-2.5">
+                <p className="text-xs text-champagne tracking-[0.1em]">
+                  On duty
+                  <span className="text-smoke"> since {ukTime(shift!.started_at)}</span>
+                </p>
+                <button
+                  disabled={act.isPending}
+                  onClick={() => act.mutate({ action: "shift_end" })}
+                  className="flex items-center gap-1.5 text-smoke hover:text-foreground transition-colors text-[10px] tracking-[0.2em] uppercase"
+                >
+                  <UserMinus className="w-3.5 h-3.5" />
                   Sign off
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  Sign on
-                </>
-              )}
-            </Button>
-          </div>
+                </button>
+              </div>
 
           {isLoading ? (
             <div className="py-16 text-center">
@@ -615,6 +645,8 @@ const Driver = () => {
                   )}
                 </div>
               )}
+            </>
+          )}
             </>
           )}
         </div>

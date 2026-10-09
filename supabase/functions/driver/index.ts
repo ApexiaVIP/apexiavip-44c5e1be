@@ -117,6 +117,16 @@ Deno.serve(async (req) => {
         return json(403, { error: "That job is not assigned to you" });
       }
 
+      // A job cannot be worked off duty. The shift clock is the timesheet, so
+      // a job progressed without one would be hours nobody is paid for.
+      const { data: onDuty } = await admin
+        .from("driver_shifts")
+        .select("id")
+        .eq("driver_id", user.id)
+        .is("ended_at", null)
+        .maybeSingle();
+      if (!onDuty) return json(409, { error: "Sign on before starting a job" });
+
       const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
       const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
 
@@ -280,6 +290,19 @@ Deno.serve(async (req) => {
       .eq("driver_id", user.id)
       .is("ended_at", null)
       .maybeSingle();
+
+    // Off duty, there is no day to show. The screen asks them to sign on
+    // rather than offering jobs they are not yet working.
+    if (!open.data) {
+      return json(200, {
+        success: true,
+        driver: { name: profile.full_name, phone: profile.phone },
+        shift: null,
+        jobs: [],
+        waypoints: [],
+        offDuty: true,
+      });
+    }
 
     const myKey = phoneKey(profile.phone as string);
     const columns =
