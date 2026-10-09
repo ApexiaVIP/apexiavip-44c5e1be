@@ -29,6 +29,13 @@
       "when": 1791318749397,
       "tag": "0003_driver_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791533189765,
+      "tag": "0004_driver_position",
+      "breakpoints": true
     }
   ]
 }

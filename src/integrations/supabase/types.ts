@@ -65,8 +65,11 @@ export type Database = {
           created_at: string
           declined_reason: string | null
           driver_id: string | null
+          driver_lat: number | null
+          driver_lng: number | null
           driver_moment: string | null
           driver_name: string | null
+          driver_position_at: string | null
           driver_status: string | null
           driver_status_at: string | null
           dropoff: Json | null
@@ -104,8 +107,11 @@ export type Database = {
           created_at?: string
           declined_reason?: string | null
           driver_id?: string | null
+          driver_lat?: number | null
+          driver_lng?: number | null
           driver_moment?: string | null
           driver_name?: string | null
+          driver_position_at?: string | null
           driver_status?: string | null
           driver_status_at?: string | null
           dropoff?: Json | null
@@ -143,8 +149,11 @@ export type Database = {
           created_at?: string
           declined_reason?: string | null
           driver_id?: string | null
+          driver_lat?: number | null
+          driver_lng?: number | null
           driver_moment?: string | null
           driver_name?: string | null
+          driver_position_at?: string | null
           driver_status?: string | null
           driver_status_at?: string | null
           dropoff?: Json | null
