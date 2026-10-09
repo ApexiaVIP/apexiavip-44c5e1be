@@ -75,6 +75,7 @@ export type Database = {
           dropoff: Json | null
           email: string
           id: string
+          job_report_sent_at: string | null
           journey_type: string
           name: string
           notes: string | null
@@ -117,6 +118,7 @@ export type Database = {
           dropoff?: Json | null
           email: string
           id?: string
+          job_report_sent_at?: string | null
           journey_type?: string
           name: string
           notes?: string | null
@@ -159,6 +161,7 @@ export type Database = {
           dropoff?: Json | null
           email?: string
           id?: string
+          job_report_sent_at?: string | null
           journey_type?: string
           name?: string
           notes?: string | null
@@ -776,6 +779,24 @@ export type Database = {
           id?: string
           metadata?: Json | null
           reason?: string
+        }
+        Relationships: []
+      }
+      timesheet_runs: {
+        Row: {
+          day: string
+          kind: string
+          sent_at: string
+        }
+        Insert: {
+          day: string
+          kind: string
+          sent_at?: string
+        }
+        Update: {
+          day?: string
+          kind?: string
+          sent_at?: string
         }
         Relationships: []
       }
