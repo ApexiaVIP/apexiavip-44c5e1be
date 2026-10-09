@@ -91,7 +91,7 @@ serve(async (req) => {
       const { data: profiles, error } = await admin
         .from("profiles")
         .select(
-          "id, full_name, email, phone, status, created_at, avatar_url, primary_member_id, profile_completed"
+          "id, full_name, email, phone, status, created_at, avatar_url, primary_member_id, profile_completed, is_driver"
         )
         .order("created_at", { ascending: false });
       if (error) throw error;

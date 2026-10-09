@@ -50,6 +50,8 @@ interface Member {
   primary_member_id: string | null;
   profile_completed: boolean;
   roles: string[];
+  /** A chauffeur sees their own jobs instead of the booking screens */
+  is_driver?: boolean;
 }
 
 const invokeAdmin = async (body: Record<string, unknown>) => {
@@ -104,9 +106,9 @@ const Admin = () => {
       }),
     onSuccess: () => {
       toast({
-        title: isDriver ? "Driver invited" : "Member invited",
+        title: isDriver ? "Chauffeur invited" : "Member invited",
         description: isDriver
-          ? `${fullName || "The new driver"} can sign in with their mobile and will see their own jobs.`
+          ? `${fullName || "The new chauffeur"} can sign in with their mobile and will see their own jobs.`
           : `${fullName || "The new member"} can now sign in with their ${phone.trim() ? "mobile number" : "email address"}.`,
       });
       setInviteOpen(false);
@@ -185,6 +187,7 @@ const Admin = () => {
   });
 
   if (loading) {
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-champagne" />
@@ -193,6 +196,172 @@ const Admin = () => {
   }
   if (!user) return <Navigate to="/login" state={{ from: "/admin" }} replace />;
   if (!isAdmin) return <Navigate to="/" replace />;
+
+  // Customers and chauffeurs are two different jobs, so the office reads them
+  // as two lists rather than hunting through one
+  const everyone = members ?? [];
+  const chauffeurs = everyone.filter((m) => m.is_driver === true);
+  const customers = everyone.filter((m) => m.is_driver !== true);
+
+  /** One row of the people list, used by both tables. */
+  const memberRow = (m: Member) => {
+                  const memberIsAdmin = m.roles.includes("admin");
+                  const revoked = m.status === "revoked";
+                  const pending = m.status === "pending";
+                  const primary = m.primary_member_id
+                    ? (members ?? []).find((p) => p.id === m.primary_member_id)
+                    : null;
+                  return (
+                    <TableRow key={m.id}>
+                      <TableCell className="font-medium">
+                        <span className="inline-flex items-center gap-2">
+                          <SignedAvatar src={m.avatar_url} className="w-7 h-7 rounded-full" />
+                          <span>
+                            {m.full_name || "—"}
+                            {primary && (
+                              <span className="block text-xs text-smoke font-normal">
+                                Family of {primary.full_name || primary.phone}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                        {memberIsAdmin && (
+                          <Badge variant="outline" className="ml-2 text-champagne border-champagne">
+                            Admin
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>{m.phone}</TableCell>
+                      <TableCell>{m.email || "—"}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={revoked ? "destructive" : pending ? "outline" : "secondary"}
+                          className={pending ? "text-champagne border-champagne" : undefined}
+                        >
+                          {revoked ? "Revoked" : pending ? "Pending" : "Active"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {new Date(m.created_at).toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </TableCell>
+                      <TableCell className="text-right space-x-2">
+                        {pending && (
+                          <>
+                            <Button
+                              size="sm"
+                              disabled={familyDecision.isPending}
+                              onClick={() =>
+                                familyDecision.mutate({ userId: m.id, action: "approve_family" })
+                              }
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={familyDecision.isPending}
+                              onClick={() =>
+                                familyDecision.mutate({ userId: m.id, action: "reject_family" })
+                              }
+                            >
+                              Decline
+                            </Button>
+                          </>
+                        )}
+                        {!pending && !memberIsAdmin && m.id !== user.id && !revoked && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={resetMfa.isPending}
+                            onClick={() => {
+                              setResetTarget(m);
+                              setResetPhone("");
+                            }}
+                          >
+                            Reset 2FA
+                          </Button>
+                        )}
+                        {pending || memberIsAdmin || m.id === user.id ? null : revoked ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={setAccess.isPending}
+                            onClick={() => setAccess.mutate({ userId: m.id, action: "restore" })}
+                          >
+                            Restore
+                          </Button>
+                        ) : (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm" disabled={setAccess.isPending}>
+                                Revoke
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  Revoke access for {m.full_name || m.phone}?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  They will be signed out and unable to sign in or make
+                                  bookings until access is restored.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => setAccess.mutate({ userId: m.id, action: "revoke" })}
+                                >
+                                  Revoke Access
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+                        {!pending && !memberIsAdmin && m.id !== user.id && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={deleteMember.isPending}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                Delete
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  Permanently delete {m.full_name || m.phone}?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Their account, profile and access are removed
+                                  immediately and this cannot be undone. Booking
+                                  history is kept for your records. To block
+                                  access temporarily, use Revoke instead.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Keep Account</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => deleteMember.mutate(m.id)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Delete Permanently
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+  };
 
   return (
     <MemberLayout>
@@ -272,7 +441,7 @@ const Admin = () => {
                     {isDriver && <Check className="w-3 h-3 text-background" />}
                   </span>
                   <span>
-                    <span className="block text-foreground text-sm">Invite as a driver</span>
+                    <span className="block text-foreground text-sm">Assign as a chauffeur</span>
                     <span className="block text-smoke text-xs mt-0.5">
                       They see their own jobs and the shift clock instead of the booking screens.
                       A mobile number is required, as it is how Dispatch matches jobs to them.
@@ -309,185 +478,45 @@ const Admin = () => {
             Could not load members: {(membersError as Error).message}
           </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Joined</TableHead>
-                <TableHead className="text-right">Access</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(members ?? []).map((m) => {
-                const memberIsAdmin = m.roles.includes("admin");
-                const revoked = m.status === "revoked";
-                const pending = m.status === "pending";
-                const primary = m.primary_member_id
-                  ? (members ?? []).find((p) => p.id === m.primary_member_id)
-                  : null;
-                return (
-                  <TableRow key={m.id}>
-                    <TableCell className="font-medium">
-                      <span className="inline-flex items-center gap-2">
-                        <SignedAvatar src={m.avatar_url} className="w-7 h-7 rounded-full" />
-                        <span>
-                          {m.full_name || "—"}
-                          {primary && (
-                            <span className="block text-xs text-smoke font-normal">
-                              Family of {primary.full_name || primary.phone}
-                            </span>
-                          )}
-                        </span>
-                      </span>
-                      {memberIsAdmin && (
-                        <Badge variant="outline" className="ml-2 text-champagne border-champagne">
-                          Admin
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>{m.phone}</TableCell>
-                    <TableCell>{m.email || "—"}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={revoked ? "destructive" : pending ? "outline" : "secondary"}
-                        className={pending ? "text-champagne border-champagne" : undefined}
-                      >
-                        {revoked ? "Revoked" : pending ? "Pending" : "Active"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {new Date(m.created_at).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </TableCell>
-                    <TableCell className="text-right space-x-2">
-                      {pending && (
-                        <>
-                          <Button
-                            size="sm"
-                            disabled={familyDecision.isPending}
-                            onClick={() =>
-                              familyDecision.mutate({ userId: m.id, action: "approve_family" })
-                            }
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={familyDecision.isPending}
-                            onClick={() =>
-                              familyDecision.mutate({ userId: m.id, action: "reject_family" })
-                            }
-                          >
-                            Decline
-                          </Button>
-                        </>
-                      )}
-                      {!pending && !memberIsAdmin && m.id !== user.id && !revoked && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={resetMfa.isPending}
-                          onClick={() => {
-                            setResetTarget(m);
-                            setResetPhone("");
-                          }}
-                        >
-                          Reset 2FA
-                        </Button>
-                      )}
-                      {pending || memberIsAdmin || m.id === user.id ? null : revoked ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={setAccess.isPending}
-                          onClick={() => setAccess.mutate({ userId: m.id, action: "restore" })}
-                        >
-                          Restore
-                        </Button>
-                      ) : (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="outline" size="sm" disabled={setAccess.isPending}>
-                              Revoke
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>
-                                Revoke access for {m.full_name || m.phone}?
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                They will be signed out and unable to sign in or make
-                                bookings until access is restored.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => setAccess.mutate({ userId: m.id, action: "revoke" })}
-                              >
-                                Revoke Access
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      )}
-                      {!pending && !memberIsAdmin && m.id !== user.id && (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={deleteMember.isPending}
-                              className="text-destructive hover:text-destructive"
-                            >
-                              Delete
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>
-                                Permanently delete {m.full_name || m.phone}?
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Their account, profile and access are removed
-                                immediately and this cannot be undone. Booking
-                                history is kept for your records. To block
-                                access temporarily, use Revoke instead.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Keep Account</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => deleteMember.mutate(m.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Delete Permanently
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {(members ?? []).length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-smoke py-10">
-                    No members yet. Invite your first member above.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <div className="space-y-12">
+            {/* Customers and chauffeurs are different jobs and different
+                conversations, so the office reads them separately */}
+            {([
+              { title: "Customers", rows: customers, empty: "No customers yet. Invite your first above." },
+              { title: "Chauffeurs", rows: chauffeurs, empty: "No chauffeurs yet. Invite one above and tick \u201cAssign as a chauffeur\u201d." },
+            ] as const).map((group) => (
+              <div key={group.title}>
+                <div className="flex items-baseline gap-3 mb-4">
+                  <h2 className="text-champagne text-xs tracking-[0.4em] uppercase">
+                    {group.title}
+                  </h2>
+                  <span className="text-smoke text-xs">{group.rows.length}</span>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Joined</TableHead>
+                      <TableHead className="text-right">Access</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {group.rows.map(memberRow)}
+                    {group.rows.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-smoke py-10">
+                          {group.empty}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            ))}
+          </div>
         )}
 
         <Dialog
