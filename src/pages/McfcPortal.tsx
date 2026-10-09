@@ -48,6 +48,10 @@ const CAPACITY: Record<string, number> = {
   [CLIENT_CAR]: 7,
 };
 
+/** The biggest car we run. A party is never capped below this, so the desk
+ *  can say how many are travelling before choosing the vehicle. */
+const MAX_SEATS = Math.max(...Object.values(CAPACITY));
+
 const MAX_CHILDREN = 8;
 const seatFor = (age: number) =>
   age < 1 ? "baby seat" : age < 4 ? "child seat" : age < 12 ? "booster" : "no seat";
@@ -166,7 +170,16 @@ const carIssues = (car: CarRequest): string[] => {
   }
   if (manifestOf(car).length === 0) issues.push("Choose who is travelling.");
   if (peakOf(car) > capacity) {
-    issues.push(`Too many passengers at once for the ${car.vehicle} (${capacity} seats).`);
+    // Listing what fits saves the desk working it out from the seat counts,
+    // without us choosing the car for them
+    const fits = Object.entries(CAPACITY)
+      .filter(([name, seats]) => name !== CLIENT_CAR && seats >= peakOf(car))
+      .sort((a, b) => a[1] - b[1])
+      .map(([name, seats]) => `${name} seats ${seats}`);
+    issues.push(
+      `${peakOf(car)} passengers at once is too many for the ${car.vehicle} (${capacity} seats).` +
+        (fits.length > 0 ? ` ${fits.join(", ")}.` : "")
+    );
   }
   car.stops.forEach((s, idx) => {
     const aboard = aboardAt(car, idx);
@@ -1795,12 +1808,6 @@ const McfcPortal = () => {
                         <div className="flex flex-wrap items-center gap-2">
                           {stop.passengers.map((p) => {
                             const party = passengerOptions.find((o) => o.name === p)?.is_group;
-                            const seatsLeft =
-                              capacity -
-                              aboardAt(car, s).reduce((n, x) => n + seatsFor(car, x), 0) -
-                              stop.passengers
-                                .filter((x) => x !== p)
-                                .reduce((n, x) => n + Math.max(1, stop.counts?.[x] ?? 1), 0);
                             return (
                               <span
                                 key={p}
@@ -1823,10 +1830,7 @@ const McfcPortal = () => {
                                     }
                                     className="bg-white text-[#1C2C5B] text-xs px-1 py-0.5 outline-none"
                                   >
-                                    {Array.from(
-                                      { length: Math.max(1, seatsLeft) },
-                                      (_, n) => n + 1
-                                    ).map((n) => (
+                                    {Array.from({ length: MAX_SEATS }, (_, n) => n + 1).map((n) => (
                                       <option key={n} value={n}>
                                         {n}
                                       </option>
