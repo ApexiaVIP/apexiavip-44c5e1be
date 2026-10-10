@@ -39,6 +39,22 @@ import {
 } from "@/components/ui/table";
 import { toast } from "@/hooks/use-toast";
 
+interface Application {
+  id: string;
+  created_at: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  address_line1: string;
+  address_line2: string;
+  town: string;
+  postcode: string;
+  country: string;
+  heard_from: string;
+  message: string;
+  status: string;
+}
+
 interface Member {
   id: string;
   full_name: string;
@@ -89,6 +105,34 @@ const Admin = () => {
   const [editEmail, setEditEmail] = useState("");
   const [resetCountryCode, setResetCountryCode] = useState("+44");
   const [resetPhone, setResetPhone] = useState("");
+
+  // People who asked to join through the website, waiting on the office
+  const { data: applications } = useQuery({
+    queryKey: ["admin-applications"],
+    queryFn: async () =>
+      (await invokeAdmin({ action: "list_applications" })).applications as Application[],
+    enabled: !!user && isAdmin,
+  });
+
+  const decideApplication = useMutation({
+    mutationFn: ({ id, approve }: { id: string; approve: boolean }) =>
+      invokeAdmin({
+        action: approve ? "approve_application" : "decline_application",
+        application_id: id,
+      }),
+    onSuccess: (_data, vars) => {
+      toast({
+        title: vars.approve ? "Member created" : "Application declined",
+        description: vars.approve
+          ? "They have been welcomed and can sign in straight away."
+          : "They have been removed from the queue.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-applications"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Could not do that", description: err.message, variant: "destructive" }),
+  });
 
   const { data: members, isLoading: membersLoading, error: membersError } = useQuery({
     queryKey: ["admin-members"],
@@ -537,6 +581,78 @@ const Admin = () => {
             </DialogContent>
           </Dialog>
         </div>
+
+        {/* Applications waiting on the office, before the member lists, because
+            somebody is sitting there expecting a reply */}
+        {(applications?.length ?? 0) > 0 && (
+          <div className="mb-12">
+            <div className="flex items-baseline gap-3 mb-4">
+              <h2 className="text-champagne text-xs tracking-[0.4em] uppercase">
+                Applications
+              </h2>
+              <span className="text-smoke text-xs">{applications!.length} waiting</span>
+            </div>
+            <div className="space-y-3">
+              {applications!.map((a) => (
+                <div key={a.id} className="border border-champagne-muted p-5">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <p className="text-foreground text-lg font-light tracking-wide">
+                        {a.full_name}
+                      </p>
+                      <p className="text-smoke text-sm mt-0.5">
+                        {a.email}
+                        {a.phone ? ` · ${a.phone}` : ""}
+                      </p>
+                      <p className="text-smoke text-xs mt-2">
+                        {[a.address_line1, a.address_line2, a.town, a.postcode, a.country]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </p>
+                      {a.heard_from && (
+                        <p className="text-smoke text-xs mt-2">Heard of us via {a.heard_from}</p>
+                      )}
+                      {a.message && (
+                        <p className="text-smoke text-xs mt-2 whitespace-pre-wrap border-l border-border pl-3">
+                          {a.message}
+                        </p>
+                      )}
+                      <p className="text-smoke/60 text-[11px] mt-3">
+                        Applied{" "}
+                        {new Date(a.created_at).toLocaleString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          timeZone: "Europe/London",
+                        })}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-none">
+                      <Button
+                        size="sm"
+                        disabled={decideApplication.isPending}
+                        onClick={() => decideApplication.mutate({ id: a.id, approve: true })}
+                        className="tracking-[0.15em] uppercase"
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={decideApplication.isPending}
+                        onClick={() => decideApplication.mutate({ id: a.id, approve: false })}
+                        className="text-smoke hover:text-destructive"
+                      >
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {membersLoading ? (
           <div className="py-20 text-center">

@@ -67,37 +67,60 @@ const is = (label, got, want) => {
   console.log(`${ok ? "ok  " : "FAIL"}  ${label}${ok ? "" : `  (got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)})`}`);
 };
 
-// Normally the code goes by text
+// A number outside the UK is emailed without troubling the network at all
 twilio = { ok: true };
 let r = await start();
-is("a number we can text gets a text", r.payload.channel, "sms");
-is("and no email is sent", lastEmailTo, null);
-
-// A country we are not permitted to text, which is what a UAE number hits
-twilio = { ok: false, body: JSON.stringify({ code: 21408, message: "Permission to send an SMS has not been enabled for the region" }) };
-r = await start();
-is("a country we cannot text still gets in", r.status, 200);
-is("by email instead", r.payload.channel, "email");
+is("an overseas number is emailed, not texted", r.payload.channel, "email");
 is("to the address we hold", lastEmailTo, MEMBER.email);
+is("and the member is told why", String(r.payload.note).includes("outside the UK"), true);
+
+// A UK mobile still gets a text, which is what members here expect
+globalThis.__tables.profiles = [{ ...MEMBER, phone: "+447700900123" }];
+const UK = "+447700900123";
+const startUk = async () => {
+  lastEmailTo = null;
+  const res = await handler(new Request("https://x/phone-login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "start", phone: UK }),
+  }));
+  return { status: res.status, payload: await res.json() };
+};
+r = await startUk();
+is("a UK mobile still gets a text", r.payload.channel, "sms");
+is("and nothing is emailed", lastEmailTo, null);
+
+// A UK number the network refuses still falls back
+twilio = { ok: false, body: JSON.stringify({ code: 21408 }) };
+r = await startUk();
+is("a refused UK number falls back to email", r.payload.channel, "email");
+
+globalThis.__tables.profiles = [MEMBER];
+
+// A UK number the network refuses, which is the case the fallback is for
+globalThis.__tables.profiles = [{ ...MEMBER, phone: UK }];
+twilio = { ok: false, body: JSON.stringify({ code: 21408, message: "Permission to send an SMS has not been enabled for the region" }) };
+r = await startUk();
+is("a number we cannot text still gets in", r.status, 200);
+is("by email instead", r.payload.channel, "email");
 is("and the member is told why", String(r.payload.note).includes("cannot text"), true);
 
 // Other permanent refusals behave the same way
 for (const code of [21211, 21214, 21606, 21610, 21612, 21614]) {
   twilio = { ok: false, body: JSON.stringify({ code }) };
-  r = await start();
+  r = await startUk();
   is(`refusal ${code} falls back to email`, r.payload.channel, "email");
 }
 
 // A passing fault is not a reason to send the code somewhere else
 twilio = { ok: false, body: JSON.stringify({ code: 20503, message: "Internal server error" }) };
-r = await start();
+r = await startUk();
 is("a temporary fault is reported, not rerouted", r.status, 502);
 is("and nothing is emailed", lastEmailTo, null);
 
 // Without an address there is nowhere to fall back to
-globalThis.__tables.profiles = [{ ...MEMBER, email: "" }];
+globalThis.__tables.profiles = [{ ...MEMBER, phone: UK, email: "" }];
 twilio = { ok: false, body: JSON.stringify({ code: 21408 }) };
-r = await start();
+r = await startUk();
 is("with no email on file we say so rather than pretend", r.status, 502);
 
 console.log(bad === 0 ? "\na member abroad can still sign in" : `\n${bad} FAILED`);

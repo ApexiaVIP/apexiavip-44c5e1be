@@ -42,6 +42,116 @@ const trySendSms = async (to: string, bodyText: string) => {
   }
 };
 
+interface NewMember {
+  fullName: string;
+  email: string;
+  phone: string;
+  isDriver: boolean;
+  invitedBy: string;
+}
+
+/**
+ * Create a membership and welcome them.
+ *
+ * Shared by inviting someone directly and by approving an application they
+ * sent in themselves, so an approved application becomes exactly the same
+ * kind of member and the office never rekeys what the applicant typed.
+ */
+const createMember = async (
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  member: NewMember
+): Promise<{ userId?: string; error?: string }> => {
+    // Sign-in never uses this address; it only anchors the auth account
+    // until the member provides their real email in their profile
+    const authEmail = member.email || `member-${member.phone.replace(/\D/g, "")}@members.apexiavip.com`;
+
+    // Create the member directly: sign-in is passwordless (code by SMS or
+    // email), so nothing in onboarding depends on an email being delivered
+    const { data: created, error: createError } = await admin.auth.admin.createUser({
+      email: authEmail,
+      ...(member.phone ? { phone: member.phone, phone_confirm: true } : {}),
+      email_confirm: true,
+      user_metadata: { full_name: member.fullName },
+    });
+    if (createError) {
+      const msg = createError.message?.includes("already")
+        ? "A user with this phone or email already exists"
+        : createError.message;
+      return { error: msg ?? "Could not create that member" };
+    }
+
+    const userId = created.user.id;
+    const { error: profileError } = await admin.from("profiles").insert({
+      id: userId,
+      full_name: member.fullName,
+      email: member.email,
+      phone: member.phone,
+      status: "active",
+      invited_by: member.invitedBy,
+      is_driver: member.isDriver,
+    });
+    if (profileError) throw profileError;
+
+    const { error: roleError } = await admin
+      .from("user_roles")
+      .insert({ user_id: userId, role: "member" });
+    if (roleError) throw roleError;
+
+    // Tell the new member they're in: welcome SMS when we have a mobile,
+    // plus a welcome email when we have an address. Sign-in never depends
+    // on either arriving.
+    if (member.phone) {
+      await trySendSms(
+        member.phone,
+        member.isDriver
+          ? "APEXIA VIP: Your driver account is ready. Get the app at apexiavip.com/app and sign in with this mobile number - we will text you a code. No password needed."
+          : "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed. The app is at apexiavip.com/app"
+      );
+    }
+
+    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+    if (RESEND_API_KEY && member.email) {
+      try {
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${RESEND_API_KEY}`,
+          },
+          body: JSON.stringify({
+            from: "Apexia VIP <info@apexiavip.com>",
+            to: [member.email],
+            subject: "Welcome to Apexia VIP",
+            html: `
+              <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 520px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 48px 40px; text-align: center;">
+                <p style="color: #b89b5e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3em; margin-bottom: 28px;">Apexia VIP</p>
+                <p style="font-size: 20px; font-weight: 300; letter-spacing: 0.05em; margin-bottom: 20px;">Welcome, ${member.fullName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+                <p style="font-size: 14px; color: #8a8070; line-height: 1.7;">${
+                  member.phone
+                    ? `Your membership is now active. To sign in, simply visit the site, choose Members, and enter this mobile number ending ${member.phone.slice(-3)}. We will text you a secure access code. There is no password to remember.`
+                    : `Your membership is now active. To sign in, simply visit the site, choose Members, select email sign-in and enter this email address. We will email you a secure access code. There is no password to remember.`
+                }</p>
+                <p style="margin: 32px 0;"><a href="https://apexiavip.com/login" style="color: #b89b5e; border: 1px solid #b89b5e; padding: 14px 36px; text-decoration: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.2em;">Member Sign In</a></p>
+                <p style="font-size: 13px; color: #8a8070; line-height: 1.7; margin-bottom: 8px;">Apexia VIP is also on your phone, with live chauffeur tracking on the day.</p>
+                <p style="margin: 0 0 32px 0; font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase;">
+                  <a href="https://apps.apple.com/gb/app/apexia-vip/id6799735654" style="color: #b89b5e; text-decoration: none;">App Store</a>
+                  <span style="color: #4a4438; padding: 0 12px;">|</span>
+                  <a href="https://play.google.com/store/apps/details?id=com.apexiavip.app" style="color: #b89b5e; text-decoration: none;">Google Play</a>
+                </p>
+                <p style="font-size: 11px; color: #8a8070;">All enquiries are handled with complete discretion.</p>
+              </div>
+            `,
+          }),
+        });
+      } catch (emailError) {
+        console.error("Welcome email failed (non-blocking):", emailError);
+      }
+    }
+
+    return { userId };
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -128,6 +238,15 @@ serve(async (req) => {
       if (!phone && !email) {
         return json(400, { error: "A mobile number or an email address is required" });
       }
+      // We can only rely on a text to a UK mobile, so a member anywhere else
+      // needs an address or their sign-in code has nowhere to go
+      if (phone && !phone.startsWith("+44") && !email) {
+        return json(400, {
+          error:
+            "A member outside the UK needs an email address: we cannot reliably text every country, and their sign-in code would have nowhere to go.",
+        });
+      }
+
       // Jobs reach a chauffeur by matching the mobile Dispatch holds for them
       if (isDriver && !phone) {
         return json(400, {
@@ -135,94 +254,15 @@ serve(async (req) => {
         });
       }
 
-      // Sign-in never uses this address; it only anchors the auth account
-      // until the member provides their real email in their profile
-      const authEmail = email || `member-${phone.replace(/\D/g, "")}@members.apexiavip.com`;
-
-      // Create the member directly: sign-in is passwordless (code by SMS or
-      // email), so nothing in onboarding depends on an email being delivered
-      const { data: created, error: createError } = await admin.auth.admin.createUser({
-        email: authEmail,
-        ...(phone ? { phone, phone_confirm: true } : {}),
-        email_confirm: true,
-        user_metadata: { full_name: fullName },
-      });
-      if (createError) {
-        const msg = createError.message?.includes("already")
-          ? "A user with this phone or email already exists"
-          : createError.message;
-        return json(400, { error: msg });
-      }
-
-      const userId = created.user.id;
-      const { error: profileError } = await admin.from("profiles").insert({
-        id: userId,
-        full_name: fullName,
+      const result = await createMember(admin, {
+        fullName,
         email,
         phone,
-        status: "active",
-        invited_by: caller.id,
-        is_driver: isDriver,
+        isDriver,
+        invitedBy: caller.id,
       });
-      if (profileError) throw profileError;
-
-      const { error: roleError } = await admin
-        .from("user_roles")
-        .insert({ user_id: userId, role: "member" });
-      if (roleError) throw roleError;
-
-      // Tell the new member they're in: welcome SMS when we have a mobile,
-      // plus a welcome email when we have an address. Sign-in never depends
-      // on either arriving.
-      if (phone) {
-        await trySendSms(
-          phone,
-          isDriver
-            ? "APEXIA VIP: Your driver account is ready. Get the app at apexiavip.com/app and sign in with this mobile number - we will text you a code. No password needed."
-            : "APEXIA VIP: Your membership is now active. Sign in with this mobile number at https://apexiavip.com/login - we will text you a secure access code. No password needed. The app is at apexiavip.com/app"
-        );
-      }
-
-      const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-      if (RESEND_API_KEY && email) {
-        try {
-          await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${RESEND_API_KEY}`,
-            },
-            body: JSON.stringify({
-              from: "Apexia VIP <info@apexiavip.com>",
-              to: [email],
-              subject: "Welcome to Apexia VIP",
-              html: `
-                <div style="font-family: 'Helvetica Neue', sans-serif; max-width: 520px; margin: 0 auto; background: #0a0a0a; color: #e0d5c4; padding: 48px 40px; text-align: center;">
-                  <p style="color: #b89b5e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3em; margin-bottom: 28px;">Apexia VIP</p>
-                  <p style="font-size: 20px; font-weight: 300; letter-spacing: 0.05em; margin-bottom: 20px;">Welcome, ${fullName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
-                  <p style="font-size: 14px; color: #8a8070; line-height: 1.7;">${
-                    phone
-                      ? `Your membership is now active. To sign in, simply visit the site, choose Members, and enter this mobile number ending ${phone.slice(-3)}. We will text you a secure access code. There is no password to remember.`
-                      : `Your membership is now active. To sign in, simply visit the site, choose Members, select email sign-in and enter this email address. We will email you a secure access code. There is no password to remember.`
-                  }</p>
-                  <p style="margin: 32px 0;"><a href="https://apexiavip.com/login" style="color: #b89b5e; border: 1px solid #b89b5e; padding: 14px 36px; text-decoration: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.2em;">Member Sign In</a></p>
-                  <p style="font-size: 13px; color: #8a8070; line-height: 1.7; margin-bottom: 8px;">Apexia VIP is also on your phone, with live chauffeur tracking on the day.</p>
-                  <p style="margin: 0 0 32px 0; font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase;">
-                    <a href="https://apps.apple.com/gb/app/apexia-vip/id6799735654" style="color: #b89b5e; text-decoration: none;">App Store</a>
-                    <span style="color: #4a4438; padding: 0 12px;">|</span>
-                    <a href="https://play.google.com/store/apps/details?id=com.apexiavip.app" style="color: #b89b5e; text-decoration: none;">Google Play</a>
-                  </p>
-                  <p style="font-size: 11px; color: #8a8070;">All enquiries are handled with complete discretion.</p>
-                </div>
-              `,
-            }),
-          });
-        } catch (emailError) {
-          console.error("Welcome email failed (non-blocking):", emailError);
-        }
-      }
-
-      return json(200, { success: true, user_id: userId });
+      if (result.error) return json(400, { error: result.error });
+      return json(200, { success: true, user_id: result.userId });
     }
 
     if (action === "revoke" || action === "restore") {
@@ -288,6 +328,65 @@ serve(async (req) => {
     // Correcting a member's details. A member invited by mobile alone has no
     // address to send a code to, which strands anyone we cannot text, and the
     // office had no way to add one.
+    // --- Applications people sent in themselves ---
+    if (action === "list_applications") {
+      const { data, error } = await admin
+        .from("membership_applications")
+        .select(
+          "id, created_at, full_name, email, phone, address_line1, address_line2, town, postcode, country, heard_from, message, status, handled_at"
+        )
+        .in("status", ["new", "contacted"])
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      return json(200, { success: true, applications: data ?? [] });
+    }
+
+    if (action === "approve_application" || action === "decline_application") {
+      const applicationId = body?.application_id;
+      if (!applicationId || typeof applicationId !== "string") {
+        return json(400, { error: "Invalid application" });
+      }
+      const { data: application } = await admin
+        .from("membership_applications")
+        .select("id, full_name, email, phone, status")
+        .eq("id", applicationId)
+        .maybeSingle();
+      if (!application) return json(404, { error: "No such application" });
+      if (application.status === "accepted" || application.status === "declined") {
+        return json(400, { error: "That application has already been dealt with" });
+      }
+
+      if (action === "decline_application") {
+        const { error } = await admin
+          .from("membership_applications")
+          .update({ status: "declined", handled_by: caller.id, handled_at: new Date().toISOString() })
+          .eq("id", applicationId);
+        if (error) throw error;
+        return json(200, { success: true });
+      }
+
+      // Approving creates exactly the member an invitation would have, from
+      // what the applicant typed, so nobody rekeys it
+      const result = await createMember(admin, {
+        fullName: String(application.full_name ?? "").trim(),
+        email: String(application.email ?? "").trim().toLowerCase(),
+        phone: String(application.phone ?? "").replace(/[\s\-()]/g, ""),
+        isDriver: false,
+        invitedBy: caller.id,
+      });
+      if (result.error) return json(400, { error: result.error });
+
+      // Only once the membership exists, so a failure leaves the application
+      // in the queue to try again rather than lost
+      const { error } = await admin
+        .from("membership_applications")
+        .update({ status: "accepted", handled_by: caller.id, handled_at: new Date().toISOString() })
+        .eq("id", applicationId);
+      if (error) throw error;
+      return json(200, { success: true, user_id: result.userId });
+    }
+
     if (action === "update_member") {
       const userId = body?.user_id;
       if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });

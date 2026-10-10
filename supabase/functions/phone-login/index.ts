@@ -180,11 +180,17 @@ serve(async (req) => {
         return json(200, { success: true, channel: "sms", sent_to: maskPhone(phone) });
       }
 
-      // Set when the network refuses the number itself, so the code goes by
-      // email rather than nowhere
-      let smsRefused = false;
+      // Why the code went by email rather than by text, when it did
+      let emailReason: string | null = null;
 
-      if (!byEmail && smsConfigured) {
+      // A text to a UK mobile is reliable. Beyond that the rules change country
+      // by country, each needing its own registration, so a member abroad is
+      // sent their code by email, which arrives everywhere.
+      if (!byEmail && !phone.startsWith("+44") && RESEND_API_KEY && profile.email) {
+        emailReason = "We email access codes to numbers outside the UK, so yours is in your inbox.";
+      }
+
+      if (!byEmail && smsConfigured && !emailReason) {
         const params = new URLSearchParams({
           To: phone,
           Body: `Your Apexia VIP access code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
@@ -209,7 +215,7 @@ serve(async (req) => {
           // A number we are not allowed to text is not a reason to lock a
           // member out, as long as we hold an email address for them
           if (refusal && PERMANENT_TWILIO_CODES.has(refusal) && RESEND_API_KEY && profile.email) {
-            smsRefused = true;
+            emailReason = "We cannot text that number, so your code has been emailed instead.";
           } else {
             return json(502, { error: "We could not send the SMS. Please try again." });
           }
@@ -246,9 +252,7 @@ serve(async (req) => {
         success: true,
         channel: "email",
         sent_to: maskEmail(profile.email),
-        ...(smsRefused
-          ? { note: "We cannot text that number, so your code has been emailed instead." }
-          : {}),
+        ...(emailReason ? { note: emailReason } : {}),
       });
     }
 
