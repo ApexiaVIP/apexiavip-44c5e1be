@@ -107,7 +107,7 @@ const Admin = () => {
   const [resetPhone, setResetPhone] = useState("");
 
   // People who asked to join through the website, waiting on the office
-  const { data: applications } = useQuery({
+  const { data: applications, error: applicationsError } = useQuery({
     queryKey: ["admin-applications"],
     queryFn: async () =>
       (await invokeAdmin({ action: "list_applications" })).applications as Application[],
@@ -584,6 +584,19 @@ const Admin = () => {
 
         {/* Applications waiting on the office, before the member lists, because
             somebody is sitting there expecting a reply */}
+        {/* A queue that failed to load looks exactly like an empty one, which
+            leaves the office wondering where an application went */}
+        {applicationsError && (
+          <div className="border border-destructive/50 p-4 mb-8">
+            <p className="text-destructive text-sm">
+              Could not load applications: {(applicationsError as Error).message}
+            </p>
+            <p className="text-smoke text-xs mt-1">
+              Anything submitted is still saved. Nothing has been lost.
+            </p>
+          </div>
+        )}
+
         {(applications?.length ?? 0) > 0 && (
           <div className="mb-12">
             <div className="flex items-baseline gap-3 mb-4">
