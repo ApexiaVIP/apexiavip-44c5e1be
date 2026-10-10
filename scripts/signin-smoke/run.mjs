@@ -67,12 +67,19 @@ const is = (label, got, want) => {
   console.log(`${ok ? "ok  " : "FAIL"}  ${label}${ok ? "" : `  (got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)})`}`);
 };
 
-// A number outside the UK is emailed without troubling the network at all
+// An overseas number is texted like any other, because plenty of countries work
 twilio = { ok: true };
 let r = await start();
-is("an overseas number is emailed, not texted", r.payload.channel, "email");
+is("an overseas number is texted like any other", r.payload.channel, "sms");
+is("and nothing is emailed", lastEmailTo, null);
+
+// Only when the network will not carry it does the code go by email
+twilio = { ok: false, body: JSON.stringify({ code: 21408 }) };
+r = await start();
+is("an overseas number we cannot text is emailed", r.payload.channel, "email");
 is("to the address we hold", lastEmailTo, MEMBER.email);
-is("and the member is told why", String(r.payload.note).includes("outside the UK"), true);
+is("and the member is told why", String(r.payload.note).includes("cannot text"), true);
+twilio = { ok: true };
 
 // A UK mobile still gets a text, which is what members here expect
 globalThis.__tables.profiles = [{ ...MEMBER, phone: "+447700900123" }];

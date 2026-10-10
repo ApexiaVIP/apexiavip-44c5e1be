@@ -183,14 +183,10 @@ serve(async (req) => {
       // Why the code went by email rather than by text, when it did
       let emailReason: string | null = null;
 
-      // A text to a UK mobile is reliable. Beyond that the rules change country
-      // by country, each needing its own registration, so a member abroad is
-      // sent their code by email, which arrives everywhere.
-      if (!byEmail && !phone.startsWith("+44") && RESEND_API_KEY && profile.email) {
-        emailReason = "We email access codes to numbers outside the UK, so yours is in your inbox.";
-      }
-
-      if (!byEmail && smsConfigured && !emailReason) {
+      // Every number is texted, wherever it is: plenty of countries work, and a
+      // member abroad should get the same text a member here does. Only when
+      // the network will not carry it does the code go to their email instead.
+      if (!byEmail && smsConfigured) {
         const params = new URLSearchParams({
           To: phone,
           Body: `Your Apexia VIP access code is ${code}. It expires in ${CODE_TTL_MINUTES} minutes.`,
