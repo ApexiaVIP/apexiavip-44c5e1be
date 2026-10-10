@@ -285,6 +285,50 @@ serve(async (req) => {
       return json(200, { success: true, is_driver: isDriver });
     }
 
+    // Correcting a member's details. A member invited by mobile alone has no
+    // address to send a code to, which strands anyone we cannot text, and the
+    // office had no way to add one.
+    if (action === "update_member") {
+      const userId = body?.user_id;
+      if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });
+
+      const patch: Record<string, string> = {};
+
+      if (typeof body.full_name === "string") {
+        const fullName = body.full_name.trim();
+        if (fullName.length > 100) return json(400, { error: "Invalid name" });
+        patch.full_name = fullName;
+      }
+
+      if (typeof body.email === "string") {
+        const email = body.email.trim().toLowerCase();
+        if (email) {
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 255) {
+            return json(400, { error: "Invalid email" });
+          }
+          // Signing in by email refuses an address held by two memberships,
+          // so one must never be created here
+          const pattern = email.replace(/([\\%_])/g, "\\$1");
+          const { data: clash } = await admin
+            .from("profiles")
+            .select("id")
+            .ilike("email", pattern)
+            .neq("id", userId)
+            .limit(1);
+          if ((clash?.length ?? 0) > 0) {
+            return json(400, { error: "Another membership already uses that email address." });
+          }
+        }
+        patch.email = email;
+      }
+
+      if (Object.keys(patch).length === 0) return json(400, { error: "Nothing to change" });
+
+      const { error } = await admin.from("profiles").update(patch).eq("id", userId);
+      if (error) throw error;
+      return json(200, { success: true });
+    }
+
     if (action === "approve_family" || action === "reject_family") {
       const userId = body?.user_id;
       if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });

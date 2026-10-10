@@ -84,6 +84,9 @@ const Admin = () => {
   const [countryCode, setCountryCode] = useState("+44");
   const [phone, setPhone] = useState("");
   const [resetTarget, setResetTarget] = useState<Member | null>(null);
+  const [editTarget, setEditTarget] = useState<Member | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
   const [resetCountryCode, setResetCountryCode] = useState("+44");
   const [resetPhone, setResetPhone] = useState("");
 
@@ -144,6 +147,28 @@ const Admin = () => {
     onError: (err: Error) => {
       toast({ title: "Reset failed", description: err.message, variant: "destructive" });
     },
+  });
+
+  // Correcting a member's details, above all adding an address for someone
+  // invited by mobile alone, who otherwise has nowhere to receive a code
+  const updateMember = useMutation({
+    mutationFn: () =>
+      invokeAdmin({
+        action: "update_member",
+        user_id: editTarget!.id,
+        full_name: editName.trim(),
+        email: editEmail.trim(),
+      }),
+    onSuccess: () => {
+      toast({
+        title: "Member updated",
+        description: "They can now be sent a sign-in code by email.",
+      });
+      setEditTarget(null);
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Could not save", description: err.message, variant: "destructive" }),
   });
 
   // The office drive to test the chauffeur app, so switching is a button
@@ -266,6 +291,20 @@ const Admin = () => {
                         })}
                       </TableCell>
                       <TableCell className="text-right space-x-2">
+                        {!pending && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setEditName(m.full_name ?? "");
+                              setEditEmail(m.email ?? "");
+                              setEditTarget(m);
+                            }}
+                            className="text-smoke hover:text-champagne"
+                          >
+                            Edit
+                          </Button>
+                        )}
                         {!revoked && !pending && (
                           <Button
                             size="sm"
@@ -548,6 +587,56 @@ const Admin = () => {
             ))}
           </div>
         )}
+
+        <Dialog
+          open={!!editTarget}
+          onOpenChange={(open) => {
+            if (!open) setEditTarget(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                Edit {editTarget?.full_name || editTarget?.phone}
+              </DialogTitle>
+              <DialogDescription>
+                An email address lets them receive a sign-in code when we cannot text
+                their number, which is how members abroad get in.
+              </DialogDescription>
+            </DialogHeader>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                updateMember.mutate();
+              }}
+              className="space-y-4 mt-2"
+            >
+              <Input
+                placeholder="Full name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                maxLength={100}
+              />
+              <Input
+                type="email"
+                placeholder="Email address"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                maxLength={255}
+              />
+              <p className="text-smoke text-xs">
+                Mobile is {editTarget?.phone || "not set"}. To change it, use Reset 2FA.
+              </p>
+              <Button
+                type="submit"
+                disabled={updateMember.isPending}
+                className="w-full tracking-[0.15em] uppercase"
+              >
+                {updateMember.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         <Dialog
           open={!!resetTarget}
