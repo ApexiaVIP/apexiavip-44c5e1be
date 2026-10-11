@@ -41,6 +41,17 @@ await esbuild.build({
   ],
 });
 
+// Rows the stubbed database answers with. The stub applies the filters the
+// function gives it, so these have to carry the columns it actually asks for.
+globalThis.__tables = {
+  mfa_sessions: [{ id: "mfa-1", session_id: "session-1" }],
+  profiles: [
+    { id: "user-1", status: "active", primary_member_id: null, full_name: "A Member", phone: "+447700900123" },
+  ],
+  rate_limits: [],
+  bookings: [],
+};
+
 globalThis.Deno = {
   env: {
     get: (key) =>
@@ -147,5 +158,37 @@ for (const [label, body, flags, expectSuccess] of cases) {
   console.log(line);
 }
 
-console.log(`\n${cases.length - failures}/${cases.length} passed`);
+// --- A family member books on the account holder's account ---
+globalThis.__tables.profiles = [
+  { id: "user-1", status: "active", primary_member_id: "holder-1", full_name: "Aleena Hussain", phone: "+447483222299" },
+  { id: "holder-1", status: "active", primary_member_id: null, full_name: "Faz Hussain", phone: "+447770995665" },
+];
+let familyMail = null;
+const realFetch2 = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  if (String(url).includes("api.resend.com")) familyMail = JSON.parse(init.body);
+  return realFetch2(url, init);
+};
+Object.assign(net, { dispatch: "ok", resend: "ok" });
+await handler(
+  new Request("https://example.test/send-booking", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(booking()),
+  })
+);
+if (!(familyMail && familyMail.subject.includes("for Faz Hussain"))) failures++;
+console.log(
+  familyMail && familyMail.subject.includes("for Faz Hussain")
+    ? "ok    the office is told whose account it is, in the subject"
+    : "FAIL  the subject does not name the account holder"
+);
+if (!(familyMail && familyMail.html.includes("Faz Hussain") && familyMail.html.includes("+447770995665"))) failures++;
+console.log(
+  familyMail && familyMail.html.includes("Faz Hussain") && familyMail.html.includes("+447770995665")
+    ? "ok    and in the booking itself"
+    : "FAIL  the email does not name the account holder"
+);
+
+console.log(`\n${cases.length + 2 - failures}/${cases.length + 2} passed`);
 process.exit(failures > 0 ? 1 : 0);

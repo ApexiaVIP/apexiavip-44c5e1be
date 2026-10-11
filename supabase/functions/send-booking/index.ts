@@ -149,13 +149,30 @@ serve(async (req) => {
 
     const { data: memberProfile } = await supabase
       .from("profiles")
-      .select("status")
+      .select("status, primary_member_id")
       .eq("id", userData.user.id)
       .maybeSingle();
     if (!memberProfile || memberProfile.status !== "active") {
       return new Response(JSON.stringify({ success: false, error: "Membership not active" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // A family member books on someone else's account. Without saying whose,
+    // the office sees only the passenger and has nothing to bill against.
+    let accountHolder: { full_name: string; phone: string } | null = null;
+    if (memberProfile.primary_member_id) {
+      const { data: holder } = await supabase
+        .from("profiles")
+        .select("full_name, phone")
+        .eq("id", memberProfile.primary_member_id)
+        .maybeSingle();
+      if (holder) {
+        accountHolder = {
+          full_name: (holder.full_name as string) ?? "",
+          phone: (holder.phone as string) ?? "",
+        };
+      }
     }
 
     const body = await req.json();
@@ -420,6 +437,7 @@ serve(async (req) => {
         : journeyType === "hourly"
           ? `VEHICLE: ${vehicle.toUpperCase()}. As directed hire: ${asDirectedHours} hours.`
           : `VEHICLE: ${vehicle.toUpperCase()}`,
+      ...(accountHolder ? [`ACCOUNT: ${accountHolder.full_name}`] : []),
       ...detailLines({ children, clientCar, business, notes }),
     ].join(" | ");
 
@@ -654,6 +672,13 @@ serve(async (req) => {
         </h1>
         <table style="width: 100%; margin-top: 24px; border-collapse: collapse;">
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Name</td><td style="padding: 12px 0;">${safeName}</td></tr>
+          ${
+            accountHolder
+              ? `<tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Account</td><td style="padding: 12px 0; color: #e0c341;">${sanitize(
+                  accountHolder.full_name
+                )}${accountHolder.phone ? ` &middot; ${sanitize(accountHolder.phone)}` : ""}</td></tr>`
+              : ""
+          }
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Email</td><td style="padding: 12px 0;">${safeEmail}</td></tr>
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Phone</td><td style="padding: 12px 0;">${safePhone}</td></tr>
           <tr><td style="padding: 12px 0; color: #8a8070; font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em;">Travel Date</td><td style="padding: 12px 0;">${safeTravelDate}</td></tr>
@@ -705,7 +730,7 @@ serve(async (req) => {
             : dispatchFailureMessage
               ? "ACTION NEEDED - NOT IN DISPATCH (ENTER BY HAND)"
               : "Booking Enquiry"
-        }: ${safeName} (${safeVehicle})${clientCar ? " - CLIENT'S OWN CAR" : ""}${
+        }: ${safeName}${accountHolder ? ` for ${sanitize(accountHolder.full_name)}` : ""} (${safeVehicle})${clientCar ? " - CLIENT'S OWN CAR" : ""}${
           children.length > 0 ? " - CHILD SEATS" : ""
         }${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}${
           availability ? " - SUBJECT TO AVAILABILITY" : ""
