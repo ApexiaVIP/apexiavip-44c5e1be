@@ -20,6 +20,8 @@ interface Suggestion {
   town: string;
   postcode: string;
   country: string;
+  /** Distance from the home patch, used only for ordering */
+  miles?: number;
 }
 
 const json = (status: number, body: unknown) =>
@@ -61,8 +63,15 @@ const searchPostcode = async (query: string): Promise<Suggestion[]> => {
   ];
 };
 
-/** Places, landmarks and street addresses via Photon (OpenStreetMap) */
-const searchPhoton = async (query: string): Promise<Suggestion[]> => {
+/** Roughly how far a result is from the home patch, for ordering. */
+const milesFromHome = (lat: number, lon: number): number => {
+  const dLat = (lat - BIAS_LAT) * 69;
+  const dLon = (lon - BIAS_LON) * 69 * Math.cos((BIAS_LAT * Math.PI) / 180);
+  return Math.sqrt(dLat * dLat + dLon * dLon);
+};
+
+/** One pass at Photon, which matches on the words given and nothing else. */
+const photonOnce = async (query: string): Promise<Suggestion[]> => {
   const url =
     `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}` +
     `&limit=${MAX_RESULTS}&lang=en&lat=${BIAS_LAT}&lon=${BIAS_LON}`;
@@ -86,16 +95,37 @@ const searchPhoton = async (query: string): Promise<Suggestion[]> => {
       town,
       postcode: p.postcode || "",
       country: p.countrycode === "GB" ? "United Kingdom" : countryName(p.countrycode, p.country || ""),
+      miles: Array.isArray(feature?.geometry?.coordinates)
+        ? milesFromHome(feature.geometry.coordinates[1], feature.geometry.coordinates[0])
+        : undefined,
     };
     if (!suggestions.some((s) => s.label === suggestion.label)) {
       suggestions.push(suggestion);
     }
   }
-  // Home market first
-  suggestions.sort((a, b) =>
-    a.country === b.country ? 0 : a.country === "United Kingdom" ? -1 : 1
-  );
+  // Nearest first, home market above everywhere else. Someone in Manchester
+  // searching for a restaurant means the Manchester one, not the London one
+  // that happens to share its name.
+  suggestions.sort((a, b) => {
+    if (a.country !== b.country) return a.country === "United Kingdom" ? -1 : 1;
+    return (a.miles ?? 1e9) - (b.miles ?? 1e9);
+  });
   return suggestions.slice(0, MAX_RESULTS);
+};
+
+/**
+ * Photon matches on every word it is given, so a query with a district or a
+ * city tacked on, which is exactly how people type a restaurant, finds
+ * nothing at all rather than finding the place and ignoring the extra. Each
+ * trailing word is dropped in turn until something comes back.
+ */
+const searchPhoton = async (query: string): Promise<Suggestion[]> => {
+  const words = query.trim().split(/\s+/);
+  for (let keep = words.length; keep >= 2; keep--) {
+    const found = await photonOnce(words.slice(0, keep).join(" "));
+    if (found.length > 0) return found;
+  }
+  return words.length === 1 ? photonOnce(query) : [];
 };
 
 /** Google Places (Text Search, New) when a key is configured: best-in-class results */
