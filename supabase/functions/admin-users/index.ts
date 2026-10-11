@@ -421,6 +421,45 @@ serve(async (req) => {
         patch.email = email;
       }
 
+      // Putting someone on another member's account, which normally happens
+      // when the primary member adds them. Anyone added another way had no
+      // way of being linked up afterwards.
+      if ("primary_member_id" in body) {
+        const primaryId = body.primary_member_id;
+        if (primaryId === null || primaryId === "") {
+          patch.primary_member_id = null as unknown as string;
+        } else if (typeof primaryId !== "string") {
+          return json(400, { error: "Invalid account" });
+        } else if (primaryId === userId) {
+          return json(400, { error: "Someone cannot be on their own account" });
+        } else {
+          const { data: primary } = await admin
+            .from("profiles")
+            .select("id, primary_member_id, status")
+            .eq("id", primaryId)
+            .maybeSingle();
+          if (!primary) return json(400, { error: "No such account" });
+          // One level only: a family member cannot themselves hold a family
+          if (primary.primary_member_id) {
+            return json(400, {
+              error: "That member is already on someone else's account, so others cannot be added to theirs.",
+            });
+          }
+          // And nobody already holding a family can be moved onto another
+          const { data: theirFamily } = await admin
+            .from("profiles")
+            .select("id")
+            .eq("primary_member_id", userId)
+            .limit(1);
+          if ((theirFamily?.length ?? 0) > 0) {
+            return json(400, {
+              error: "This member has family on their own account, so they cannot be moved onto another.",
+            });
+          }
+          patch.primary_member_id = primaryId;
+        }
+      }
+
       if (Object.keys(patch).length === 0) return json(400, { error: "Nothing to change" });
 
       const { error } = await admin.from("profiles").update(patch).eq("id", userId);

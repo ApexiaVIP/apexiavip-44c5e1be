@@ -103,6 +103,7 @@ const Admin = () => {
   const [editTarget, setEditTarget] = useState<Member | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  const [editPrimary, setEditPrimary] = useState("");
   const [resetCountryCode, setResetCountryCode] = useState("+44");
   const [resetPhone, setResetPhone] = useState("");
 
@@ -202,6 +203,7 @@ const Admin = () => {
         user_id: editTarget!.id,
         full_name: editName.trim(),
         email: editEmail.trim(),
+        primary_member_id: editPrimary || null,
       }),
     onSuccess: () => {
       toast({
@@ -342,6 +344,7 @@ const Admin = () => {
                             onClick={() => {
                               setEditName(m.full_name ?? "");
                               setEditEmail(m.email ?? "");
+                              setEditPrimary(m.primary_member_id ?? "");
                               setEditTarget(m);
                             }}
                             className="text-smoke hover:text-champagne"
@@ -753,6 +756,28 @@ const Admin = () => {
                 onChange={(e) => setEditEmail(e.target.value)}
                 maxLength={255}
               />
+              <div>
+                <label className="block text-smoke text-[11px] tracking-[0.18em] uppercase mb-2">
+                  On whose account
+                </label>
+                <select
+                  value={editPrimary}
+                  onChange={(e) => setEditPrimary(e.target.value)}
+                  className="w-full h-10 bg-transparent border border-border rounded-none px-3 text-sm text-foreground outline-none"
+                >
+                  <option value="">Their own account</option>
+                  {(members ?? [])
+                    .filter((m) => m.id !== editTarget?.id && !m.primary_member_id)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.full_name || m.phone || m.email}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-smoke text-xs mt-2">
+                  A family member's bookings show on the account holder's own list.
+                </p>
+              </div>
               <p className="text-smoke text-xs">
                 Mobile is {editTarget?.phone || "not set"}. To change it, use Reset 2FA.
               </p>
