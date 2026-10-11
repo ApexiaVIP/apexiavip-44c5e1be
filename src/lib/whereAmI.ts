@@ -63,11 +63,13 @@ export const currentPlace = async (): Promise<Place> => {
  *
  * The callback fires on a steady beat rather than on every movement, so the
  * map keeps a fresh time even when the car is sat at lights, and a motorway
- * run does not send hundreds of updates. Returns a function that stops it.
+ * run does not send hundreds of updates. The phone is already tracking
+ * continuously either way, so a shorter beat costs battery nothing and only
+ * adds a small request. Returns a function that stops it.
  */
 export const followPosition = (
   onFix: (lat: number, lng: number) => void,
-  everyMs = 20000
+  everyMs = 6000
 ): (() => void) => {
   if (typeof navigator === "undefined" || !navigator.geolocation) return () => {};
   let latest: { lat: number; lng: number } | null = null;

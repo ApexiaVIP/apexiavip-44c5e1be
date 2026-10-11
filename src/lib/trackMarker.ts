@@ -7,8 +7,13 @@
  * the difference between "is this working?" and a live map.
  */
 
-/** How long the car takes to glide to a newly reported position. */
-export const GLIDE_MS = 1200;
+/**
+ * How long the car takes to glide to a newly reported position.
+ *
+ * Close to the gap between reports, so the car is almost always moving rather
+ * than darting and then sitting still, which reads as a map that has frozen.
+ */
+export const GLIDE_MS = 4000;
 
 /** Below this many metres a new fix is GPS noise, not a change of direction. */
 const HEADING_THRESHOLD_M = 8;

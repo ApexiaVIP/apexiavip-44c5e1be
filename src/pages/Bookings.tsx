@@ -165,12 +165,12 @@ const Bookings = () => {
     enabled: !!user && mfaVerified,
     // The chauffeur's app reports progress and position here, so the member
     // sees the car move without having to pull the screen down. The chauffeur
-    // reports every twenty seconds, so asking every ten keeps the map close
-    // to live while a car is out, and backs off when none is.
+    // reports every six seconds, so asking every four keeps the map as live as
+    // the car can make it, and backs off to half a minute when none is out.
     refetchInterval: (query) => {
       const rows = (query.state.data ?? []) as BookingRow[];
       const working = rows.some((b) => b.driver_status && b.driver_status !== "clear");
-      return working ? 10_000 : 20_000;
+      return working ? 4_000 : 30_000;
     },
     refetchOnWindowFocus: true,
   });
