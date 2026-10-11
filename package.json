@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest",
+    "test:watch": "node scripts/watch-smoke/run.mjs",
     "build:native": "VITE_NATIVE_BUILD=true vite build",
     "ios:sync": "npm run build:native && npx cap sync ios",
     "test:booking": "node scripts/booking-smoke/run.mjs",
@@ -19,7 +19,7 @@
     "test:live": "node scripts/booking-live.test.mjs",
     "test:fixtures": "node scripts/fixture-calendar.test.mjs",
     "typecheck": "tsc -b",
-    "check": "npm run typecheck && npm run test:queue && npm run test:live && npm run test:fixtures && npm run test:signin && npm run test:booking && npm run test:timesheets",
+    "check": "npm run typecheck && npm run test:queue && npm run test:live && npm run test:fixtures && npm run test:watch && npm run test:signin && npm run test:booking && npm run test:timesheets",
     "test:signin": "node scripts/signin-smoke/run.mjs"
   },
   "dependencies": {

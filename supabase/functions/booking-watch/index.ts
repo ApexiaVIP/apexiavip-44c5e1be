@@ -179,16 +179,18 @@ serve(async (req) => {
         details.push({ reference: b.reference, outcome: "not returned by the booking system" });
         continue;
       }
-      if (status === b.status) {
-        details.push({ reference: b.reference, status, outcome: "unchanged" });
-        continue;
+      // Whether the stored status changed is the wrong question to ask. The
+      // passenger's own app writes that column too, every time they open their
+      // bookings, so a member eager enough to look swallowed their own change
+      // and the text was never sent. What matters is what we have told them,
+      // which is what notified_status records.
+      if (status !== b.status) {
+        changed += 1;
+        await admin
+          .from("bookings")
+          .update({ status, status_checked_at: new Date().toISOString() })
+          .eq("reference", b.reference);
       }
-
-      changed += 1;
-      await admin
-        .from("bookings")
-        .update({ status, status_checked_at: new Date().toISOString() })
-        .eq("reference", b.reference);
 
       const moment = classify(status);
       if (!moment) {
