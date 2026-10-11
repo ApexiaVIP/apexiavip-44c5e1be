@@ -20,14 +20,19 @@ interface Props {
 }
 
 /**
- * The map for devices without WebGL, which the vector map needs. Esri's dark
- * canvas is drawn dark at source, unlike the old arrangement of a light
- * OpenStreetMap turned dark with a CSS filter, which came out muddy and left
- * the labels fighting the roads.
+ * A clean, light map, close in on the car.
+ *
+ * A passenger wants one thing from this: where is my car, right now. So it is
+ * drawn pale with the roads picked out in white, and it stays zoomed in on
+ * the car rather than pulling back to fit the whole journey, which left the
+ * car a speck somewhere in Greater Manchester.
  */
-const BASE = "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
-const LABELS = "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}";
+const BASE = "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+const LABELS = "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}";
 const ATTRIBUTION = "&copy; Esri &copy; OpenStreetMap contributors";
+
+/** Close enough to see which street the car is on. */
+const FOLLOW_ZOOM = 16;
 
 const carIcon = L.divIcon({ className: "", html: carElement().innerHTML, iconSize: [30, 30], iconAnchor: [15, 15] });
 const pickupIcon = L.divIcon({ className: "", html: pickupElement().innerHTML, iconSize: [14, 14], iconAnchor: [7, 7] });
@@ -43,7 +48,7 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const map = L.map(containerRef.current, { zoomControl: false }).setView([lat, lng], 14);
+    const map = L.map(containerRef.current, { zoomControl: false }).setView([lat, lng], FOLLOW_ZOOM);
     L.tileLayer(BASE, { attribution: ATTRIBUTION, maxZoom: 16 }).addTo(map);
     L.tileLayer(LABELS, { maxZoom: 16 }).addTo(map);
     carRef.current = L.marker([lat, lng], { icon: carIcon }).addTo(map);
@@ -52,7 +57,7 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
     // this, any subsequent fitBounds computes against a zero-height box
     requestAnimationFrame(() => {
       map.invalidateSize();
-      map.setView([lat, lng], 14);
+      map.setView([lat, lng], FOLLOW_ZOOM);
     });
     return () => {
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
@@ -88,12 +93,12 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
       frameRef.current = requestAnimationFrame(step);
     }
 
-    // Keep the driver comfortably inside the view rather than hugging an edge
+    // Keep the car near the middle at the same zoom, rather than letting it
+    // wander to an edge and clip. Below about twenty five metres the movement
+    // is GPS jitter and panning for it would make the map twitch.
     const position = L.latLng(lat, lng);
-    if (!map.getBounds().pad(-0.2).contains(position)) {
-      const pickup = pickupRef.current?.getLatLng();
-      if (pickup) map.fitBounds(L.latLngBounds(position, pickup), { padding: [40, 40], maxZoom: 15 });
-      else map.panTo(position);
+    if (moved > 25 || !map.getBounds().pad(-0.25).contains(position)) {
+      map.panTo(position, { animate: true, duration: 0.8 });
     }
   }, [lat, lng]);
 
@@ -104,14 +109,6 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
       const map = mapRef.current;
       if (cancelled || !map || !point) return;
       pickupRef.current = L.marker([point.lat, point.lng], { icon: pickupIcon }).addTo(map);
-      if (!fittedRef.current) {
-        fittedRef.current = true;
-        const bounds = L.latLngBounds([lat, lng], [point.lat, point.lng]);
-        requestAnimationFrame(() => {
-          map.invalidateSize();
-          map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
-        });
-      }
     });
     return () => {
       cancelled = true;

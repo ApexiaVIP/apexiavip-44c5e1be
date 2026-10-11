@@ -15,11 +15,11 @@ const HEADING_THRESHOLD_M = 8;
 
 export const CAR_SVG = `
 <svg viewBox="0 0 28 28" width="30" height="30" aria-hidden="true">
-  <path d="M14 2.6c2.1 0 3.6 1.7 4 4l.6 3.4c.3 1.7.4 3.4.4 5.1v5.2c0 1.3-.5 2.4-1.4 3l-.8.5a1 1 0 0 1-.6.2h-4.4a1 1 0 0 1-.6-.2l-.8-.5c-.9-.6-1.4-1.7-1.4-3v-5.2c0-1.7.1-3.4.4-5.1l.6-3.4c.4-2.3 1.9-4 4-4Z" fill="#c2a468"/>
-  <path d="M11.5 7.3h5l.5 2.6a11 11 0 0 0-6 0Z" fill="#17140f"/>
-  <path d="M11.2 19.2a13 13 0 0 0 5.6 0l-.3 1.9a12 12 0 0 1-5 0Z" fill="#17140f" opacity="0.85"/>
-  <rect x="8.2" y="10.3" width="1.6" height="1.3" rx="0.65" fill="#c2a468"/>
-  <rect x="18.2" y="10.3" width="1.6" height="1.3" rx="0.65" fill="#c2a468"/>
+  <path d="M14 2.6c2.1 0 3.6 1.7 4 4l.6 3.4c.3 1.7.4 3.4.4 5.1v5.2c0 1.3-.5 2.4-1.4 3l-.8.5a1 1 0 0 1-.6.2h-4.4a1 1 0 0 1-.6-.2l-.8-.5c-.9-.6-1.4-1.7-1.4-3v-5.2c0-1.7.1-3.4.4-5.1l.6-3.4c.4-2.3 1.9-4 4-4Z" fill="#14120f"/>
+  <path d="M11.5 7.3h5l.5 2.6a11 11 0 0 0-6 0Z" fill="#cdbb95"/>
+  <path d="M11.2 19.2a13 13 0 0 0 5.6 0l-.3 1.9a12 12 0 0 1-5 0Z" fill="#cdbb95" opacity="0.85"/>
+  <rect x="8.2" y="10.3" width="1.6" height="1.3" rx="0.65" fill="#14120f"/>
+  <rect x="18.2" y="10.3" width="1.6" height="1.3" rx="0.65" fill="#14120f"/>
 </svg>`;
 
 /** The marker element: an outer box the map positions, an inner box we turn. */
@@ -29,7 +29,7 @@ export const carElement = (): HTMLDivElement => {
   el.style.height = "30px";
   el.innerHTML =
     `<div class="apx-car" style="width:30px;height:30px;transform:rotate(0deg);` +
-    `transform-origin:50% 50%;filter:drop-shadow(0 0 7px rgba(194,164,104,0.7))">${CAR_SVG}</div>`;
+    `transform-origin:50% 50%;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35))">${CAR_SVG}</div>`;
   return el;
 };
 
@@ -38,8 +38,8 @@ export const pickupElement = (): HTMLDivElement => {
   el.style.width = "14px";
   el.style.height = "14px";
   el.innerHTML =
-    '<div style="width:14px;height:14px;border-radius:50%;background:rgba(194,164,104,0.18);' +
-    'border:2px solid #c2a468;box-shadow:0 0 0 4px rgba(194,164,104,0.12)"></div>';
+    '<div style="width:14px;height:14px;border-radius:50%;background:#ffffff;' +
+    'border:3px solid #14120f;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>';
   return el;
 };
 

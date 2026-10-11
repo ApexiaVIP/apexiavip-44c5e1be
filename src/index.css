@@ -173,14 +173,14 @@
 /* Both maps are drawn dark at source. The old arrangement inverted a light
    basemap with a CSS filter, which is what made it look muddy. */
 .apx-map {
-  background: #0b0a08;
+  background: #f2f1ee;
 }
 .apx-map.leaflet-container {
   font-family: inherit;
 }
 .apx-map .leaflet-control-attribution,
 .apx-map .maplibregl-ctrl-attrib {
-  background: rgba(10, 10, 8, 0.7);
+  background: rgba(255, 255, 255, 0.75);
   color: #6b6355;
   font-size: 9px;
 }
