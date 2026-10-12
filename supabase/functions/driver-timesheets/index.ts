@@ -42,6 +42,16 @@ const REPORT_AFTER_MINUTES = 30;
 const QUIET_MINUTES = REPORT_AFTER_MINUTES;
 
 /**
+ * The longest a single shift can contribute to one day.
+ *
+ * A chauffeur who forgets to sign off leaves the clock running, and a shift
+ * spanning a weekend would otherwise report a flat twenty four hours for the
+ * Saturday as though it had been worked. Nobody is paid on a figure nobody
+ * checked, so it is capped and said plainly instead.
+ */
+const MAX_SHIFT_HOURS = 14;
+
+/**
  * How far back a finished job is still worth reporting one at a time.
  * Anything older than this belongs to a day the office has already had a
  * sheet for, and must not arrive as if it had just happened.
@@ -105,14 +115,23 @@ const addressLine = (a: Job["pickup"]) =>
 const minutesOnDuty = (shifts: Shift[], from: Date, to: Date) => {
   let minutes = 0;
   let stillOpen = false;
+  let capped = false;
   for (const s of shifts) {
     const start = Math.max(new Date(s.started_at).getTime(), from.getTime());
     const rawEnd = s.ended_at ? new Date(s.ended_at).getTime() : to.getTime();
     if (!s.ended_at) stillOpen = true;
     const end = Math.min(rawEnd, to.getTime());
-    if (end > start) minutes += (end - start) / 60000;
+    if (end <= start) continue;
+    const worked = (end - start) / 60000;
+    // A shift left running does not become a longer day
+    if (worked > MAX_SHIFT_HOURS * 60) {
+      capped = true;
+      minutes += MAX_SHIFT_HOURS * 60;
+    } else {
+      minutes += worked;
+    }
   }
-  return { minutes, stillOpen };
+  return { minutes, stillOpen, capped };
 };
 
 const esc = (v: unknown) =>
@@ -365,7 +384,7 @@ serve(async (req) => {
         // what actually happened
         if (mine.length === 0 && myJobs.length === 0) continue;
 
-        const { minutes, stillOpen } = minutesOnDuty(mine, from, to);
+        const { minutes, stillOpen, capped } = minutesOnDuty(mine, from, to);
         const signOn = mine.map((s) => ukTimeOf(s.started_at)).join(", ") || "not signed on";
         const signOff = mine.some((s) => !s.ended_at)
           ? "still on duty"
@@ -401,6 +420,11 @@ serve(async (req) => {
 
         const flags: string[] = [];
         if (stillOpen) flags.push("Did not sign off, so hours run to midnight.");
+        if (capped) {
+          flags.push(
+            `A shift ran past ${MAX_SHIFT_HOURS} hours, so the hours here are capped and are not a day's work. Check what was actually worked before paying it.`
+          );
+        }
         if (unfinished.length > 0) {
           flags.push(
             `${unfinished.length} job${unfinished.length > 1 ? "s" : ""} started but never cleared: ${unfinished

@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { isInstalledApp } from "@/lib/appLinks";
-import { currentPlace, followPosition } from "@/lib/whereAmI";
+import { currentPlace, followPosition, keepScreenAwake } from "@/lib/whereAmI";
 import { splitJobs } from "@/lib/driverQueue";
 
 type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
@@ -186,11 +186,19 @@ const Driver = () => {
       : null;
   useEffect(() => {
     if (!reportingFor) return;
-    return followPosition((lat, lng) => {
+    // The phone suspends this app the moment it is locked or put away, and
+    // the passenger's map then freezes until the job ends. Holding the screen
+    // on keeps a mounted phone reporting for the whole journey.
+    const releaseScreen = keepScreenAwake();
+    const stopFollowing = followPosition((lat, lng) => {
       void supabase.functions.invoke("driver", {
         body: { action: "position", reference: reportingFor, lat, lng },
       });
     });
+    return () => {
+      stopFollowing();
+      releaseScreen();
+    };
   }, [reportingFor]);
 
   if (loading || (user && !mfaResolved)) {
@@ -526,7 +534,7 @@ const Driver = () => {
                   {reportingFor === current.reference && (
                     <p className="text-smoke/70 text-[11px] tracking-[0.1em] flex items-center gap-2">
                       <Navigation className="w-3 h-3 text-champagne" />
-                      Your passenger can see the car on their map until you clear this job
+                      Leave this screen open so your passenger can follow the car
                     </p>
                   )}
                   <div>{bigButtons(current)}</div>

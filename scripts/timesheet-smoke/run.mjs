@@ -179,6 +179,18 @@ check("and nothing is recorded as sent", !(globalThis.__writes ?? []).some((w) =
 const forced = await call({ mode: "daily", date: DAY });
 check("a named day is sent whatever else is happening", forced.sent.length === 2, `sent ${forced.sent.length}`);
 
+// --- A chauffeur who forgot to sign off over a weekend ---
+globalThis.__tables.driver_shifts = [
+  // Started Friday, not closed until Sunday: the Saturday in between would
+  // otherwise report a flat twenty four hours as though it were worked
+  { driver_id: "driver-1", started_at: "2026-10-10T15:10:00.000Z", ended_at: "2026-10-12T08:48:00.000Z" },
+];
+const saturday = await call({ mode: "daily", date: "2026-10-11" });
+const sat = saturday.sent.find((e) => e.subject.includes("Faz"));
+check("a day inside a forgotten shift is not billed as 24 hours", !!sat && !sat.html.includes("24h 00m"), sat?.html.match(/>(\d+h [0-9]+m)</)?.[1]);
+check("it is capped at the longest a shift can be", !!sat && sat.html.includes("14h 00m"));
+check("and the office is told not to pay it blind", !!sat && sat.html.includes("not a day's work"));
+
 const weekly = await call({ mode: "weekly", date: "2026-10-09" });
 check("the weekly summary is a single email", weekly.sent.length === 1, `sent ${weekly.sent.length}`);
 check("it says which week it covers", weekly.sent[0]?.subject.includes("week to Friday 9 October"), weekly.sent[0]?.subject);

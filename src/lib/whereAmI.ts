@@ -94,3 +94,55 @@ export const followPosition = (
     clearInterval(beat);
   };
 };
+
+/**
+ * Keep the screen awake while a job is running.
+ *
+ * The app only reports where the car is while it is actually on screen: the
+ * phone suspends it the moment it is locked or put away, and the passenger's
+ * map then freezes on the last position until the job ends. Holding the
+ * screen on keeps a mounted phone reporting for the whole journey.
+ *
+ * The lock is dropped by the phone whenever the app goes to the background,
+ * so it is taken again each time the app comes back. Returns a function that
+ * releases it.
+ */
+export const keepScreenAwake = (): (() => void) => {
+  interface Sentinel {
+    release: () => Promise<void>;
+  }
+  const lock = (navigator as unknown as {
+    wakeLock?: { request: (type: "screen") => Promise<Sentinel> };
+  }).wakeLock;
+  if (!lock) return () => {};
+
+  let held: Sentinel | null = null;
+  let stopped = false;
+
+  const take = async () => {
+    if (stopped || held || document.visibilityState !== "visible") return;
+    try {
+      held = await lock.request("screen");
+      // The phone drops it on its own when the app is backgrounded
+      (held as unknown as { onrelease?: () => void }).onrelease = () => {
+        held = null;
+      };
+    } catch {
+      // A phone that will not hold the screen on is not a reason to fail
+    }
+  };
+
+  const onVisible = () => {
+    if (document.visibilityState === "visible") void take();
+  };
+
+  void take();
+  document.addEventListener("visibilitychange", onVisible);
+
+  return () => {
+    stopped = true;
+    document.removeEventListener("visibilitychange", onVisible);
+    void held?.release().catch(() => {});
+    held = null;
+  };
+};
