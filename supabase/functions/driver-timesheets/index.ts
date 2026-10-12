@@ -52,6 +52,15 @@ const QUIET_MINUTES = REPORT_AFTER_MINUTES;
 const MAX_SHIFT_HOURS = 14;
 
 /**
+ * Steps pressed closer together than this were filled in after the event
+ * rather than as the job happened. The times then describe when the
+ * chauffeur caught up with the app, not when anything occurred, and the
+ * passenger saw no live tracking at all, because the car only reports its
+ * position once a job is under way.
+ */
+const CAUGHT_UP_WITHIN_SECONDS = 120;
+
+/**
  * How far back a finished job is still worth reporting one at a time.
  * Anything older than this belongs to a day the office has already had a
  * sheet for, and must not arrive as if it had just happened.
@@ -418,6 +427,17 @@ serve(async (req) => {
           })
           .join("");
 
+        // Steps all pressed at once mean the job was written up afterwards
+        const workedInRetrospect = myJobs.filter((j) => {
+          const steps = myPoints
+            .filter((w) => w.booking_reference === j.reference)
+            .filter((w) => ["en_route", "arrived", "pob"].includes(w.kind))
+            .map((w) => new Date(w.recorded_at).getTime())
+            .sort((a, b) => a - b);
+          if (steps.length < 3) return false;
+          return (steps[steps.length - 1] - steps[0]) / 1000 < CAUGHT_UP_WITHIN_SECONDS;
+        });
+
         const flags: string[] = [];
         if (stillOpen) flags.push("Did not sign off, so hours run to midnight.");
         if (capped) {
@@ -440,6 +460,15 @@ serve(async (req) => {
           );
         }
         if (minutes > 0 && myJobs.length === 0) flags.push("On duty with no jobs assigned.");
+        if (workedInRetrospect.length > 0) {
+          flags.push(
+            `${workedInRetrospect.length} job${
+              workedInRetrospect.length > 1 ? "s were" : " was"
+            } written up afterwards, every step pressed within two minutes: ${workedInRetrospect
+              .map((j) => esc(j.reference))
+              .join(", ")}. The times are when the app was filled in, not when anything happened, and the passenger had no live tracking.`
+          );
+        }
 
         const html = SHELL(
           `${esc(driver.full_name ?? "Chauffeur")} &middot; ${ukDayName(day)}`,

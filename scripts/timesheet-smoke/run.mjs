@@ -191,6 +191,30 @@ check("a day inside a forgotten shift is not billed as 24 hours", !!sat && !sat.
 check("it is capped at the longest a shift can be", !!sat && sat.html.includes("14h 00m"));
 check("and the office is told not to pay it blind", !!sat && sat.html.includes("not a day's work"));
 
+// --- A job written up after the event, which is what Arshad did ---
+globalThis.__tables.driver_shifts = [
+  { driver_id: "driver-1", started_at: uk("07:00"), ended_at: uk("15:30") },
+];
+globalThis.__tables.booking_waypoints = [
+  { driver_id: "driver-1", booking_reference: "APEXIA-1", kind: "en_route", place: "", note: "", recorded_at: uk("12:15") },
+  { driver_id: "driver-1", booking_reference: "APEXIA-1", kind: "arrived", place: "", note: "", recorded_at: uk("12:15") },
+  { driver_id: "driver-1", booking_reference: "APEXIA-1", kind: "pob", place: "", note: "", recorded_at: uk("12:15") },
+];
+const afterwards = await call({ mode: "daily", date: DAY });
+const catchUp = afterwards.sent.find((e) => e.subject.includes("Faz"));
+check("a job filled in all at once is called out", !!catchUp && catchUp.html.includes("written up afterwards"));
+check("and the office is told the times are not real", !!catchUp && catchUp.html.includes("not when anything happened"));
+
+// A job worked as it happened is left alone
+globalThis.__tables.booking_waypoints = [
+  { driver_id: "driver-1", booking_reference: "APEXIA-1", kind: "en_route", place: "", note: "", recorded_at: uk("08:40") },
+  { driver_id: "driver-1", booking_reference: "APEXIA-1", kind: "arrived", place: "", note: "", recorded_at: uk("08:55") },
+  { driver_id: "driver-1", booking_reference: "APEXIA-1", kind: "pob", place: "", note: "", recorded_at: uk("09:02") },
+];
+const properly = await call({ mode: "daily", date: DAY });
+const normal = properly.sent.find((e) => e.subject.includes("Faz"));
+check("a job worked as it happened is not accused", !!normal && !normal.html.includes("written up afterwards"));
+
 const weekly = await call({ mode: "weekly", date: "2026-10-09" });
 check("the weekly summary is a single email", weekly.sent.length === 1, `sent ${weekly.sent.length}`);
 check("it says which week it covers", weekly.sent[0]?.subject.includes("week to Friday 9 October"), weekly.sent[0]?.subject);
