@@ -286,6 +286,9 @@ interface RecentBooking {
   /** Who keyed it; the desk shares bookings, this just says who to ask */
   booked_by?: string;
   mine?: boolean;
+  notes?: string | null;
+  children?: { age: number }[] | null;
+  client_car?: { make_model?: string; registration?: string; client_travelling?: boolean } | null;
 }
 
 const emptyStop = (type: StopType): Stop => ({
@@ -387,6 +390,8 @@ const McfcPortal = () => {
   // Amending an existing car: its reference; Dispatch overwrites on resubmit
   const [amendRef, setAmendRef] = useState<string | null>(null);
   const [cancelConfirmRef, setCancelConfirmRef] = useState<string | null>(null);
+  // Reading a booking back, without touching it
+  const [viewingRef, setViewingRef] = useState<string | null>(null);
   const [cancellingRef, setCancellingRef] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
@@ -2243,124 +2248,234 @@ const McfcPortal = () => {
                     const confirming = cancelConfirmRef === b.reference;
                     const cancelling = cancellingRef === b.reference;
                     return (
-                      <tr
-                        key={b.reference ?? idx}
-                        className="border-t"
-                        style={{ borderColor: "rgba(28,44,91,0.12)" }}
-                      >
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          {b.travel_date}
-                          {b.collection_at && (
-                            <span style={{ color: `${NAVY}99` }}>
-                              {" "}
-                              {new Date(b.collection_at).toLocaleTimeString("en-GB", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                timeZone: "Europe/London",
-                              })}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">{b.vehicle}</td>
-                        <td className="px-4 py-3">
-                          {b.name}
-                          {b.booked_by && !b.mine && (
-                            <div className="text-[11px]" style={{ color: `${NAVY}99` }}>
-                              Booked by {b.booked_by}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          {(() => {
-                            const live = b.reference ? recentLive[b.reference] : undefined;
-                            if (live?.driver?.name) {
-                              return (
-                                <>
-                                  {live.driver.name}
-                                  {live.vehicle?.registration && (
-                                    <span style={{ color: `${NAVY}99` }}> {live.vehicle.registration}</span>
-                                  )}
-                                </>
-                              );
-                            }
-                            return <span style={{ color: `${NAVY}66` }}>Not yet assigned</span>;
-                          })()}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span
-                            className="inline-block px-2.5 py-1 text-[11px] tracking-[0.12em] uppercase text-white"
-                            style={{
-                              backgroundColor:
-                                b.status === "Failed" || b.status === "Cancelled"
-                                  ? "#b91c1c"
-                                  : b.status === "Amendment requested"
-                                    ? "#b45309"
-                                    : NAVY,
-                            }}
-                          >
+                      <>
+                        <tr
+                          key={b.reference ?? idx}
+                          className="border-t"
+                          style={{ borderColor: "rgba(28,44,91,0.12)" }}
+                        >
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {b.travel_date}
+                            {b.collection_at && (
+                              <span style={{ color: `${NAVY}99` }}>
+                                {" "}
+                                {new Date(b.collection_at).toLocaleTimeString("en-GB", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  timeZone: "Europe/London",
+                                })}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">{b.vehicle}</td>
+                          <td className="px-4 py-3">
+                            {b.name}
+                            {b.booked_by && !b.mine && (
+                              <div className="text-[11px]" style={{ color: `${NAVY}99` }}>
+                                Booked by {b.booked_by}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
                             {(() => {
-                              const live = b.reference ? recentLive[b.reference]?.bookingStatus : null;
-                              if (b.status === "Amendment requested") return "Change requested";
-                              if (live === "Dispatched") return "Chauffeur assigned";
-                              if (live === "En route to pickup") return "On the way";
-                              if (live === "At Pickup") return "Arrived";
-                              if (live === "Passenger on board") return "On board";
-                              if (live === "Cancelled") return "Cancelled";
-                              if (b.status === "Confirmed") return "Received";
-                              return b.status;
+                              const live = b.reference ? recentLive[b.reference] : undefined;
+                              if (live?.driver?.name) {
+                                return (
+                                  <>
+                                    {live.driver.name}
+                                    {live.vehicle?.registration && (
+                                      <span style={{ color: `${NAVY}99` }}> {live.vehicle.registration}</span>
+                                    )}
+                                  </>
+                                );
+                              }
+                              return <span style={{ color: `${NAVY}66` }}>Not yet assigned</span>;
                             })()}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-right">
-                          {actionable && (
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span
+                              className="inline-block px-2.5 py-1 text-[11px] tracking-[0.12em] uppercase text-white"
+                              style={{
+                                backgroundColor:
+                                  b.status === "Failed" || b.status === "Cancelled"
+                                    ? "#b91c1c"
+                                    : b.status === "Amendment requested"
+                                      ? "#b45309"
+                                      : NAVY,
+                              }}
+                            >
+                              {(() => {
+                                const live = b.reference ? recentLive[b.reference]?.bookingStatus : null;
+                                if (b.status === "Amendment requested") return "Change requested";
+                                if (live === "Dispatched") return "Chauffeur assigned";
+                                if (live === "En route to pickup") return "On the way";
+                                if (live === "At Pickup") return "Arrived";
+                                if (live === "Passenger on board") return "On board";
+                                if (live === "Cancelled") return "Cancelled";
+                                if (b.status === "Confirmed") return "Received";
+                                return b.status;
+                              })()}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-right">
                             <span className="inline-flex items-center gap-4 text-[11px] tracking-[0.12em] uppercase">
-                              {!confirming && (
-                                <button
-                                  type="button"
-                                  onClick={() => beginAmend(b)}
-                                  className="underline underline-offset-4 hover:opacity-70 transition-opacity"
-                                  style={{ color: NAVY }}
-                                >
-                                  Amend
-                                </button>
-                              )}
-                              {confirming ? (
-                                <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingRef(viewingRef === b.reference ? null : b.reference)
+                                }
+                                className="underline underline-offset-4 hover:opacity-70 transition-opacity"
+                                style={{ color: NAVY }}
+                              >
+                                {viewingRef === b.reference ? "Close" : "View"}
+                              </button>
+                            </span>
+                            {actionable && (
+                              <span className="inline-flex items-center gap-4 text-[11px] tracking-[0.12em] uppercase ml-4">
+                                {!confirming && (
                                   <button
                                     type="button"
-                                    disabled={cancelling}
-                                    onClick={() => cancelRequest(b.reference!)}
-                                    className="px-2.5 py-1 text-white disabled:opacity-50"
-                                    style={{ backgroundColor: "#b91c1c" }}
-                                  >
-                                    {cancelling ? "Cancelling…" : "Confirm Cancel"}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={cancelling}
-                                    onClick={() => setCancelConfirmRef(null)}
+                                    onClick={() => beginAmend(b)}
                                     className="underline underline-offset-4 hover:opacity-70 transition-opacity"
                                     style={{ color: NAVY }}
                                   >
-                                    Keep
+                                    Amend
                                   </button>
-                                </>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setCancelError(null);
-                                    setCancelConfirmRef(b.reference);
-                                  }}
-                                  className="underline underline-offset-4 hover:opacity-70 transition-opacity text-red-700"
-                                >
-                                  Cancel
-                                </button>
-                              )}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
+                                )}
+                                {confirming ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={cancelling}
+                                      onClick={() => cancelRequest(b.reference!)}
+                                      className="px-2.5 py-1 text-white disabled:opacity-50"
+                                      style={{ backgroundColor: "#b91c1c" }}
+                                    >
+                                      {cancelling ? "Cancelling…" : "Confirm Cancel"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={cancelling}
+                                      onClick={() => setCancelConfirmRef(null)}
+                                      className="underline underline-offset-4 hover:opacity-70 transition-opacity"
+                                      style={{ color: NAVY }}
+                                    >
+                                      Keep
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCancelError(null);
+                                      setCancelConfirmRef(b.reference);
+                                    }}
+                                    className="underline underline-offset-4 hover:opacity-70 transition-opacity text-red-700"
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      {viewingRef === b.reference && (
+                        <tr style={{ backgroundColor: "rgba(28,44,91,0.03)" }}>
+                          <td colSpan={6} className="px-4 py-5">
+                            <div className="grid gap-6 sm:grid-cols-2">
+                              <div>
+                                <p className="text-[11px] tracking-[0.18em] uppercase mb-3" style={{ color: `${NAVY}99` }}>
+                                  The journey
+                                </p>
+                                {b.journey_type === "hourly" ? (
+                                  <p className="text-sm" style={{ color: NAVY }}>
+                                    At the passenger&apos;s direction
+                                    {b.as_directed_hours ? `, ${b.as_directed_hours} hours` : ""}
+                                    {b.stops?.[0]?.address ? ` from ${b.stops[0].address}` : ""}
+                                  </p>
+                                ) : (b.stops?.length ?? 0) > 0 ? (
+                                  <ol className="space-y-2">
+                                    {b.stops!.map((stop, n) => (
+                                      <li key={n} className="text-sm" style={{ color: NAVY }}>
+                                        <span className="text-[11px] tracking-[0.12em] uppercase mr-2" style={{ color: `${NAVY}99` }}>
+                                          {stop.time ? `${stop.time} ` : ""}
+                                          {stop.type === "pickup" ? "Pick up" : "Drop off"}
+                                        </span>
+                                        {stop.address || "No address"}
+                                        {stop.greyTarmac && (
+                                          <span className="ml-2 text-[11px]" style={{ color: SKY }}>Grey Tarmac</span>
+                                        )}
+                                        {stop.passengers.length > 0 && (
+                                          <div className="text-[12px] mt-0.5" style={{ color: `${NAVY}99` }}>
+                                            {stop.passengers
+                                              .map((who) =>
+                                                (stop.counts?.[who] ?? 1) > 1
+                                                  ? `${who} x${stop.counts![who]}`
+                                                  : who
+                                              )
+                                              .join(", ")}
+                                          </div>
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ol>
+                                ) : (
+                                  <p className="text-sm" style={{ color: NAVY }}>
+                                    {b.pickup?.line1 || "No pick up recorded"}
+                                    {b.dropoff?.line1 ? ` to ${b.dropoff.line1}` : ""}
+                                  </p>
+                                )}
+                              </div>
+
+                              <div>
+                                <p className="text-[11px] tracking-[0.18em] uppercase mb-3" style={{ color: `${NAVY}99` }}>
+                                  Details
+                                </p>
+                                <dl className="space-y-2 text-sm" style={{ color: NAVY }}>
+                                  <div>
+                                    <dt className="text-[11px]" style={{ color: `${NAVY}99` }}>Vehicle</dt>
+                                    <dd>{b.vehicle}</dd>
+                                  </div>
+                                  {b.client_car?.make_model && (
+                                    <div>
+                                      <dt className="text-[11px]" style={{ color: `${NAVY}99` }}>Client&apos;s own car</dt>
+                                      <dd>
+                                        {b.client_car.make_model} {b.client_car.registration}
+                                        {b.client_car.client_travelling === false ? " (move only)" : ""}
+                                      </dd>
+                                    </div>
+                                  )}
+                                  {(b.children?.length ?? 0) > 0 && (
+                                    <div>
+                                      <dt className="text-[11px]" style={{ color: `${NAVY}99` }}>Children</dt>
+                                      <dd>{b.children!.length} aboard, ages {b.children!.map((c) => c.age).join(", ")}</dd>
+                                    </div>
+                                  )}
+                                  {b.notes?.trim() && (
+                                    <div>
+                                      <dt className="text-[11px]" style={{ color: `${NAVY}99` }}>Notes</dt>
+                                      <dd className="whitespace-pre-wrap">{b.notes}</dd>
+                                    </div>
+                                  )}
+                                  {b.booked_by && (
+                                    <div>
+                                      <dt className="text-[11px]" style={{ color: `${NAVY}99` }}>Booked by</dt>
+                                      <dd>{b.booked_by}</dd>
+                                    </div>
+                                  )}
+                                  {b.reference && (
+                                    <div>
+                                      <dt className="text-[11px]" style={{ color: `${NAVY}99` }}>Reference</dt>
+                                      <dd className="font-mono text-[12px]">{b.reference}</dd>
+                                    </div>
+                                  )}
+                                </dl>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </>
                     );
                   })}
                 </tbody>
