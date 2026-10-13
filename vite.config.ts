@@ -48,6 +48,10 @@ export default defineConfig(({ mode }) => ({
       },
     }),
   ].filter(Boolean),
+  // The map engine's worker is an ES module, so emit workers as modules
+  worker: {
+    format: "es",
+  },
   resolve: {
     alias: {
       ...(nativeBuild
