@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
-import { stillRunning } from "@/lib/bookingLive";
+import { refsToCheck } from "@/lib/bookingLive";
 import { useAuth } from "@/hooks/useAuth";
 import apexiaLogo from "@/assets/apexia-logo.svg";
 import mcfcBadge from "@/assets/mcfc-badge.svg";
@@ -569,12 +569,11 @@ const McfcPortal = () => {
       .then(async ({ data }) => {
         const rows = (Array.isArray(data?.recent) ? data.recent : []) as RecentBooking[];
         setRecent(rows);
-        // Ask the booking system who is driving the ones still to run
+        // Ask the booking system who is driving the ones still to run,
+        // soonest first so tonight's cars are never the ones left out.
         // A hire that runs over is still running, so this follows the job
         // rather than the clock
-        const refs = rows
-          .filter((b) => b.reference && stillRunning(b))
-          .map((b) => b.reference as string);
+        const refs = refsToCheck(rows);
         try {
           const live = await checkBookingStatuses(refs);
           setRecentLive(Object.fromEntries(live.map((l) => [l.reference, l])));

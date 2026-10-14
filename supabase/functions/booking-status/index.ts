@@ -7,7 +7,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const MAX_REFERENCES = 10;
+// Kept in step with MAX_LIVE_CHECKS in src/lib/bookingLive.ts, which is what
+// the desk and the member app send. Callers order theirs soonest first, so a
+// job running tonight is never the one this cap drops.
+const MAX_REFERENCES = 15;
 const MAX_CHECKS_PER_HOUR = 240;
 
 const json = (status: number, body: unknown) =>

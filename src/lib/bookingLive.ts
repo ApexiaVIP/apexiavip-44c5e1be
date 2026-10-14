@@ -133,3 +133,38 @@ export const chauffeurPosition = (
   }
   return ours;
 };
+
+/**
+ * How many journeys we may ask Dispatch about in one go. The booking-status
+ * function enforces the same number; keep the two together.
+ */
+export const MAX_LIVE_CHECKS = 15;
+
+export interface Referenced extends LiveBooking {
+  reference?: string | null;
+}
+
+/**
+ * Which journeys to ask Dispatch about, when we can only ask about so many.
+ *
+ * The cap used to fall wherever the list happened to be ordered, which is
+ * newest keyed first. A car going out tonight could be pushed past the cap by
+ * ten jobs keyed after it, and then read "Not yet assigned" on the desk no
+ * matter who Dispatch had allocated to it. Ask about the ones running soonest
+ * instead, and about a chauffeur already working a job before anything else.
+ */
+export const refsToCheck = <T extends Referenced>(
+  bookings: T[],
+  cap: number = MAX_LIVE_CHECKS,
+  now: number = Date.now()
+): string[] => {
+  const working = (b: T) => (ACTIVE_STATUSES.includes(effectiveStatus(b)) ? 0 : 1);
+  const pickup = (b: T) =>
+    b.collection_at ? new Date(b.collection_at).getTime() : Number.POSITIVE_INFINITY;
+
+  return bookings
+    .filter((b) => b.reference && stillRunning(b, now))
+    .sort((a, b) => working(a) - working(b) || pickup(a) - pickup(b))
+    .slice(0, cap)
+    .map((b) => b.reference as string);
+};

@@ -8,7 +8,9 @@ import {
   ACTIVE_STATUSES,
   DRIVER_STATUS_AS_DISPATCH,
   FINAL_STATUSES,
+  MAX_LIVE_CHECKS,
   chauffeurPosition,
+  refsToCheck,
   stillRunning,
 } from "@/lib/bookingLive";
 import { locationFreshness } from "@/lib/locationAge";
@@ -208,11 +210,13 @@ const Bookings = () => {
     })
     .map((b) => b.reference as string);
 
-  const checkRefs = upcoming.map((b) => b.reference).filter(Boolean) as string[];
+  // Soonest first, so a car going out shortly is never the one the cap
+  // leaves out and shows as unassigned
+  const checkRefs = refsToCheck(upcoming, MAX_LIVE_CHECKS, now);
 
   const { data: liveStatuses, isFetching: refreshing, refetch } = useQuery({
     queryKey: ["booking-statuses", checkRefs.join(",")],
-    queryFn: () => checkBookingStatuses(checkRefs.slice(0, 10)),
+    queryFn: () => checkBookingStatuses(checkRefs),
     enabled: !!user && mfaVerified && checkRefs.length > 0,
     // Every 15s while a driver is actively on a job, which is exactly when
     // the map is on screen, and every 30s in the run up to a pickup. Asking

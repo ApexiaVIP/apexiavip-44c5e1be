@@ -18,7 +18,7 @@ await esbuild.build({
   entryPoints: [join(here, "..", "src", "lib", "bookingLive.ts")],
   bundle: true, format: "esm", platform: "node", outfile: out,
 });
-const { stillRunning, effectiveStatus, chauffeurPosition } = await import(pathToFileURL(out).href);
+const { stillRunning, effectiveStatus, chauffeurPosition, refsToCheck } = await import(pathToFileURL(out).href);
 
 const NOW = Date.parse("2026-10-08T20:00:00Z");
 const hoursAgo = (h) => new Date(NOW - h * 3600 * 1000).toISOString();
@@ -86,5 +86,43 @@ is("a half written position is ignored", chauffeurPosition({ driver_lat: 53.48, 
 is("the age of ours is reported", Math.round(chauffeurPosition(ours(1), dispatch, NOW).ageMs / 1000), 60);
 
 console.log(bad === 0 ? "\nposition source chosen correctly" : `\n${bad} FAILED`);
+
+// --- Which journeys we ask Dispatch about ---
+// The desk list arrives newest keyed first. A car going out tonight must still
+// be asked about, however many were keyed after it.
+const inHours = (h) => new Date(NOW + h * 3600 * 1000).toISOString();
+const keyed = (n, hoursAway) => ({
+  reference: n,
+  status: "Requested",
+  collection_at: inHours(hoursAway),
+});
+
+// Tonight's car, keyed first, then twelve keyed after it
+const deskList = [
+  ...Array.from({ length: 12 }, (_, i) => keyed(`NEW${i}`, 48 + i)),
+  keyed("TONIGHT", 3),
+];
+
+is("tonight's car is asked about despite twelve keyed after it",
+  refsToCheck(deskList, 10, NOW).includes("TONIGHT"), true);
+is("and it is asked about first", refsToCheck(deskList, 10, NOW)[0], "TONIGHT");
+is("the cap is still respected", refsToCheck(deskList, 10, NOW).length, 10);
+is("the furthest away is the one dropped",
+  refsToCheck(deskList, 10, NOW).includes("NEW11"), false);
+
+// A chauffeur already on a job comes before anything merely due
+const working = { reference: "ONJOB", status: "Passenger on board", collection_at: hoursAgo(2) };
+is("a chauffeur already working is asked about first",
+  refsToCheck([keyed("SOON", 1), working], 10, NOW)[0], "ONJOB");
+
+// Finished and unreferenced jobs are not worth asking about
+is("a cleared job is not asked about",
+  refsToCheck([{ reference: "DONE", status: "Cancelled", collection_at: inHours(3) }], 10, NOW).length, 0);
+is("a booking with no reference is skipped",
+  refsToCheck([{ reference: null, status: "Requested", collection_at: inHours(3) }], 10, NOW).length, 0);
+is("the desk list is not reordered in place", deskList[0].reference, "NEW0");
+
+console.log(bad === 0 ? "\nthe soonest journeys are the ones checked" : `\n${bad} FAILED`);
+
 console.log(bad === 0 ? "\ntracking and position source hold" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);
