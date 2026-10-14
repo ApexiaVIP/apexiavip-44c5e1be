@@ -248,5 +248,28 @@ check("a fleet total is given", weekly.sent[0]?.html.includes("across the fleet"
 const quiet = await call({ mode: "daily", date: "2026-09-01" });
 check("a day with activity still reports (filtering is the database's job)", quiet.payload.success === true);
 
+
+// --- A shift never signed off must not bill fourteen hours a day for ever ---
+// Arshad signed on on the 12th and never signed off. Reporting the 14th used
+// to count him from midnight to midnight, capped at fourteen hours, and would
+// have done so every day after that too.
+globalThis.__tables.driver_shifts = [
+  { driver_id: "driver-1", started_at: "2026-10-12T07:48:00.000Z", ended_at: null },
+];
+const laterDay = await call({ mode: "daily", date: "2026-10-14" });
+const later = laterDay.sent.find((e) => e.subject.includes("Faz"));
+check("a shift left open on an earlier day earns nothing later",
+  !!later && later.html.includes(">0h<"), later?.html.match(/<strong[^>]*>([^<]+)<\/strong>/)?.[1]);
+check("and it is not passed off as a capped day",
+  !!later && !later.html.includes("not a day's work"));
+check("but the office is told to close it",
+  !!later && later.html.includes("never signed off"));
+
+// The day it actually started is still reported, capped as before
+const ownDay = await call({ mode: "daily", date: "2026-10-12" });
+const own = ownDay.sent.find((e) => e.subject.includes("Faz"));
+check("the day it began still reports its hours",
+  !!own && own.html.includes("14h 00m"), own?.html.match(/>(\d+h [0-9]+m)</)?.[1]);
+
 console.log(bad === 0 ? "\nall checks passed" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

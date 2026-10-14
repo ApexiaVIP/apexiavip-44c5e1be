@@ -322,7 +322,21 @@ serve(async (req) => {
         .update({ is_driver: isDriver })
         .eq("id", userId);
       if (error) throw error;
-      return json(200, { success: true, is_driver: isDriver });
+
+      // Somebody who is no longer a chauffeur cannot sign off, so close any
+      // shift they left running. Left open it would sit in the timesheets
+      // for an account that can no longer reach the screen to end it.
+      let shiftClosed = false;
+      if (!isDriver) {
+        const { data: closed } = await admin
+          .from("driver_shifts")
+          .update({ ended_at: new Date().toISOString() })
+          .eq("driver_id", userId)
+          .is("ended_at", null)
+          .select("id");
+        shiftClosed = (closed?.length ?? 0) > 0;
+      }
+      return json(200, { success: true, is_driver: isDriver, shiftClosed });
     }
 
     // Correcting a member's details. A member invited by mobile alone has no

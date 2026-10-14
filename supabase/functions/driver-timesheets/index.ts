@@ -120,12 +120,22 @@ const addressLine = (a: Job["pickup"]) =>
 /**
  * Minutes on duty within a day. An open shift is counted to the end of the
  * day and flagged, rather than guessed at.
+ *
+ * An open shift that began before the day being reported is a different
+ * thing: nobody works a fortnight without signing off. Counting it to the
+ * end of every later day would put fourteen hours against that chauffeur
+ * every day for ever, so it earns nothing and is called out instead.
  */
 const minutesOnDuty = (shifts: Shift[], from: Date, to: Date) => {
   let minutes = 0;
   let stillOpen = false;
   let capped = false;
+  let neverClosed = false;
   for (const s of shifts) {
+    if (!s.ended_at && new Date(s.started_at).getTime() < from.getTime()) {
+      neverClosed = true;
+      continue;
+    }
     const start = Math.max(new Date(s.started_at).getTime(), from.getTime());
     const rawEnd = s.ended_at ? new Date(s.ended_at).getTime() : to.getTime();
     if (!s.ended_at) stillOpen = true;
@@ -140,7 +150,7 @@ const minutesOnDuty = (shifts: Shift[], from: Date, to: Date) => {
       minutes += worked;
     }
   }
-  return { minutes, stillOpen, capped };
+  return { minutes, stillOpen, capped, neverClosed };
 };
 
 const esc = (v: unknown) =>
@@ -402,7 +412,7 @@ serve(async (req) => {
         // what actually happened
         if (mine.length === 0 && myJobs.length === 0) continue;
 
-        const { minutes, stillOpen, capped } = minutesOnDuty(mine, from, to);
+        const { minutes, stillOpen, capped, neverClosed } = minutesOnDuty(mine, from, to);
         const signOn = mine.map((s) => ukTimeOf(s.started_at)).join(", ") || "not signed on";
         const signOff = mine.some((s) => !s.ended_at)
           ? "still on duty"
@@ -449,6 +459,12 @@ serve(async (req) => {
 
         const flags: string[] = [];
         if (stillOpen) flags.push("Did not sign off, so hours run to midnight.");
+        if (neverClosed) {
+          flags.push(
+            "A shift from an earlier day was never signed off. It earns nothing here, " +
+              "but somebody should close it so it stops appearing."
+          );
+        }
         if (capped) {
           flags.push(
             `A shift ran past ${MAX_SHIFT_HOURS} hours, so the hours here are capped and are not a day's work. Check what was actually worked before paying it.`
