@@ -52,6 +52,13 @@ const QUIET_MINUTES = REPORT_AFTER_MINUTES;
 const MAX_SHIFT_HOURS = 14;
 
 /**
+ * What a chauffeur's own app says while a job is in hand. Any of these means
+ * they are working, however long ago they signed on: a twenty hour day with
+ * guests on board is not a forgotten sign off.
+ */
+const WORKING_STATUSES = ["en_route", "arrived", "pob", "waiting"];
+
+/**
  * Steps pressed closer together than this were filled in after the event
  * rather than as the job happened. The times then describe when the
  * chauffeur caught up with the app, not when anything occurred, and the
@@ -371,28 +378,44 @@ serve(async (req) => {
         // Wait for the last chauffeur to finish. A night that runs past
         // midnight still gets its own day's sheet, just later.
         const quietSince = new Date(Date.now() - QUIET_MINUTES * 60 * 1000).toISOString();
-        // A shift nobody ever closed is a forgotten sign off, not somebody
-        // still working. Without this, one chauffeur who forgets once holds
-        // the wrap up open for every night after it, for everybody, for good.
-        // Past the longest a shift can run it stops counting as working, and
-        // the sheet itself already says the shift was never signed off.
-        const couldStillBeWorking = new Date(
+        // A shift nobody ever closed is a forgotten sign off rather than
+        // somebody still working, and one of those used to hold the wrap up
+        // open for every night after it, for everybody, for good.
+        //
+        // But a long day is not the same thing. A chauffeur can be twenty
+        // hours into a day and still very much out, so the age of the shift
+        // alone cannot decide it. Somebody is working if they signed on
+        // recently, or if they still have a job in hand whenever they signed
+        // on. Nothing in hand and signed on yesterday is a forgotten row.
+        const { data: openShifts } = await admin
+          .from("driver_shifts")
+          .select("id, driver_id, started_at")
+          .in("driver_id", driverIds)
+          .is("ended_at", null);
+
+        const signedOnRecently = new Date(
           Date.now() - MAX_SHIFT_HOURS * 60 * 60 * 1000
         ).toISOString();
-        const { data: openShift } = await admin
-          .from("driver_shifts")
-          .select("id")
-          .in("driver_id", driverIds)
-          .is("ended_at", null)
-          .gte("started_at", couldStillBeWorking)
-          .limit(1);
+        const open = openShifts ?? [];
+        let someoneWorking = open.some(
+          (s) => String(s.started_at) >= signedOnRecently
+        );
+        if (!someoneWorking && open.length > 0) {
+          const { data: inHand } = await admin
+            .from("bookings")
+            .select("reference")
+            .in("driver_id", open.map((s) => s.driver_id as string))
+            .in("driver_status", WORKING_STATUSES)
+            .limit(1);
+          someoneWorking = (inHand?.length ?? 0) > 0;
+        }
         const { data: justCleared } = await admin
           .from("bookings")
           .select("reference")
           .eq("driver_status", "clear")
           .gte("driver_status_at", quietSince)
           .limit(1);
-        if ((openShift?.length ?? 0) > 0 || (justCleared?.length ?? 0) > 0) {
+        if (someoneWorking || (justCleared?.length ?? 0) > 0) {
           return json(200, {
             success: true,
             mode,

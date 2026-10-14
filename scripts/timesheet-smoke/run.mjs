@@ -186,6 +186,7 @@ check("and nothing is recorded as sent", !(globalThis.__writes ?? []).some((w) =
 // A shift nobody ever closed is a forgotten sign off, not somebody working.
 // It used to hold the wrap up open for every night after it, for everybody,
 // which is why no timesheet had ever reached the back office.
+const bookingsBefore = globalThis.__tables.bookings;
 globalThis.__tables.driver_shifts = [
   { driver_id: "driver-1", started_at: uk("07:00"), ended_at: uk("15:30") },
   { driver_id: "driver-2", started_at: hoursAgo(30), ended_at: null },
@@ -195,6 +196,21 @@ const stale = await call({ mode: "daily" });
 check("a shift left open yesterday does not hold tonight", stale.sent.length > 0, `sent ${stale.sent.length}`);
 check("and the night is recorded as sent",
   (globalThis.__writes ?? []).some((w) => w.table === "timesheet_runs"));
+
+// A twenty hour day is not a forgotten sign off. Faz signs on before dawn and
+// is still carrying guests at midnight: the night waits for him.
+globalThis.__tables.bookings = [
+  { driver_id: "driver-2", reference: "APEXIA-LATE", name: "Very Important",
+    collection_at: uk("22:00"), pickup: null, dropoff: null, via: null, stops: null,
+    journey_type: "hourly", as_directed_hours: 6, vehicle: "Viano",
+    driver_status: "pob", corporate: "mcfc" },
+];
+globalThis.__writes.length = 0;
+const longDay = await call({ mode: "daily" });
+check("a chauffeur still carrying guests holds the night", longDay.sent.length === 0, `sent ${longDay.sent.length}`);
+check("however long ago they signed on", String(longDay.payload.note).includes("still working"), longDay.payload.note);
+
+globalThis.__tables.bookings = bookingsBefore;
 globalThis.__tables.driver_shifts = shiftsBefore;
 
 // Asking for a named day is someone asking on purpose, and is never held back
