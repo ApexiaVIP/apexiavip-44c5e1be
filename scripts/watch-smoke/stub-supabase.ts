@@ -44,7 +44,7 @@ const builder = (
   new Proxy({}, {
     get(_t, prop: string) {
       if (prop === "then") {
-        const op = chain.find((c) => ["insert", "update", "delete"].includes(c));
+        const op = chain.find((c) => ["insert", "update", "delete", "upsert"].includes(c));
         if (op) {
           writes.push({ table, op, payload });
           return (r: (v: unknown) => void) => Promise.resolve({ data: null, error: null }).then(r);
@@ -66,7 +66,7 @@ const builder = (
           table,
           [...chain, prop],
           filters,
-          ["insert", "update"].includes(prop) ? args[0] : payload
+          ["insert", "update", "upsert"].includes(prop) ? args[0] : payload
         );
       };
     },

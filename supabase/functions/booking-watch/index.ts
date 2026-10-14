@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { followLink } from "../_shared/notify.ts";
+import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -152,6 +153,8 @@ serve(async (req) => {
     });
     const heldOver = all.length - bookings.length;
     if (bookings.length === 0) {
+      // A sweep that found everybody checked a moment ago still ran
+      await recordHeartbeat(admin, "booking-watch", { watched: 0, heldOver });
       return json(200, { success: true, watched: 0, notified: 0, heldOver });
     }
 
@@ -362,6 +365,7 @@ serve(async (req) => {
       }
     }
 
+    await recordHeartbeat(admin, "booking-watch", { watched: bookings.length, heldOver, changed, notified });
     return json(200, { success: true, watched: bookings.length, heldOver, changed, notified, details });
   } catch (error) {
     console.error("booking-watch error:", error);

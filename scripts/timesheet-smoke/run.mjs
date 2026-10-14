@@ -300,5 +300,23 @@ const own = ownDay.sent.find((e) => e.subject.includes("Faz"));
 check("the day it began still reports its hours",
   !!own && own.html.includes("14h 00m"), own?.html.match(/>(\d+h [0-9]+m)</)?.[1]);
 
+
+// --- The nightly run must leave a trace whatever it decides ---
+// The health endpoint reads the absence of these as the job having stopped,
+// so a night that correctly waits for a chauffeur still has to report in.
+globalThis.__writes.length = 0;
+const sentNight = await call({ mode: "daily", date: DAY });
+const sentBeat = (globalThis.__writes ?? []).find((w) => w.table === "job_heartbeats");
+check("a night that sends records a heartbeat", !!sentBeat);
+check("under the daily name", sentBeat?.payload?.job === "driver-timesheets:daily", sentBeat?.payload?.job);
+
+globalThis.__tables.driver_shifts = [
+  { driver_id: "driver-2", started_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(), ended_at: null },
+];
+globalThis.__writes.length = 0;
+const heldNight = await call({ mode: "daily" });
+check("and so does a night that waits for a chauffeur",
+  (globalThis.__writes ?? []).some((w) => w.table === "job_heartbeats"), heldNight.payload.note);
+
 console.log(bad === 0 ? "\nall checks passed" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

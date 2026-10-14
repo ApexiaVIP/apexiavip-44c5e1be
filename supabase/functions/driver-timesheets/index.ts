@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import {
   asHours,
   ukDay,
@@ -230,6 +231,7 @@ serve(async (req) => {
       .select("id, full_name, phone")
       .eq("is_driver", true);
     if (!drivers || drivers.length === 0) {
+      await recordHeartbeat(admin, `driver-timesheets:${mode}`, { note: "no chauffeur accounts" });
       return json(200, { success: true, mode, day, sent: 0, note: "no chauffeur accounts" });
     }
     const driverIds = drivers.map((d) => d.id as string);
@@ -322,6 +324,7 @@ serve(async (req) => {
           reported++;
         }
       }
+      await recordHeartbeat(admin, "driver-timesheets:cleared", { reported });
       return json(200, { success: true, mode, reported });
     }
 
@@ -373,7 +376,10 @@ serve(async (req) => {
           .eq("day", day)
           .eq("kind", "daily")
           .maybeSingle();
-        if (already) return json(200, { success: true, mode, day, sent: 0, note: "Already sent" });
+        if (already) {
+          await recordHeartbeat(admin, "driver-timesheets:daily", { day, note: "already sent" });
+          return json(200, { success: true, mode, day, sent: 0, note: "Already sent" });
+        }
 
         // Wait for the last chauffeur to finish. A night that runs past
         // midnight still gets its own day's sheet, just later.
@@ -421,6 +427,8 @@ serve(async (req) => {
           .gte("driver_status_at", quietSince)
           .limit(1);
         if (someoneWorking || (justCleared?.length ?? 0) > 0) {
+          // Waiting for a chauffeur is a working run, not a missed one
+          await recordHeartbeat(admin, "driver-timesheets:daily", { day, note: "waiting for a chauffeur" });
           return json(200, {
             success: true,
             mode,
@@ -560,6 +568,7 @@ serve(async (req) => {
       if (!forced) {
         await admin.from("timesheet_runs").insert({ day, kind: "daily" });
       }
+      await recordHeartbeat(admin, "driver-timesheets:daily", { day, sent });
       return json(200, { success: true, mode, day, sent });
     }
 
@@ -620,6 +629,7 @@ serve(async (req) => {
     );
 
     if (await sendEmail(`Weekly timesheets - week to ${ukDayName(day)}`, html)) sent++;
+    await recordHeartbeat(admin, "driver-timesheets:weekly", { week: { from: firstDay, to: day }, sent });
     return json(200, { success: true, mode, week: { from: firstDay, to: day }, sent });
   } catch (error) {
     console.error("driver-timesheets error:", error);

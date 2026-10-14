@@ -169,5 +169,23 @@ is("one that really moved says so", moved.moved, true);
 is("and is counted", r.payload.changed, 1);
 dispatchStatus = "On Route";
 
+
+// --- A run has to leave a trace, or the alarm cries wolf for ever ---
+// The health endpoint decides a job has stopped by the absence of these. A
+// sweep that does its work but records nothing would read as dead.
+dispatchStatus = "Dispatched";
+globalThis.__writes.length = 0;
+r = await run({ status: "Pending", notified_status: null, status_checked_at: null });
+const beat = (globalThis.__writes ?? []).find((w) => w.table === "job_heartbeats");
+is("a completed sweep records a heartbeat", !!beat, true);
+is("under its own name", beat?.payload?.job, "booking-watch");
+is("stamped with a time", typeof beat?.payload?.last_success_at, "string");
+
+// Even a sweep with nothing to ask about has run, and must say so
+globalThis.__writes.length = 0;
+r = await run({ status: "Pending", notified_status: null, status_checked_at: new Date().toISOString() });
+const quiet = (globalThis.__writes ?? []).find((w) => w.table === "job_heartbeats");
+is("a sweep that held everything back still reports in", !!quiet, true);
+
 console.log(bad === 0 ? "\na confirmation reaches the passenger" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

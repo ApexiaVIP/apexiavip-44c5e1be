@@ -44,3 +44,7 @@ verify_jwt = false
 
 [functions.driver]
 verify_jwt = false
+
+# Watched from outside, so it must answer without a key
+[functions.health]
+verify_jwt = false
