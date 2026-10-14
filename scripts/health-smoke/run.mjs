@@ -99,5 +99,39 @@ is("a database it cannot read is an alarm, not a pass", r.status, 503);
 is("and it says why", r.body.summary, "Could not read the job heartbeats");
 globalThis.__readFails = false;
 
+
+// --- The job names have to agree in three places ---
+// The endpoint watches a list, the migration seeds a list, and the functions
+// write names. If any of those drift apart the alarm either sits red for ever
+// on a name nobody writes, or quietly stops watching something. Two copies of
+// a value drifting is exactly the fault that caused the outage this exists for.
+const { readFile } = await import("node:fs/promises");
+const repo = join(here, "..", "..");
+const read = (p) => readFile(join(repo, p), "utf8");
+
+const fnSource = await read("supabase/functions/health/index.ts");
+const watched = [...fnSource.matchAll(/^\s*"([a-z-]+(?::[a-z]+)?)": \{ everyMinutes/gm)].map((m) => m[1]);
+
+const migration = await read("supabase/migrations/20261014120000_job_heartbeats.sql");
+const seeded = [...migration.matchAll(/\('([a-z-]+(?::[a-z]+)?)', now\(\)/g)].map((m) => m[1]);
+
+let jobSource = "";
+for (const f of ["booking-watch", "driver-timesheets", "fixtures-sync"]) {
+  jobSource += await read(`supabase/functions/${f}/index.ts`);
+}
+const written = new Set(
+  [...jobSource.matchAll(/recordHeartbeat\([a-z]+, [`"]([a-z-]+(?::\$\{mode\}|:[a-z]+)?)[`"]/g)]
+    .map((m) => m[1].replace(":${mode}", ""))
+);
+
+is("every watched job is seeded", [...watched].sort().join(","), [...seeded].sort().join(","));
+is("and the endpoint watches all five", watched.length, 5);
+for (const job of watched) {
+  const covered = written.has(job) || written.has(job.split(":")[0]);
+  is(`something writes a heartbeat for ${job}`, covered, true);
+}
+
+console.log(bad === 0 ? "\nthe job names agree" : `\n${bad} FAILED`);
+
 console.log(bad === 0 ? "\nthe alarm sounds when it should" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);
