@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { followLink } from "../_shared/notify.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -233,7 +234,7 @@ serve(async (req) => {
             // booking system's tracker
             ? `APEXIA VIP: ${driver || "Your chauffeur"} is on the way for your ${when} collection${
                 carText ? `, ${carText}` : ""
-              }. Follow the car: www.apexiavip.com/bookings`
+              }. Follow the car: ${followLink(b.corporate as string | null)}`
             : moment === "arrived"
               ? `APEXIA VIP: ${driver || "Your chauffeur"} has arrived for your ${when} collection${
                   carText ? `, ${carText}` : ""

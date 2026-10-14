@@ -91,3 +91,12 @@ export const ukWhen = (iso: string | null): string =>
         timeZone: "Europe/London",
       })
     : "your booking";
+
+/**
+ * Where to send someone to follow their car.
+ *
+ * A travel desk assistant works in the partner portal, not the member app, so
+ * sending them to the members' bookings page shows them nothing of theirs.
+ */
+export const followLink = (corporate?: string | null): string =>
+  corporate === "mcfc" ? "mcfc.apexiavip.com" : "www.apexiavip.com/bookings";

@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
-import { recipientsFor, trySendSms, ukWhen } from "../_shared/notify.ts";
+import { followLink, recipientsFor, trySendSms, ukWhen } from "../_shared/notify.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -170,7 +170,7 @@ Deno.serve(async (req) => {
         // passenger is never sent to the booking system's own tracker.
         // It has to be the www host: the apex redirects, and neither Apple
         // nor Android follows a redirect when checking who owns a domain.
-        const follow = "www.apexiavip.com/bookings";
+        const follow = followLink(job.corporate as string | null);
         const message =
           moment === "onroute"
             ? `APEXIA VIP: ${who} is on the way for your ${when} collection${car ? `, ${car}` : ""}. Follow the car: ${follow}`

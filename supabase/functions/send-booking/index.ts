@@ -15,6 +15,7 @@ import {
   MIN_NOTICE_MINUTES,
   availabilityReason,
 } from "../_shared/availability.ts";
+import { ukWallClockUtc } from "../_shared/ukTime.ts";
 import {
   parseNotes,
   parseChildren,
@@ -57,6 +58,30 @@ const dispatchMonthLookup = dispatchMonthNames.reduce<Record<string, number>>((a
 }, {});
 
 const padNumber = (value: number | string) => value.toString().padStart(2, "0");
+/**
+ * When the car is wanted, taken from the time the member typed and read as a
+ * clock here rather than wherever they are.
+ *
+ * The app works the instant out from the phone's own timezone, which is right
+ * for a member in Manchester and an hour or more wrong for one in Dubai, who
+ * still means a UK pickup time. The typed wall clock is the honest source.
+ */
+const pickupInstant = (raw: unknown, fallback: unknown): Date | null => {
+  if (typeof raw === "string") {
+    const m = raw.trim().match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})\s+(\d{1,2}):(\d{2})/);
+    const month = m ? dispatchMonthLookup[m[2].toLowerCase()] : undefined;
+    if (m && month !== undefined) {
+      const ymd = `${m[3]}-${String(month + 1).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+      const when = ukWallClockUtc(ymd, `${m[4].padStart(2, "0")}:${m[5]}`);
+      if (!Number.isNaN(when.getTime())) return when;
+    }
+  }
+  if (typeof fallback === "string" && !Number.isNaN(Date.parse(fallback))) {
+    return new Date(fallback);
+  }
+  return null;
+};
+
 
 const formatDispatchDate = (day: number, monthIndex: number, year: number) =>
   `${padNumber(day)}-${dispatchMonthNames[monthIndex]}-${year}`;
@@ -218,10 +243,7 @@ serve(async (req) => {
 
     // The same notice rule the form applies, enforced here too: an older app
     // or a direct call must not slip a car in for ten minutes' time
-    const collectionAtRaw =
-      typeof body.collectionAt === "string" && !Number.isNaN(Date.parse(body.collectionAt))
-        ? new Date(body.collectionAt)
-        : null;
+    const collectionAtRaw = pickupInstant(body.travelDateRaw, body.collectionAt);
     if (!amendReference && collectionAtRaw) {
       const noticeMinutes = (collectionAtRaw.getTime() - Date.now()) / 60000;
       if (noticeMinutes < MIN_NOTICE_MINUTES) {
@@ -243,9 +265,12 @@ serve(async (req) => {
     // confirmation. Never on an hourly hire (the car is already waiting).
     const wantsReturn =
       body.returnJourney === true && journeyType !== "hourly" && !body.amendReference;
+    const returnLeg = wantsReturn
+      ? pickupInstant(body.returnTravelDateRaw, body.returnCollectionAt)
+      : null;
     const returnCollectionAt =
-      wantsReturn && typeof body.returnCollectionAt === "string" && !Number.isNaN(Date.parse(body.returnCollectionAt))
-        ? new Date(body.returnCollectionAt).toISOString()
+      returnLeg
+        ? returnLeg.toISOString()
         : null;
     if (wantsReturn && !returnCollectionAt) {
       return new Response(JSON.stringify({ success: false, error: "Please give the date and time of the return journey" }), {
@@ -361,10 +386,7 @@ serve(async (req) => {
 
     // Store the booking against the member so it appears in My Bookings
     const bookingReference = amendReference ?? `APEXIA-${Date.now()}`;
-    const collectionAt =
-      typeof body.collectionAt === "string" && !Number.isNaN(Date.parse(body.collectionAt))
-        ? new Date(body.collectionAt).toISOString()
-        : null;
+    const collectionAt = collectionAtRaw ? collectionAtRaw.toISOString() : null;
     const bookingRow = {
       name: name.trim(),
       email: email.trim(),

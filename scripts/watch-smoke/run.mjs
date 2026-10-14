@@ -60,7 +60,7 @@ const run = async (booking) => {
       vehicle: "S-Class", subject_to_availability: false, driver_moment: null,
       ...booking,
     }],
-    profiles: [], corporate_passengers: [],
+    profiles: booking.__profiles ?? [], corporate_passengers: [],
   };
   const res = await handler(new Request("https://x/booking-watch", {
     method: "POST", headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
@@ -103,6 +103,21 @@ is("a status a passenger gains nothing from is not texted", r.texts.length, 0);
 dispatchStatus = "Cancelled";
 r = await run({ status: "Cancelled", notified_status: null });
 is("a cancellation is always told", r.texts.length, 1);
+
+// The follow link only appears once the chauffeur is on the way
+dispatchStatus = "On Route";
+
+// A travel desk assistant works in the partner portal, not the member app
+r = await run({
+  status: "Pending", notified_status: null, corporate: "mcfc",
+  user_id: "assistant-1", name: "A Guest",
+  __profiles: [{ id: "assistant-1", phone: "+447700900999" }],
+});
+is("a desk booking links to the partner portal", r.texts[0]?.includes("mcfc.apexiavip.com"), true);
+is("and not to the members' page", r.texts[0]?.includes("www.apexiavip.com/bookings"), false);
+
+r = await run({ status: "Pending", notified_status: null, corporate: null });
+is("a member booking still links to their own bookings", r.texts[0]?.includes("www.apexiavip.com/bookings"), true);
 
 console.log(bad === 0 ? "\na confirmation reaches the passenger" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

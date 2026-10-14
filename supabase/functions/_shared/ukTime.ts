@@ -65,3 +65,20 @@ export const asHours = (minutes: number): string => {
   const m = Math.round(minutes % 60);
   return h > 0 ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
 };
+
+/**
+ * The instant at which a clock on a wall in London reads this date and time.
+ *
+ * A time typed into a booking form means the time here, not the time wherever
+ * the server happens to run, which is UTC. Reading "05:30" as UTC puts the
+ * car an hour late for seven months of the year.
+ */
+export const ukWallClockUtc = (ymd: string, hhmm: string): Date => {
+  const naive = Date.parse(`${ymd}T${hhmm}:00Z`);
+  if (Number.isNaN(naive)) return new Date(NaN);
+  // Correct by the offset in force then, and settle again in case the first
+  // guess landed the other side of a clock change
+  let instant = naive - ukOffsetMinutes(new Date(naive)) * 60000;
+  instant = naive - ukOffsetMinutes(new Date(instant)) * 60000;
+  return new Date(instant);
+};

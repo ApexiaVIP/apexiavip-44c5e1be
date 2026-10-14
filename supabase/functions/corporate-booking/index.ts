@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ukWallClockUtc } from "../_shared/ukTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -906,7 +907,9 @@ serve(async (req) => {
         vehicle: car.vehicle,
         passengers: peak,
         bags: 0,
-        collection_at: new Date(`${travelDate}T${car.time}:00`).toISOString(),
+        // A time typed at the desk means the time here. Without a zone the
+        // server read it as UTC, putting every car an hour late all summer.
+        collection_at: ukWallClockUtc(travelDate, car.time).toISOString(),
         pickup: { line1: stops[0].address, town: "", postcode: "" },
         dropoff: {
           line1: endsWithDropoff

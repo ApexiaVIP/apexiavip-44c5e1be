@@ -99,12 +99,25 @@ if (typeof handler !== "function") throw new Error("The function did not registe
 const token = `x.${Buffer.from(JSON.stringify({ session_id: "session-1" })).toString("base64url")}.y`;
 const inHours = (h) => new Date(Date.now() + h * 3600 * 1000).toISOString();
 
+// The app sends the typed wall clock alongside the instant, and the server
+// now trusts the wall clock, so a fixture must keep the two in step or it is
+// describing a booking no form could produce
+const ukRaw = (iso) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date(iso));
+  const g = (t) => parts.find((p) => p.type === t).value;
+  return `${g("day")}-${g("month")}-${g("year")} ${g("hour")}:${g("minute")}`;
+};
+
 const booking = (over = {}) => ({
   name: "Test Member",
   email: "member@example.com",
   phone: "+447700900123",
   travelDate: "10 October 2026",
-  travelDateRaw: "10-Oct-2026 14:00",
+  travelDateRaw: ukRaw(over.collectionAt ?? inHours(24)),
   collectionAt: inHours(24),
   vehicle: "S-Class",
   passengers: 2,
@@ -190,5 +203,44 @@ console.log(
     : "FAIL  the email does not name the account holder"
 );
 
-console.log(`\n${cases.length + 2 - failures}/${cases.length + 2} passed`);
+// --- A typed time means the time here, wherever the member is ---
+globalThis.__tables.profiles = [
+  { id: "user-1", status: "active", primary_member_id: null, full_name: "A Member", phone: "+447700900123" },
+];
+let stored = null;
+const realFetch3 = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  if (String(url).includes("deversoftware")) {
+    stored = JSON.parse(init.body).Bookings[0];
+  }
+  return realFetch3(url, init);
+};
+Object.assign(net, { dispatch: "ok", resend: "ok" });
+await handler(
+  new Request("https://example.test/send-booking", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(
+      booking({
+        // Summer, so a UK clock is an hour ahead of UTC
+        travelDateRaw: "14-Jul-2027 05:30",
+        travelDate: "14 July 2027",
+        // What a phone in Dubai would have worked out, which is wrong
+        collectionAt: "2027-07-14T01:30:00.000Z",
+      })
+    ),
+  })
+);
+// The one this test just made, not the first of the day
+const inserts = (globalThis.__writes ?? []).filter((w) => w.table === "bookings" && w.op === "insert");
+const wrote = inserts[inserts.length - 1];
+const row = Array.isArray(wrote?.payload) ? wrote.payload[0] : wrote?.payload;
+if (row?.collection_at !== "2027-07-14T04:30:00.000Z") failures++;
+console.log(
+  row?.collection_at === "2027-07-14T04:30:00.000Z"
+    ? "ok    a 05:30 pickup is stored as 04:30 UTC, not the phone's guess"
+    : `FAIL  pickup stored as ${row?.collection_at}, wanted 2027-07-14T04:30:00.000Z`
+);
+
+console.log(`\n${cases.length + 3 - failures}/${cases.length + 3} passed`);
 process.exit(failures > 0 ? 1 : 0);
