@@ -33,9 +33,17 @@ globalThis.Deno = { env: { get: (k) => ({
 
 let dispatchStatus = "Dispatched";
 const texts = [];
+// Which references Dispatch was asked about, so a booking held back can be
+// told apart from one asked about and found unchanged
+const asked = [];
+let dispatchHttp = 200;
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.includes("deversoftware")) {
+    for (const b of JSON.parse(init.body).Bookings) asked.push(b.Reference);
+    if (dispatchHttp !== 200) {
+      return new Response("Too many requests. Please wait 30 seconds.", { status: dispatchHttp });
+    }
     return Response.json({ Result: [{ Bookings: [{
       Reference: "APEXIA-1", BookingStatus: dispatchStatus,
       Driver: { Name: "Faz Hussain" }, Vehicle: { Description: "S-Class", Registration: "AB12 CDE" },
@@ -53,6 +61,7 @@ const handler = globalThis.__handler;
 
 const run = async (booking) => {
   texts.length = 0;
+  asked.length = 0;
   globalThis.__tables = {
     bookings: [{
       reference: "APEXIA-1", user_id: null, corporate: null, name: "A Member",
@@ -118,6 +127,33 @@ is("and not to the members' page", r.texts[0]?.includes("www.apexiavip.com/booki
 
 r = await run({ status: "Pending", notified_status: null, corporate: null });
 is("a member booking still links to their own bookings", r.texts[0]?.includes("www.apexiavip.com/bookings"), true);
+
+
+// --- Dispatch refuses a recheck inside 30 seconds, and refuses the whole
+// request when it does. One member watching their car must not cost every
+// other booking in the sweep its answer. ---
+dispatchStatus = "Dispatched";
+
+r = await run({ status: "Pending", notified_status: null, status_checked_at: new Date().toISOString() });
+is("a booking asked about seconds ago is held back", asked.length, 0);
+is("and the sweep says so", r.payload.heldOver, 1);
+is("so Dispatch is never given the chance to refuse", r.status, 200);
+is("and nobody is texted on a run that asked nothing", r.texts.length, 0);
+
+r = await run({ status: "Pending", notified_status: null, status_checked_at: new Date(Date.now() - 120e3).toISOString() });
+is("one checked two minutes ago is asked about again", asked.join(","), "APEXIA-1");
+is("and it is texted", r.texts.length, 1);
+
+r = await run({ status: "Pending", notified_status: null, status_checked_at: null });
+is("one never checked is asked about", asked.join(","), "APEXIA-1");
+
+// If Dispatch still refuses, the run says what happened rather than reading
+// as though we could not reach it at all
+dispatchHttp = 429;
+r = await run({ status: "Pending", notified_status: null, status_checked_at: null });
+is("a refusal is reported as a refusal", r.payload.error.includes("asked us to wait"), true);
+is("and it does not claim the chauffeur was told", r.texts.length, 0);
+dispatchHttp = 200;
 
 console.log(bad === 0 ? "\na confirmation reaches the passenger" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

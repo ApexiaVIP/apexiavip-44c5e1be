@@ -17,6 +17,14 @@ const json = (status: number, body: Record<string, unknown>) =>
 const WATCH_BEFORE_HOURS = 24 * 14;
 const WATCH_AFTER_HOURS = 4;
 const MAX_WATCHED = 100;
+// Dispatch refuses a status check within thirty seconds of the last one for
+// the same booking, and refuses the whole request when one booking in it is
+// too soon. So one member watching their car could lose the answer for every
+// other booking in the sweep. Keep DISPATCH_RECHECK_MS in src/lib/bookingLive.ts
+// in step with this.
+const DISPATCH_RECHECK_MS = 30_000;
+// A little past Dispatch's own window, so a clock a second out cannot bite
+const RECHECK_MARGIN_MS = 5_000;
 
 const trySendSms = async (to: string, message: string) => {
   const sid = Deno.env.get("TWILIO_ACCOUNT_SID");
@@ -123,7 +131,7 @@ serve(async (req) => {
     const { data: watched } = await admin
       .from("bookings")
       .select(
-        "reference, user_id, corporate, name, phone, status, notified_status, collection_at, vehicle, subject_to_availability, driver_moment"
+        "reference, user_id, corporate, name, phone, status, notified_status, collection_at, vehicle, subject_to_availability, driver_moment, status_checked_at"
       )
       .not("reference", "is", null)
       .not("collection_at", "is", null)
@@ -133,8 +141,19 @@ serve(async (req) => {
       .order("collection_at")
       .limit(MAX_WATCHED);
 
-    const bookings = watched ?? [];
-    if (bookings.length === 0) return json(200, { success: true, watched: 0, notified: 0 });
+    // Somebody's app or the travel desk may have asked about one of these
+    // seconds ago. Including it would have Dispatch refuse the whole request,
+    // and the next sweep is only five minutes away.
+    const askedTooRecently = now - (DISPATCH_RECHECK_MS + RECHECK_MARGIN_MS);
+    const all = watched ?? [];
+    const bookings = all.filter((b) => {
+      const last = b.status_checked_at ? Date.parse(b.status_checked_at as string) : NaN;
+      return Number.isNaN(last) || last < askedTooRecently;
+    });
+    const heldOver = all.length - bookings.length;
+    if (bookings.length === 0) {
+      return json(200, { success: true, watched: 0, notified: 0, heldOver });
+    }
 
     // Ask Dispatch where each of them stands
     const auth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
@@ -149,8 +168,17 @@ serve(async (req) => {
       }
     );
     if (!res.ok) {
-      console.error("Dispatch status HTTP", res.status, await res.text());
-      return json(502, { success: false, error: "Could not reach the booking system" });
+      const body = await res.text();
+      console.error("Dispatch status HTTP", res.status, body);
+      return json(502, {
+        success: false,
+        error:
+          res.status === 429
+            ? "The booking system asked us to wait before checking these again"
+            : "Could not reach the booking system",
+        watched: bookings.length,
+        heldOver,
+      });
     }
     const data = await res.json();
     const result = Array.isArray(data?.Result) ? data.Result[0] : data;
@@ -326,7 +354,7 @@ serve(async (req) => {
       }
     }
 
-    return json(200, { success: true, watched: bookings.length, changed, notified, details });
+    return json(200, { success: true, watched: bookings.length, heldOver, changed, notified, details });
   } catch (error) {
     console.error("booking-watch error:", error);
     return json(500, { success: false, error: "An error occurred" });

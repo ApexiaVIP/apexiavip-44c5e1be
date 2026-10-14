@@ -170,16 +170,26 @@ export const refsToCheck = <T extends Referenced>(
 };
 
 /**
+ * Dispatch refuses a status check made within thirty seconds of the last one
+ * for the same booking, in its own words: "Please wait 30 seconds since the
+ * last status check for this booking." It refuses the whole request when one
+ * booking in it is too soon, so asking faster than this does not just waste
+ * the call, it loses the answer for every other booking asked about at the
+ * same time.
+ */
+export const DISPATCH_RECHECK_MS = 30_000;
+
+/**
  * How often the member app asks Dispatch for status while a chauffeur is
  * working a job, and in the run up to a pickup.
  *
- * These set the floor for the per hour ceiling in the booking-status function:
- * at 15 seconds a member watching one job asks 240 times an hour on its own,
- * before returning to the app refetches anything, so a ceiling of 240 cut them
- * off at the hour exactly. See MIN_CHECKS_PER_HOUR.
+ * Both sit above DISPATCH_RECHECK_MS with a margin. At fifteen seconds every
+ * second poll was refused and surfaced to the member as "we could not reach
+ * the booking system", and it was colliding with the five minute sweep as
+ * well. Slower here is genuinely faster.
  */
-export const LIVE_POLL_MS = 15_000;
-export const PENDING_POLL_MS = 30_000;
+export const LIVE_POLL_MS = 35_000;
+export const PENDING_POLL_MS = 45_000;
 
 /**
  * The least the booking-status ceiling can be without stopping our own app

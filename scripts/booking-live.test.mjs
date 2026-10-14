@@ -18,7 +18,8 @@ await esbuild.build({
   entryPoints: [join(here, "..", "src", "lib", "bookingLive.ts")],
   bundle: true, format: "esm", platform: "node", outfile: out,
 });
-const { stillRunning, effectiveStatus, chauffeurPosition, refsToCheck, LIVE_POLL_MS, MIN_CHECKS_PER_HOUR } =
+const { stillRunning, effectiveStatus, chauffeurPosition, refsToCheck, LIVE_POLL_MS,
+  PENDING_POLL_MS, DISPATCH_RECHECK_MS, MIN_CHECKS_PER_HOUR } =
   await import(pathToFileURL(out).href);
 
 const NOW = Date.parse("2026-10-08T20:00:00Z");
@@ -136,13 +137,26 @@ const fnSource = await readFile(
 const ceiling = Number(/MAX_CHECKS_PER_HOUR = (\d+)/.exec(fnSource)?.[1]);
 const refCap = Number(/MAX_REFERENCES = (\d+)/.exec(fnSource)?.[1]);
 
-is("one device watching for an hour needs this many checks", MIN_CHECKS_PER_HOUR, 240);
+// Dispatch refuses a second check on the same booking inside 30 seconds, and
+// refuses the whole request when it does, so polling faster loses the answer
+// for every other booking asked about at the same time.
+is("the live poll waits longer than Dispatch allows", LIVE_POLL_MS > DISPATCH_RECHECK_MS, true);
+is("so does the run up poll", PENDING_POLL_MS > DISPATCH_RECHECK_MS, true);
+is("and the sweep agrees on the window", DISPATCH_RECHECK_MS, 30_000);
+
+const watchSource = await (await import("node:fs/promises")).readFile(
+  join(here, "..", "supabase", "functions", "booking-watch", "index.ts"), "utf8");
+const sweepWindow = /DISPATCH_RECHECK_MS = ([\d_]+)/.exec(watchSource)?.[1];
+is("the sweep holds the same window as the client",
+  Number(String(sweepWindow).replace(/_/g, "")), DISPATCH_RECHECK_MS);
+
+is("one device watching for an hour needs this many checks", MIN_CHECKS_PER_HOUR, 103);
 is("the ceiling is readable from the function", Number.isFinite(ceiling), true);
 is("the ceiling outlasts one device watching for an hour", ceiling > MIN_CHECKS_PER_HOUR, true);
 is("with room for a second device and coming back to the app",
   ceiling >= MIN_CHECKS_PER_HOUR * 3, true);
 is("the reference cap matches what the client sends", refCap, 15);
-is("the poll interval is the one the ceiling was worked out from", LIVE_POLL_MS, 15_000);
+is("the poll interval is the one the ceiling was worked out from", LIVE_POLL_MS, 35_000);
 
 console.log(bad === 0 ? "\nthe ceiling outlasts our own polling" : `\n${bad} FAILED`);
 
