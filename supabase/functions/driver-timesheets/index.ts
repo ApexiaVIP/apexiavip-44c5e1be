@@ -361,11 +361,20 @@ serve(async (req) => {
         // Wait for the last chauffeur to finish. A night that runs past
         // midnight still gets its own day's sheet, just later.
         const quietSince = new Date(Date.now() - QUIET_MINUTES * 60 * 1000).toISOString();
+        // A shift nobody ever closed is a forgotten sign off, not somebody
+        // still working. Without this, one chauffeur who forgets once holds
+        // the wrap up open for every night after it, for everybody, for good.
+        // Past the longest a shift can run it stops counting as working, and
+        // the sheet itself already says the shift was never signed off.
+        const couldStillBeWorking = new Date(
+          Date.now() - MAX_SHIFT_HOURS * 60 * 60 * 1000
+        ).toISOString();
         const { data: openShift } = await admin
           .from("driver_shifts")
           .select("id")
           .in("driver_id", driverIds)
           .is("ended_at", null)
+          .gte("started_at", couldStillBeWorking)
           .limit(1);
         const { data: justCleared } = await admin
           .from("bookings")

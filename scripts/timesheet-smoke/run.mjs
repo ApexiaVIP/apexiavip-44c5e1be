@@ -168,12 +168,34 @@ check("and the passenger", jobMail?.html.includes("Cleared Passenger"));
 check("the job is marked as reported so it is not sent twice",
   (globalThis.__writes ?? []).some((w) => w.table === "bookings" && w.op === "update" && w.payload?.job_report_sent_at));
 
-// --- The day's wrap up waits for the last chauffeur ---
+// --- The day's wrap up waits for the last chauffeur, but not for ever ---
+// Somebody signed on two hours ago and has not signed off: they are out
+// working, so the night waits for them.
+const shiftsBefore = globalThis.__tables.driver_shifts;
+const hoursAgo = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
+globalThis.__tables.driver_shifts = [
+  { driver_id: "driver-1", started_at: uk("07:00"), ended_at: uk("15:30") },
+  { driver_id: "driver-2", started_at: hoursAgo(2), ended_at: null },
+];
 globalThis.__writes.length = 0;
 const early = await call({ mode: "daily" });
 check("with someone still on duty, the wrap up holds", early.sent.length === 0, `sent ${early.sent.length}`);
 check("and says why", String(early.payload.note).includes("still working"), early.payload.note);
 check("and nothing is recorded as sent", !(globalThis.__writes ?? []).some((w) => w.table === "timesheet_runs"));
+
+// A shift nobody ever closed is a forgotten sign off, not somebody working.
+// It used to hold the wrap up open for every night after it, for everybody,
+// which is why no timesheet had ever reached the back office.
+globalThis.__tables.driver_shifts = [
+  { driver_id: "driver-1", started_at: uk("07:00"), ended_at: uk("15:30") },
+  { driver_id: "driver-2", started_at: hoursAgo(30), ended_at: null },
+];
+globalThis.__writes.length = 0;
+const stale = await call({ mode: "daily" });
+check("a shift left open yesterday does not hold tonight", stale.sent.length > 0, `sent ${stale.sent.length}`);
+check("and the night is recorded as sent",
+  (globalThis.__writes ?? []).some((w) => w.table === "timesheet_runs"));
+globalThis.__tables.driver_shifts = shiftsBefore;
 
 // Asking for a named day is someone asking on purpose, and is never held back
 const forced = await call({ mode: "daily", date: DAY });
