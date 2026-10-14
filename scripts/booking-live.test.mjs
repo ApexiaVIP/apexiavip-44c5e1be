@@ -18,7 +18,8 @@ await esbuild.build({
   entryPoints: [join(here, "..", "src", "lib", "bookingLive.ts")],
   bundle: true, format: "esm", platform: "node", outfile: out,
 });
-const { stillRunning, effectiveStatus, chauffeurPosition, refsToCheck } = await import(pathToFileURL(out).href);
+const { stillRunning, effectiveStatus, chauffeurPosition, refsToCheck, LIVE_POLL_MS, MIN_CHECKS_PER_HOUR } =
+  await import(pathToFileURL(out).href);
 
 const NOW = Date.parse("2026-10-08T20:00:00Z");
 const hoursAgo = (h) => new Date(NOW - h * 3600 * 1000).toISOString();
@@ -123,6 +124,27 @@ is("a booking with no reference is skipped",
 is("the desk list is not reordered in place", deskList[0].reference, "NEW0");
 
 console.log(bad === 0 ? "\nthe soonest journeys are the ones checked" : `\n${bad} FAILED`);
+
+
+// --- The ceiling must outlast our own app ---
+// A member watching a chauffeur work polls continuously. If the hourly ceiling
+// in booking-status only matches that rate, their map dies on the hour, which
+// is exactly when a long hire is still running.
+const { readFile } = await import("node:fs/promises");
+const fnSource = await readFile(
+  join(here, "..", "supabase", "functions", "booking-status", "index.ts"), "utf8");
+const ceiling = Number(/MAX_CHECKS_PER_HOUR = (\d+)/.exec(fnSource)?.[1]);
+const refCap = Number(/MAX_REFERENCES = (\d+)/.exec(fnSource)?.[1]);
+
+is("one device watching for an hour needs this many checks", MIN_CHECKS_PER_HOUR, 240);
+is("the ceiling is readable from the function", Number.isFinite(ceiling), true);
+is("the ceiling outlasts one device watching for an hour", ceiling > MIN_CHECKS_PER_HOUR, true);
+is("with room for a second device and coming back to the app",
+  ceiling >= MIN_CHECKS_PER_HOUR * 3, true);
+is("the reference cap matches what the client sends", refCap, 15);
+is("the poll interval is the one the ceiling was worked out from", LIVE_POLL_MS, 15_000);
+
+console.log(bad === 0 ? "\nthe ceiling outlasts our own polling" : `\n${bad} FAILED`);
 
 console.log(bad === 0 ? "\ntracking and position source hold" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

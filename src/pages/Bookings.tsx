@@ -8,7 +8,9 @@ import {
   ACTIVE_STATUSES,
   DRIVER_STATUS_AS_DISPATCH,
   FINAL_STATUSES,
+  LIVE_POLL_MS,
   MAX_LIVE_CHECKS,
+  PENDING_POLL_MS,
   chauffeurPosition,
   refsToCheck,
   stillRunning,
@@ -226,8 +228,8 @@ const Bookings = () => {
       const anyActive = (query.state.data ?? []).some(
         (s) => s.bookingStatus && ACTIVE_STATUSES.includes(s.bookingStatus)
       );
-      if (anyActive) return 15_000;
-      return liveRefs.length > 0 ? 30_000 : false;
+      if (anyActive) return LIVE_POLL_MS;
+      return liveRefs.length > 0 ? PENDING_POLL_MS : false;
     },
     // Coming back to the app should show the current position, not the one
     // from when it was last put down

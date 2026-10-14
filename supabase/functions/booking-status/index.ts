@@ -11,7 +11,13 @@ const corsHeaders = {
 // the desk and the member app send. Callers order theirs soonest first, so a
 // job running tonight is never the one this cap drops.
 const MAX_REFERENCES = 15;
-const MAX_CHECKS_PER_HOUR = 240;
+// A member watching a chauffeur work asks every 15 seconds (LIVE_POLL_MS in
+// src/lib/bookingLive.ts), which is 240 times an hour on its own. At a ceiling
+// of 240 their map died at the hour mark, exactly when an as-directed hire is
+// still running and they are most likely to be watching. This leaves room for
+// that, for coming back to the app, and for a second device on the same
+// account, while still stopping a client stuck in a loop.
+const MAX_CHECKS_PER_HOUR = 900;
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {

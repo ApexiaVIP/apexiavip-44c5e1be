@@ -168,3 +168,21 @@ export const refsToCheck = <T extends Referenced>(
     .slice(0, cap)
     .map((b) => b.reference as string);
 };
+
+/**
+ * How often the member app asks Dispatch for status while a chauffeur is
+ * working a job, and in the run up to a pickup.
+ *
+ * These set the floor for the per hour ceiling in the booking-status function:
+ * at 15 seconds a member watching one job asks 240 times an hour on its own,
+ * before returning to the app refetches anything, so a ceiling of 240 cut them
+ * off at the hour exactly. See MIN_CHECKS_PER_HOUR.
+ */
+export const LIVE_POLL_MS = 15_000;
+export const PENDING_POLL_MS = 30_000;
+
+/**
+ * The least the booking-status ceiling can be without stopping our own app
+ * mid journey: one member, one device, watching continuously for an hour.
+ */
+export const MIN_CHECKS_PER_HOUR = Math.ceil(3600_000 / LIVE_POLL_MS);
