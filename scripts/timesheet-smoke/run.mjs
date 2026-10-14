@@ -203,12 +203,25 @@ globalThis.__tables.bookings = [
   { driver_id: "driver-2", reference: "APEXIA-LATE", name: "Very Important",
     collection_at: uk("22:00"), pickup: null, dropoff: null, via: null, stops: null,
     journey_type: "hourly", as_directed_hours: 6, vehicle: "Viano",
-    driver_status: "pob", corporate: "mcfc" },
+    driver_status: "pob", driver_status_at: hoursAgo(1), corporate: "mcfc" },
 ];
 globalThis.__writes.length = 0;
 const longDay = await call({ mode: "daily" });
 check("a chauffeur still carrying guests holds the night", longDay.sent.length === 0, `sent ${longDay.sent.length}`);
 check("however long ago they signed on", String(longDay.payload.note).includes("still working"), longDay.payload.note);
+
+// Arshad forgot to sign off and forgot to clear his last job as well. An
+// untouched job from two days ago is not somebody working either.
+globalThis.__tables.bookings = [
+  { driver_id: "driver-2", reference: "APEXIA-ABANDONED", name: "Long Gone",
+    collection_at: uk("09:00"), pickup: null, dropoff: null, via: null, stops: null,
+    journey_type: "destination", as_directed_hours: null, vehicle: "S-Class",
+    driver_status: "pob", driver_status_at: hoursAgo(50), corporate: null },
+];
+globalThis.__writes.length = 0;
+const abandoned = await call({ mode: "daily" });
+check("a job left in hand two days ago does not hold the night",
+  abandoned.sent.length > 0, `sent ${abandoned.sent.length}`);
 
 globalThis.__tables.bookings = bookingsBefore;
 globalThis.__tables.driver_shifts = shiftsBefore;

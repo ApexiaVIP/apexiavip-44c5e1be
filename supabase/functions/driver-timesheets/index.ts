@@ -401,11 +401,16 @@ serve(async (req) => {
           (s) => String(s.started_at) >= signedOnRecently
         );
         if (!someoneWorking && open.length > 0) {
+          // And the job in hand has to be a live one. Somebody who forgets to
+          // sign off usually forgot to clear their last job as well, so an
+          // untouched job from two days ago would hold the night open just as
+          // the shift row used to.
           const { data: inHand } = await admin
             .from("bookings")
             .select("reference")
             .in("driver_id", open.map((s) => s.driver_id as string))
             .in("driver_status", WORKING_STATUSES)
+            .gte("driver_status_at", signedOnRecently)
             .limit(1);
           someoneWorking = (inHand?.length ?? 0) > 0;
         }
