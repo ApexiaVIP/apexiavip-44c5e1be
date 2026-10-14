@@ -276,6 +276,18 @@ serve(async (req) => {
     const result = Array.isArray(dispatchData?.Result) ? dispatchData.Result[0] : dispatchData;
     const dispatchBookings = Array.isArray(result?.Bookings) ? result.Bookings : [];
 
+    // Dispatch starts its thirty second clock on every booking we ask about,
+    // whatever it then answers. The five minute sweep steps aside on the
+    // strength of this column, so stamping only the ones that came back with a
+    // status left it blind to the rest: a member's app checking a booking at
+    // the wrong moment had Dispatch refuse the sweep's whole batch, and the
+    // sweep lost the answer for every booking in it. Record the asking, not
+    // the answering.
+    await admin
+      .from("bookings")
+      .update({ status_checked_at: new Date().toISOString() })
+      .in("reference", ownRefs);
+
     const statuses = [];
     for (const b of dispatchBookings) {
       const reference = b?.Reference;
@@ -308,10 +320,11 @@ serve(async (req) => {
         message: b?.Message ?? null,
       });
 
+      // The stamp is already on, above, for everything we asked about
       if (bookingStatus) {
         await admin
           .from("bookings")
-          .update({ status: bookingStatus, status_checked_at: new Date().toISOString() })
+          .update({ status: bookingStatus })
           .eq("reference", reference);
       }
     }
