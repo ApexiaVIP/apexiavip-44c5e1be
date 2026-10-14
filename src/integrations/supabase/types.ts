@@ -549,6 +549,24 @@ export type Database = {
         }
         Relationships: []
       }
+      job_heartbeats: {
+        Row: {
+          detail: Json | null
+          job: string
+          last_success_at: string
+        }
+        Insert: {
+          detail?: Json | null
+          job: string
+          last_success_at?: string
+        }
+        Update: {
+          detail?: Json | null
+          job?: string
+          last_success_at?: string
+        }
+        Relationships: []
+      }
       membership_applications: {
         Row: {
           address_line1: string
