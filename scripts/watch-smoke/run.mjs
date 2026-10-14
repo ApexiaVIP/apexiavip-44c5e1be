@@ -155,5 +155,19 @@ is("a refusal is reported as a refusal", r.payload.error.includes("asked us to w
 is("and it does not claim the chauffeur was told", r.texts.length, 0);
 dispatchHttp = 200;
 
+
+// --- A run must not describe a booking as changed when it has not ---
+dispatchStatus = "Passenger On Board";
+r = await run({ status: "Passenger On Board", notified_status: null, status_checked_at: null });
+const entry = r.payload.details.find((d) => d.reference === "APEXIA-1");
+is("a status we already held is not called changed", entry.moved, false);
+is("and the count agrees with it", r.payload.changed, 0);
+
+r = await run({ status: "Pending", notified_status: null, status_checked_at: null });
+const moved = r.payload.details.find((d) => d.reference === "APEXIA-1");
+is("one that really moved says so", moved.moved, true);
+is("and is counted", r.payload.changed, 1);
+dispatchStatus = "On Route";
+
 console.log(bad === 0 ? "\na confirmation reaches the passenger" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

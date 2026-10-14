@@ -213,7 +213,8 @@ serve(async (req) => {
       // bookings, so a member eager enough to look swallowed their own change
       // and the text was never sent. What matters is what we have told them,
       // which is what notified_status records.
-      if (status !== b.status) {
+      const moved = status !== b.status;
+      if (moved) {
         changed += 1;
         await admin
           .from("bookings")
@@ -223,7 +224,14 @@ serve(async (req) => {
 
       const moment = classify(status);
       if (!moment) {
-        details.push({ reference: b.reference, status, outcome: "changed, nothing worth texting" });
+        // Say whether it actually moved. Reading "changed" against a count of
+        // zero sent us looking for a bug that was only ever the wording.
+        details.push({
+          reference: b.reference,
+          status,
+          moved,
+          outcome: "nothing a passenger gains from",
+        });
         // Back to an uninteresting state: whatever we said no longer stands
         if (b.notified_status) {
           await admin
