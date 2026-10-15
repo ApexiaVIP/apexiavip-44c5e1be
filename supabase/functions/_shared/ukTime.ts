@@ -82,3 +82,34 @@ export const ukWallClockUtc = (ymd: string, hhmm: string): Date => {
   instant = naive - ukOffsetMinutes(new Date(instant)) * 60000;
   return new Date(instant);
 };
+
+/**
+ * From this hour, UK time, an evening counts as belonging to the day it is
+ * ending rather than the one about to begin.
+ */
+const EVENING_FROM_HOUR = 20;
+
+/**
+ * The day a nightly sheet is owed for, given when the run happens.
+ *
+ * The run fires late and then keeps trying through the small hours while it
+ * waits for the last chauffeur to finish. Before midnight the day ending is
+ * today; after midnight the day owed a sheet is yesterday.
+ *
+ * This used to be read as simply three hours ago, which held just after
+ * midnight and then broke: by 03:00 the lookback named the day barely begun.
+ * On 15 October 2026 a run at 03:00 sent a nearly empty sheet for that
+ * morning and recorded the day as done, which would have stopped the real
+ * wrap up going out that night.
+ */
+export const ukDayOwedASheet = (now: Date = new Date()): string => {
+  const today = ukDay(now);
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(now)
+  );
+  return hour >= EVENING_FROM_HOUR ? today : ukDayPlus(today, -1);
+};

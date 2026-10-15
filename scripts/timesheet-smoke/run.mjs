@@ -318,5 +318,54 @@ const heldNight = await call({ mode: "daily" });
 check("and so does a night that waits for a chauffeur",
   (globalThis.__writes ?? []).some((w) => w.table === "job_heartbeats"), heldNight.payload.note);
 
+
+// --- Which day a nightly run is owed a sheet for ---
+// Built and checked on its own, because the fault depended entirely on the
+// time of night the run happened, and these are the exact times that broke it.
+{
+  const ukOut = join(await mkdtemp(join(tmpdir(), "uk-")), "u.mjs");
+  await esbuild.build({
+    entryPoints: [join(here, "..", "..", "supabase", "functions", "_shared", "ukTime.ts")],
+    bundle: true, format: "esm", platform: "node", outfile: ukOut,
+  });
+  const { ukDayOwedASheet } = await import(pathToFileURL(ukOut).href);
+  const owed = (iso) => ukDayOwedASheet(new Date(iso));
+
+  // British Summer Time, the night this went wrong
+  check("a run at 23:00 UK reports that same day",
+    owed("2026-10-14T22:00:00Z") === "2026-10-14", owed("2026-10-14T22:00:00Z"));
+  check("and just after midnight still reports the day that ended",
+    owed("2026-10-14T23:30:00Z") === "2026-10-14", owed("2026-10-14T23:30:00Z"));
+  check("at 02:30 UK, still waiting for a chauffeur, still yesterday",
+    owed("2026-10-15T01:30:00Z") === "2026-10-14", owed("2026-10-15T01:30:00Z"));
+  // This is the one that sent a sheet for a day two hours old
+  check("at 03:00 UK it does not jump to the day barely begun",
+    owed("2026-10-15T02:00:00Z") === "2026-10-14", owed("2026-10-15T02:00:00Z"));
+  check("nor at the last run of the night",
+    owed("2026-10-15T04:30:00Z") === "2026-10-14", owed("2026-10-15T04:30:00Z"));
+
+  // And the same through the winter, when UK time is UTC
+  check("in GMT, a run at 23:30 reports that day",
+    owed("2026-12-14T23:30:00Z") === "2026-12-14", owed("2026-12-14T23:30:00Z"));
+  check("in GMT, a run at 03:00 reports the day before",
+    owed("2026-12-15T03:00:00Z") === "2026-12-14", owed("2026-12-15T03:00:00Z"));
+
+  // The clocks change on 25 October 2026. The night of the change runs 25
+  // hours, and a sheet must still be owed to the day that ended.
+  // 25 October 2026 is when the clocks go back, so that night runs 25 hours
+  // and BST has already ended by 01:30 UTC.
+  check("the small hours of the clock change report the day that ended",
+    owed("2026-10-25T01:30:00Z") === "2026-10-24", owed("2026-10-25T01:30:00Z"));
+  check("and an hour earlier, still on BST, reads the same",
+    owed("2026-10-25T00:30:00Z") === "2026-10-24", owed("2026-10-25T00:30:00Z"));
+  check("and the evening before belongs to the 24th",
+    owed("2026-10-24T22:30:00Z") === "2026-10-24", owed("2026-10-24T22:30:00Z"));
+
+  // Midnight exactly, which is where an hour-24 bug would show
+  check("midnight UK belongs to the day that ended",
+    owed("2026-10-14T23:00:00Z") === "2026-10-14", owed("2026-10-14T23:00:00Z"));
+
+}
+
 console.log(bad === 0 ? "\nall checks passed" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

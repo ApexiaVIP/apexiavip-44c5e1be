@@ -6,6 +6,7 @@ import {
   ukDay,
   ukDayEnd,
   ukDayName,
+  ukDayOwedASheet,
   ukDayPlus,
   ukDayStart,
   ukTimeOf,
@@ -76,14 +77,15 @@ const CAUGHT_UP_WITHIN_SECONDS = 120;
 const REPORT_WITHIN_HOURS = 12;
 
 /**
- * Which day to report on. The daily run fires late in the evening, so the day
- * that has just finished is the one three hours ago: that holds whether the
- * clocks are on BST or GMT.
+ * Which day to report on. The shared rule decides it: before midnight the
+ * evening belongs to the day ending, after midnight the day owed a sheet is
+ * yesterday. Naming a date overrides all of it, which is how a missed night
+ * gets sent afterwards.
  */
 const dayToReport = (override: unknown): string =>
   typeof override === "string" && /^\d{4}-\d{2}-\d{2}$/.test(override)
     ? override
-    : ukDay(new Date(Date.now() - 3 * 3600 * 1000));
+    : ukDayOwedASheet();
 
 interface Shift {
   started_at: string;
