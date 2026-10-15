@@ -10,7 +10,9 @@
  */
 export interface HeartbeatWriter {
   from: (table: string) => {
-    upsert: (row: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
+    // The client hands back a builder that only settles when awaited, not a
+    // Promise, so the value is left as whatever it is and awaited as such
+    upsert: (row: Record<string, unknown>, options?: Record<string, unknown>) => unknown;
   };
 }
 
