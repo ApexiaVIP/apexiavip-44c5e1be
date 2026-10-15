@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/health",
+      "destination": "https://mzqpvnxtwshjcyzaipea.supabase.co/functions/v1/health"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
