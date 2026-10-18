@@ -28,3 +28,6 @@ ios/App/build/
 # Xcode archives and exported builds: large, rebuildable, never source
 build/
 ios/App/build/
+
+# Signing keys never belong in the repo, wherever they are dropped
+*.p8
