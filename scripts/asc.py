@@ -16,7 +16,9 @@ Usage:
   python3 scripts/asc.py versions         app store versions and theirs
 """
 import json, sys, time, urllib.request, urllib.error
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 HOME = Path.home() / ".appstoreconnect"
 CONFIG = HOME / "config.json"
@@ -76,20 +78,42 @@ def app_id() -> str:
     return data["data"][0]["id"]
 
 
+def uk(stamp: str) -> str:
+    """Apple answers in Pacific time. Nobody here thinks in Pacific time."""
+    if not stamp:
+        return "?"
+    try:
+        when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        return when.astimezone(ZoneInfo("Europe/London")).strftime("%d %b %H:%M")
+    except ValueError:
+        return stamp
+
+
 def builds() -> None:
-    data = get(f"builds?filter[app]={app_id()}&limit=10&sort=-uploadedDate")
+    # The marketing version lives on a related resource rather than on the
+    # build, so without including it every row reads as unknown
+    data = get(
+        f"builds?filter[app]={app_id()}&limit=10&sort=-uploadedDate"
+        "&include=preReleaseVersion"
+    )
     rows = data.get("data", [])
     if not rows:
         print("No builds at all.")
         return
-    print(f"{'version':<10} {'build':<8} {'state':<28} uploaded")
+    version_of = {
+        inc["id"]: inc["attributes"].get("version", "?")
+        for inc in data.get("included", [])
+        if inc["type"] == "preReleaseVersions"
+    }
+    print(f"{'version':<10} {'build':<8} {'state':<14} uploaded (UK)")
     for b in rows:
         a = b["attributes"]
+        rel = b.get("relationships", {}).get("preReleaseVersion", {}).get("data") or {}
         print(
-            f"{str(a.get('preReleaseVersion') or '?'):<10} "
+            f"{version_of.get(rel.get('id'), '?'):<10} "
             f"{str(a.get('version')):<8} "
-            f"{str(a.get('processingState')):<28} "
-            f"{str(a.get('uploadedDate'))[:19].replace('T', ' ')}"
+            f"{str(a.get('processingState')):<14} "
+            f"{uk(a.get('uploadedDate'))}"
         )
 
 
