@@ -31,3 +31,6 @@ ios/App/build/
 
 # Signing keys never belong in the repo, wherever they are dropped
 *.p8
+
+# Personal permission settings, not the team's
+.claude/settings.local.json
