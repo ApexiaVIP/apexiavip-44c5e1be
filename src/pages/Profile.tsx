@@ -145,9 +145,23 @@ const Profile = () => {
       const path = `${user.id}/avatar-${Date.now()}.${ext}`;
       const { error } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
       if (error) throw error;
+
+      // Write it to the profile now rather than waiting for the form to be
+      // saved. Choosing a photo looks finished the moment it appears, so
+      // anybody who picks one and leaves the page had, until this, uploaded a
+      // file that nothing ever pointed at: the picture came back for the rest
+      // of the visit and was gone by the next one.
+      const { error: saveError } = await supabase
+        .from("profiles")
+        .update({ avatar_url: path })
+        .eq("id", user.id);
+      if (saveError) throw saveError;
+
       // The bucket is private: store the path and display via signed URLs
       setAvatarUrl(path);
       setAvatarPreview(URL.createObjectURL(file));
+      await refreshProfile();
+      toast({ title: "Photo saved" });
     } catch {
       toast({ title: "Upload failed", description: "Please try a different image.", variant: "destructive" });
     } finally {
