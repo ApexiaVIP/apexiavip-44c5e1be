@@ -50,9 +50,16 @@ export interface Vehicle {
   gallery?: string[];
   /** Shown under the name, for a car whose model year is worth stating */
   modelYear?: string;
+  /**
+   * Kept off the site. For a car that is bought but not yet delivered: the
+   * page and its pictures stay ready, and nobody can reach them or see it in
+   * the fleet until this comes off.
+   */
+  hidden?: boolean;
 }
 
-export const vehicles: Vehicle[] = [
+/** Everything we hold, including cars that are not on the site yet. */
+export const allVehicles: Vehicle[] = [
   {
     slug: "range-rover",
     name: "Range Rover",
@@ -110,6 +117,9 @@ export const vehicles: Vehicle[] = [
     slug: "jetclass-7-seat",
     name: "JetClass Seven",
     modelYear: "2026/2027",
+    // Not delivered yet, so not on the site. Take this line out on the day
+    // it arrives and the page is live again exactly as it is.
+    hidden: true,
     image: jc7ExteriorFront,
     interiorImage: jc7Cabin,
     objectPos: "object-center",
@@ -152,3 +162,6 @@ export const vehicles: Vehicle[] = [
     ],
   },
 ];
+
+/** What the public sees. Anything still on its way is not in here. */
+export const vehicles: Vehicle[] = allVehicles.filter((v) => !v.hidden);

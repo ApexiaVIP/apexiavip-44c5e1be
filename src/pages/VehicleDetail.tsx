@@ -11,6 +11,8 @@ const VehicleDetail = () => {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [slug]);
+  // `vehicles` already excludes anything not released, so a hidden car is
+  // unreachable by its address as well as absent from the fleet
   const vehicle = vehicles.find((v) => v.slug === slug);
 
   if (!vehicle) {
