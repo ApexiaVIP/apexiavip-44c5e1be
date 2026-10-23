@@ -16,6 +16,22 @@ import rrInterior4 from "@/assets/rr-interior-4.jpg";
 import rrDashboard from "@/assets/rr-dashboard.jpg";
 import rrFront from "@/assets/rr-front.jpg";
 
+import jc7ExteriorSide from "@/assets/jc7-exterior-side.jpg";
+import jc7ExteriorFront from "@/assets/jc7-exterior-front.jpg";
+import jc7ExteriorRear from "@/assets/jc7-exterior-rear.jpg";
+import jc7Cabin from "@/assets/jc7-cabin.jpg";
+import jc7CabinRear from "@/assets/jc7-cabin-rear.jpg";
+import jc7CabinAlt from "@/assets/jc7-cabin-alt.jpg";
+import jc7Seats from "@/assets/jc7-seats.jpg";
+import jc7Screen from "@/assets/jc7-screen.jpg";
+import jc7Console from "@/assets/jc7-console.jpg";
+import jc7Refreshments from "@/assets/jc7-refreshments.jpg";
+import jc7Ambient from "@/assets/jc7-ambient.jpg";
+import jc7Headliner from "@/assets/jc7-headliner.jpg";
+import jc7Controls from "@/assets/jc7-controls.jpg";
+import jc7Sill from "@/assets/jc7-sill.jpg";
+import jc7Loadspace from "@/assets/jc7-loadspace.jpg";
+
 import scFront from "@/assets/sc-front.jpg";
 import scSide from "@/assets/sc-side.jpg";
 import scInterior from "@/assets/sc-interior.jpg";
@@ -32,6 +48,8 @@ export interface Vehicle {
   luggage: number;
   features: string[];
   gallery?: string[];
+  /** Shown under the name, for a car whose model year is worth stating */
+  modelYear?: string;
 }
 
 export const vehicles: Vehicle[] = [
@@ -86,6 +104,33 @@ export const vehicles: Vehicle[] = [
       "Extended Luggage Capacity",
       "Wi-Fi Connectivity",
       "USB Charging Ports",
+    ],
+  },
+  {
+    slug: "jetclass-7-seat",
+    name: "JetClass Seven",
+    modelYear: "2026/2027",
+    image: jc7ExteriorFront,
+    interiorImage: jc7Cabin,
+    objectPos: "object-center",
+    passengers: 7,
+    luggage: 4,
+    features: [
+      "Seven Seats in Silk Beige Hide",
+      "Reclining Captain Chairs",
+      "Panoramic Roof and Starlight Headliner",
+      "Rear Entertainment Screen",
+      "Chilled Refreshment Console",
+      "Cut Glass Barware",
+      "Ambient Cabin Lighting",
+      "Wi-Fi Connectivity",
+    ],
+    gallery: [
+      jc7ExteriorSide, jc7ExteriorFront, jc7ExteriorRear,
+      jc7CabinRear, jc7CabinAlt, jc7Seats,
+      jc7Screen, jc7Console, jc7Refreshments,
+      jc7Ambient, jc7Headliner, jc7Controls,
+      jc7Sill, jc7Loadspace,
     ],
   },
   {

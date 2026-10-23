@@ -42,9 +42,15 @@ const VehicleDetail = () => {
             </Link>
 
             {/* Vehicle name */}
-            <h1 className="font-display text-4xl md:text-5xl text-foreground tracking-tight mb-16" style={{ fontStretch: "condensed" }}>
+            <h1 className="font-display text-4xl md:text-5xl text-foreground tracking-tight mb-3" style={{ fontStretch: "condensed" }}>
               {vehicle.name}
             </h1>
+            {vehicle.modelYear && (
+              <p className="text-champagne text-xs tracking-[0.4em] uppercase mb-16">
+                {vehicle.modelYear} Model
+              </p>
+            )}
+            {!vehicle.modelYear && <div className="mb-16" />}
 
             {/* Vehicle images */}
             {vehicle.gallery && vehicle.gallery.length > 0 ? (
