@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import {
+  destinationQuery, googleMapsLink, nextDestination, openNavigation, wazeLink,
+} from "@/lib/navigation";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
@@ -113,6 +116,56 @@ const stepLabel: Record<string, string> = {
 /** Where a job has got to, in the chauffeur's own words. */
 const whereItIs = (status: Step | null) =>
   status ? stepLabel[status] : "Not started";
+
+/**
+ * One tap from the job to driving it.
+ *
+ * Chauffeurs were leaving the app, opening Waze and typing the postcode in by
+ * hand. Waze leads because it is what they use, and because its traffic is
+ * the reason they were leaving in the first place. Maps is there for the ones
+ * who prefer it and for when Waze is not installed.
+ *
+ * Where it sends them follows the job: the collection until the passenger is
+ * aboard, the destination afterwards.
+ */
+export function NavigateRow({ job, asDirected }: { job: Job; asDirected: boolean }) {
+  const heading = nextDestination(
+    { pickup: job.pickup, dropoff: job.dropoff, as_directed: asDirected },
+    job.driver_status
+  );
+  if (!heading) return null;
+
+  const query = destinationQuery(heading.place);
+  if (!query) return null;
+
+  const goingToPickup = heading.what === "pickup";
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] tracking-[0.15em] uppercase text-smoke">
+        {goingToPickup ? "Drive to the collection" : "Drive to the destination"}
+      </p>
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          onClick={() => openNavigation(wazeLink(heading.place))}
+          className="flex-1 h-14 rounded-none text-sm tracking-[0.15em] uppercase font-light"
+        >
+          <Navigation className="w-4 h-4 mr-2" />
+          Waze
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => openNavigation(googleMapsLink(heading.place))}
+          className="flex-1 h-14 rounded-none text-sm tracking-[0.15em] uppercase font-light"
+        >
+          <MapPin className="w-4 h-4 mr-2" />
+          Maps
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 const Driver = () => {
   const { user, profile, mfaVerified, mfaResolved, loading, isAdmin } = useAuth();
@@ -425,6 +478,8 @@ const Driver = () => {
             </p>
           )}
         </div>
+
+        <NavigateRow job={job} asDirected={asDirected} />
 
         {(job.notes || (job.children?.length ?? 0) > 0) && (
           <div className="border border-champagne-muted bg-champagne/5 px-3 py-2 text-xs text-smoke space-y-1">
