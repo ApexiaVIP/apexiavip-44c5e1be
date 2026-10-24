@@ -32,6 +32,8 @@ const YARDS_PER_M = 1.09361;
 const M_PER_MILE = 1609.344;
 
 export interface Guidance {
+  /** How far along the whole route the car has got, in metres. */
+  along: number;
   /** The step being driven. */
   stepIndex: number;
   step: Step;
@@ -176,7 +178,46 @@ const stepEnd = (route: NavRoute, stepIndex: number): number => {
   return next ? cum[next.fromIndex] : cum[cum.length - 1];
 };
 
-export const follow = (route: NavRoute, pos: LatLng, lastIndex = -1): Guidance => {
+/**
+ * Where a given distance along the route puts the car.
+ *
+ * The inverse of the measuring: used to hold the car at the furthest point it
+ * has reached when a wandering phone reports it slightly behind.
+ */
+const atDistance = (
+  route: NavRoute,
+  cum: number[],
+  along: number
+): { lineIndex: number; t: number; point: LatLng } => {
+  let i = 0;
+  while (i < cum.length - 2 && cum[i + 1] < along) i++;
+  const segment = cum[i + 1] - cum[i];
+  const t = segment > 0 ? Math.min(1, Math.max(0, (along - cum[i]) / segment)) : 0;
+  const a = route.line[i];
+  const b = route.line[i + 1] ?? a;
+  return {
+    lineIndex: i,
+    t,
+    point: { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t },
+  };
+};
+
+/**
+ * Follow the car along the route.
+ *
+ * `leastAlong` is the furthest it has already got, and the journey is never
+ * allowed back behind it. A phone in a city wanders twenty metres between
+ * tall buildings, and without this the reading slips back over a junction it
+ * has already passed: the banner returns to an instruction the chauffeur has
+ * just carried out, which is how a driver stops believing the screen. Going
+ * genuinely backwards means leaving the route, and that earns a new one.
+ */
+export const follow = (
+  route: NavRoute,
+  pos: LatLng,
+  lastIndex = -1,
+  leastAlong = 0
+): Guidance => {
   const cum = cumulative(route);
   const total = cum[cum.length - 1];
   const found = locate(route, pos, lastIndex);
@@ -185,9 +226,11 @@ export const follow = (route: NavRoute, pos: LatLng, lastIndex = -1): Guidance =
     cum[found.lineIndex + 1] !== undefined
       ? cum[found.lineIndex + 1] - cum[found.lineIndex]
       : 0;
-  const along = cum[found.lineIndex] + found.t * segment;
+  const reading = cum[found.lineIndex] + found.t * segment;
+  const along = Math.max(reading, Math.min(leastAlong, total));
+  const held = along > reading ? atDistance(route, cum, along) : found;
 
-  const stepIndex = stepAt(route, found.lineIndex);
+  const stepIndex = stepAt(route, held.lineIndex);
   const step = route.steps[stepIndex];
   const toTurn = Math.max(0, stepEnd(route, stepIndex) - along);
   const metresLeft = Math.max(0, total - along);
@@ -203,10 +246,11 @@ export const follow = (route: NavRoute, pos: LatLng, lastIndex = -1): Guidance =
   const leftOfStep = stepLength > 0 ? Math.min(1, toTurn / stepLength) : 0;
   secondsLeft += step.seconds * leftOfStep;
 
-  const ahead = route.line[Math.min(found.lineIndex + 1, route.line.length - 1)];
-  const behind = route.line[found.lineIndex];
+  const ahead = route.line[Math.min(held.lineIndex + 1, route.line.length - 1)];
+  const behind = route.line[held.lineIndex];
 
   return {
+    along,
     stepIndex,
     step,
     next: route.steps[stepIndex + 1] ?? step,
@@ -214,9 +258,11 @@ export const follow = (route: NavRoute, pos: LatLng, lastIndex = -1): Guidance =
     toTurn,
     metresLeft,
     secondsLeft,
+    // Measured from where the phone actually says the car is, never from the
+    // held reading, or leaving the route would go unnoticed
     offBy: found.offBy,
-    snapped: found.point,
-    lineIndex: found.lineIndex,
+    snapped: held.point,
+    lineIndex: held.lineIndex,
     course: bearing(behind.lat, behind.lng, ahead.lat, ahead.lng),
     arrived: metresLeft <= ARRIVED_M,
   };

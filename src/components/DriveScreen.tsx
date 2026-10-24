@@ -175,6 +175,8 @@ const DriveScreen = ({
   const onGoogle = googleMapsConfigured() && !googleOut;
 
   const lineIndex = useRef(-1);
+  /** The furthest along the route the car has got, so it never slips back. */
+  const along = useRef(0);
   const strayed = useRef(0);
   const askedAt = useRef(0);
   const asking = useRef(false);
@@ -212,6 +214,7 @@ const DriveScreen = ({
         // at an empty screen for a second or two every time
         const first = follow(worked, from, -1);
         lineIndex.current = first.lineIndex;
+        along.current = first.along;
         setRoute(worked);
         setGuidance(first);
         setStage((was) => (was === "arrived" ? was : "driving"));
@@ -276,8 +279,9 @@ const DriveScreen = ({
     if (!route || !target) return;
     const stop = watchDriving((fix) => {
       latest.current = fix;
-      const next = follow(route, fix, lineIndex.current);
+      const next = follow(route, fix, lineIndex.current, along.current);
       lineIndex.current = next.lineIndex;
+      along.current = next.along;
       setGuidance(next);
 
       if (next.arrived) {

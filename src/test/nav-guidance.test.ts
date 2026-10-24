@@ -220,6 +220,28 @@ describe("following a route", () => {
     expect(g.course).toBeCloseTo(0, 0);
   });
 
+  /**
+   * Holding the car at the furthest point it reached must never be confused
+   * with it having strayed. Off route has to be measured from where the phone
+   * actually says the car is, or a chauffeur who takes a wrong turning while
+   * the reading is held forward would never get a new route.
+   */
+  it("measures straying from the real position, not from the held reading", () => {
+    const route = simple();
+    const onTheRoute = { lat: 53.4820, lng: -2.24 };
+    // Held a long way ahead of where the car actually is
+    const held = follow(route, onTheRoute, -1, 700);
+    expect(held.along).toBeCloseTo(700, 0);
+    expect(held.offBy).toBeLessThan(2);
+    expect(offRoute(held)).toBe(false);
+  });
+
+  it("still spots a car that has left the route while the reading is held", () => {
+    const route = simple();
+    const wellOff = { lat: 53.4820, lng: -2.2425 };
+    expect(offRoute(follow(route, wellOff, -1, 700))).toBe(true);
+  });
+
   it("calls it off route only once the car has properly left it", () => {
     const route = simple();
     const drifted = follow(route, { lat: 53.4825, lng: -2.2405 }, -1);
