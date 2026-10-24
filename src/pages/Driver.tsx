@@ -26,6 +26,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { isInstalledApp } from "@/lib/appLinks";
 import { currentPlace, followPosition, keepScreenAwake } from "@/lib/whereAmI";
+import DriveScreen from "@/components/DriveScreen";
+import { wakeVoice } from "@/lib/navVoice";
 import { splitJobs } from "@/lib/driverQueue";
 
 type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
@@ -120,15 +122,26 @@ const whereItIs = (status: Step | null) =>
 /**
  * One tap from the job to driving it.
  *
- * Chauffeurs were leaving the app, opening Waze and typing the postcode in by
- * hand. Waze leads because it is what they use, and because its traffic is
- * the reason they were leaving in the first place. Maps is there for the ones
- * who prefer it and for when Waze is not installed.
+ * The app does the navigating itself. Handing over to Waze put this app to
+ * sleep, and a sleeping app reports no positions, so the passenger watched a
+ * car that never moved for the whole journey. Driving here keeps the app in
+ * front of the chauffeur and the car moving on the passenger's map.
  *
- * Where it sends them follows the job: the collection until the passenger is
+ * Waze and Maps are left underneath for the night the route will not come,
+ * and the cost of using them is written next to them.
+ *
+ * Where it heads follows the job: the collection until the passenger is
  * aboard, the destination afterwards.
  */
-export function NavigateRow({ job, asDirected }: { job: Job; asDirected: boolean }) {
+export function NavigateRow({
+  job,
+  asDirected,
+  onDrive,
+}: {
+  job: Job;
+  asDirected: boolean;
+  onDrive?: (what: "pickup" | "dropoff") => void;
+}) {
   const heading = nextDestination(
     { pickup: job.pickup, dropoff: job.dropoff, as_directed: asDirected },
     job.driver_status
@@ -145,24 +158,37 @@ export function NavigateRow({ job, asDirected }: { job: Job; asDirected: boolean
       <p className="text-[10px] tracking-[0.15em] uppercase text-smoke">
         {goingToPickup ? "Drive to the collection" : "Drive to the destination"}
       </p>
+      {onDrive && (
+        <Button
+          onClick={() => onDrive(heading.what)}
+          className="w-full h-16 rounded-none text-sm tracking-[0.2em] uppercase font-light"
+        >
+          <Navigation className="w-4 h-4 mr-2" />
+          Drive
+        </Button>
+      )}
       <div className="flex gap-2">
         <Button
           variant="outline"
           onClick={() => openNavigation(wazeLink(heading.place))}
-          className="flex-1 h-14 rounded-none text-sm tracking-[0.15em] uppercase font-light"
+          className="flex-1 h-11 rounded-none text-xs tracking-[0.15em] uppercase font-light text-smoke"
         >
-          <Navigation className="w-4 h-4 mr-2" />
           Waze
         </Button>
         <Button
           variant="outline"
           onClick={() => openNavigation(googleMapsLink(heading.place))}
-          className="flex-1 h-14 rounded-none text-sm tracking-[0.15em] uppercase font-light"
+          className="flex-1 h-11 rounded-none text-xs tracking-[0.15em] uppercase font-light text-smoke"
         >
           <MapPin className="w-4 h-4 mr-2" />
           Maps
         </Button>
       </div>
+      {onDrive && (
+        <p className="text-[10px] text-smoke/70 leading-relaxed">
+          Leaving the app for Waze stops the passenger seeing the car move.
+        </p>
+      )}
     </div>
   );
 }
@@ -171,6 +197,9 @@ const Driver = () => {
   const { user, profile, mfaVerified, mfaResolved, loading, isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const [waitFor, setWaitFor] = useState<string | null>(null);
+  const [driveFor, setDriveFor] = useState<{ reference: string; what: "pickup" | "dropoff" } | null>(
+    null
+  );
   const [clearFor, setClearFor] = useState<string | null>(null);
   const [clearNotes, setClearNotes] = useState("");
   const [waitPlace, setWaitPlace] = useState("");
@@ -275,6 +304,47 @@ const Driver = () => {
 
   const step = (job: Job, kind: Step, place = "", fix: { lat?: number; lng?: number } = {}) =>
     act.mutate({ action: "progress", reference: job.reference, kind, place, ...fix });
+
+  /**
+   * Start navigating a job.
+   *
+   * A chauffeur who has set off is en route, so the office is told without
+   * anybody having to remember to press it first. The voice is woken here
+   * because this tap is the gesture a phone wants before it will speak.
+   */
+  const startDrive = (job: Job, what: "pickup" | "dropoff") => {
+    wakeVoice();
+    if (onShift && !job.driver_status) step(job, "en_route");
+    setDriveFor({ reference: job.reference, what });
+  };
+
+  /**
+   * Move the job on from inside the drive.
+   *
+   * Marking the passenger aboard turns the drive round to the destination on
+   * the spot, so the chauffeur never comes out of navigation between the two
+   * halves of a job.
+   */
+  const advance = (job: Job, kind: "arrived" | "pob") => {
+    step(job, kind);
+    if (kind === "pob") setDriveFor({ reference: job.reference, what: "dropoff" });
+  };
+
+  /**
+   * The car has pulled up where it was heading.
+   *
+   * Arriving to collect is one button. Setting down is not: the office needs
+   * where it happened and anything to charge, so that lands on the clear form
+   * with the job already open.
+   */
+  const reachedIt = (job: Job, what: "pickup" | "dropoff") => {
+    setDriveFor(null);
+    if (what === "pickup") {
+      step(job, "arrived");
+      return;
+    }
+    setClearFor(job.reference);
+  };
 
   /** Fetch a position, then let the chauffeur correct it before it is saved. */
   const openWait = async (job: Job) => {
@@ -479,7 +549,7 @@ const Driver = () => {
           )}
         </div>
 
-        <NavigateRow job={job} asDirected={asDirected} />
+        <NavigateRow job={job} asDirected={asDirected} onDrive={(what) => startDrive(job, what)} />
 
         {(job.notes || (job.children?.length ?? 0) > 0) && (
           <div className="border border-champagne-muted bg-champagne/5 px-3 py-2 text-xs text-smoke space-y-1">
@@ -496,8 +566,23 @@ const Driver = () => {
     );
   };
 
+  const driving = driveFor
+    ? allJobs.find((j) => j.reference === driveFor.reference) ?? null
+    : null;
+
   return (
     <div className="min-h-screen bg-background">
+      {driving && driveFor && (
+        <DriveScreen
+          reference={driving.reference}
+          to={driveFor.what === "pickup" ? driving.pickup : driving.dropoff}
+          what={driveFor.what}
+          status={driving.driver_status}
+          onAdvance={(kind) => advance(driving, kind)}
+          onSetDown={() => reachedIt(driving, "dropoff")}
+          onClose={() => setDriveFor(null)}
+        />
+      )}
       <Header />
       <main
         className={

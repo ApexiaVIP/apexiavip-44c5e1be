@@ -146,3 +146,61 @@ export const keepScreenAwake = (): (() => void) => {
     held = null;
   };
 };
+
+/** A single fix, for working out a route from where the car is standing. */
+export interface Fix {
+  lat: number;
+  lng: number;
+  /** Which way the car is pointing, where the phone can tell. */
+  heading: number | null;
+  /** Metres per second, where the phone can tell. */
+  speed: number | null;
+}
+
+export const currentFix = async (): Promise<Fix | null> => {
+  try {
+    const position = await fix();
+    const { latitude, longitude, heading, speed } = position.coords;
+    return {
+      lat: latitude,
+      lng: longitude,
+      heading: typeof heading === "number" && !Number.isNaN(heading) ? heading : null,
+      speed: typeof speed === "number" && !Number.isNaN(speed) ? speed : null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Follow the phone closely, for navigating by.
+ *
+ * Every fix is passed on as it arrives rather than on a beat, because the
+ * countdown to a turn has to be right at the turn, not up to six seconds
+ * stale. Returns a function that stops it.
+ */
+export const watchDriving = (
+  onFix: (fix: Fix) => void,
+  onRefused?: () => void
+): (() => void) => {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    onRefused?.();
+    return () => {};
+  }
+  const watch = navigator.geolocation.watchPosition(
+    (position) => {
+      const { latitude, longitude, heading, speed } = position.coords;
+      onFix({
+        lat: latitude,
+        lng: longitude,
+        heading: typeof heading === "number" && !Number.isNaN(heading) ? heading : null,
+        speed: typeof speed === "number" && !Number.isNaN(speed) ? speed : null,
+      });
+    },
+    (err) => {
+      if (err.code === err.PERMISSION_DENIED) onRefused?.();
+    },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+  );
+  return () => navigator.geolocation.clearWatch(watch);
+};

@@ -191,3 +191,30 @@
 .apx-map .maplibregl-ctrl-attrib-button {
   background-color: rgba(194, 164, 104, 0.25);
 }
+
+/*
+ * The driving screen.
+ *
+ * The attribution has to clear the strip along the bottom, which carries the
+ * arrival time and sits over the map.
+ */
+.apx-drive .maplibregl-ctrl-bottom-left {
+  bottom: 6.5rem;
+}
+/*
+ * Both selectors: MapLibre styles the collapsed pill with two classes of its
+ * own, and its stylesheet is injected after this one, so a single class here
+ * ties on specificity and loses.
+ */
+.apx-drive .maplibregl-ctrl-attrib,
+.apx-drive .maplibregl-ctrl-attrib.maplibregl-compact {
+  background-color: rgba(11, 10, 8, 0.7);
+  color: #8a8070;
+  font-size: 9px;
+}
+.apx-drive .maplibregl-ctrl-attrib a {
+  color: #8a8070;
+}
+.apx-drive .maplibregl-ctrl-attrib-button {
+  background-color: rgba(205, 187, 149, 0.25);
+}

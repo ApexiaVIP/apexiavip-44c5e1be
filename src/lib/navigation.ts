@@ -85,5 +85,7 @@ export function appleMapsLink(place: Place): string {
  */
 export function openNavigation(url: string): void {
   if (!url) return;
-  window.open(url, "_system", "location=yes") ?? window.open(url, "_blank");
+  // The native shell hands "_system" to the real app instead of our webview
+  const opened = window.open(url, "_system", "location=yes");
+  if (!opened) window.open(url, "_blank");
 }
