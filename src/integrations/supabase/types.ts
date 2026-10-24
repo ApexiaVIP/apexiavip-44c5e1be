@@ -64,6 +64,7 @@ export type Database = {
           corporate: string | null
           created_at: string
           declined_reason: string | null
+          driver_eta_at: string | null
           driver_id: string | null
           driver_lat: number | null
           driver_lng: number | null
@@ -107,6 +108,7 @@ export type Database = {
           corporate?: string | null
           created_at?: string
           declined_reason?: string | null
+          driver_eta_at?: string | null
           driver_id?: string | null
           driver_lat?: number | null
           driver_lng?: number | null
@@ -150,6 +152,7 @@ export type Database = {
           corporate?: string | null
           created_at?: string
           declined_reason?: string | null
+          driver_eta_at?: string | null
           driver_id?: string | null
           driver_lat?: number | null
           driver_lng?: number | null
