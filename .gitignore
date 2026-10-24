@@ -33,7 +33,6 @@ ios/App/build/
 *.p8
 
 # Personal permission settings, not the team's
-.claude/settings.local.json
 
 # Scratch folder for the Lightroom album import, not part of the site
 .vehicle-import/
