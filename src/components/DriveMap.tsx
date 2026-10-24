@@ -5,11 +5,9 @@ import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 import { Crosshair } from "lucide-react";
 import { pickupElement } from "@/lib/trackMarker";
 import type { LatLng } from "@/lib/navRoute";
+import { openMapStyle, routeColours, type MapTheme } from "@/lib/mapTheme";
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
-
-/** Dark, because a chauffeur is looking at this at five in the morning. */
-const STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
 
 /** Close enough to see which lane, tilted so the road ahead is visible. */
 const DRIVE_ZOOM = 16.8;
@@ -34,6 +32,8 @@ interface Props {
   course: number;
   /** The address itself, as a pin. */
   to: LatLng | null;
+  /** Light or dark, as the chauffeur asked for. */
+  theme: MapTheme;
 }
 
 /**
@@ -70,7 +70,7 @@ const asLine = (points: LatLng[]): GeoJSON.Feature<GeoJSON.LineString> => ({
  * at something, at which point it stays where they put it and offers to go
  * back. A map that fights the hand holding it is worse than no map.
  */
-const DriveMap = ({ line, car, lineIndex, course, to }: Props) => {
+const DriveMap = ({ line, car, lineIndex, course, to, theme }: Props) => {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const carRef = useRef<maplibregl.Marker | null>(null);
@@ -82,7 +82,7 @@ const DriveMap = ({ line, car, lineIndex, course, to }: Props) => {
     if (!holder.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: holder.current,
-      style: STYLE_URL,
+      style: openMapStyle(theme),
       center: [car.lng, car.lat],
       zoom: DRIVE_ZOOM,
       pitch: DRIVE_PITCH,
@@ -138,25 +138,25 @@ const DriveMap = ({ line, car, lineIndex, course, to }: Props) => {
         type: "line",
         source: "drive-done",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#534d41", "line-width": 7 },
+        paint: { "line-color": routeColours(theme).done, "line-width": 7 },
       });
       map.addLayer({
         id: "drive-left-casing",
         type: "line",
         source: "drive-left",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#0b0a08", "line-width": 12 },
+        paint: { "line-color": routeColours(theme).casing, "line-width": 12 },
       });
       map.addLayer({
         id: "drive-left-line",
         type: "line",
         source: "drive-left",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#cdbb95", "line-width": 6 },
+        paint: { "line-color": routeColours(theme).line, "line-width": 6 },
       });
       // The car is drawn by a marker, which sits above every layer
     }
-  }, [ready, line, lineIndex, car]);
+  }, [ready, line, lineIndex, car, theme]);
 
   /** The door. */
   useEffect(() => {

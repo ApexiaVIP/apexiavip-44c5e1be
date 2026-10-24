@@ -375,3 +375,29 @@ describe("which map the chauffeur gets", () => {
     expect(screen.queryByTestId("drive-map-google")).not.toBeInTheDocument();
   });
 });
+
+describe("light or dark, as the chauffeur prefers", () => {
+  it("offers to switch, and says which way it is going", async () => {
+    localStorage.setItem("apx.drive.map", "dark");
+    driving();
+    expect(await screen.findByRole("button", { name: /switch to the light map/i })).toBeInTheDocument();
+  });
+
+  /**
+   * A chauffeur who flipped it at midday should not find it flipped back on
+   * the next job, so the choice outlives the drive.
+   */
+  it("remembers the choice for the next job", async () => {
+    localStorage.setItem("apx.drive.map", "dark");
+    driving();
+    fireEvent.click(await screen.findByRole("button", { name: /switch to the light map/i }));
+    expect(localStorage.getItem("apx.drive.map")).toBe("light");
+    expect(screen.getByRole("button", { name: /switch to the dark map/i })).toBeInTheDocument();
+  });
+
+  it("starts on what the chauffeur last chose", async () => {
+    localStorage.setItem("apx.drive.map", "light");
+    driving();
+    expect(await screen.findByRole("button", { name: /switch to the dark map/i })).toBeInTheDocument();
+  });
+});

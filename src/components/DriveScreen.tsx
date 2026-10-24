@@ -10,6 +10,8 @@ import {
   Merge,
   RotateCw,
   Split,
+  Moon,
+  Sun,
   Volume2,
   VolumeX,
   X,
@@ -32,6 +34,12 @@ import {
 } from "@/lib/navGuidance";
 import { canSpeak, hush, rememberVoice, say, voiceWanted, wakeVoice } from "@/lib/navVoice";
 import { watchDriving, type Fix } from "@/lib/whereAmI";
+import {
+  otherTheme,
+  preferredMapTheme,
+  rememberMapTheme,
+  type MapTheme,
+} from "@/lib/mapTheme";
 import { googleMapsConfigured } from "@/lib/googleMaps";
 
 const DriveMap = lazy(() => import("./DriveMap"));
@@ -158,6 +166,12 @@ const DriveScreen = ({
    * a road on it rather than a black rectangle.
    */
   const [googleOut, setGoogleOut] = useState(false);
+  /**
+   * Light or dark. Dark is right before dawn and wrong at midday against a
+   * bright windscreen, so it starts on whatever the phone is set to and the
+   * chauffeur can flip it in one tap without leaving the drive.
+   */
+  const [theme, setTheme] = useState<MapTheme>(preferredMapTheme);
   const onGoogle = googleMapsConfigured() && !googleOut;
 
   const lineIndex = useRef(-1);
@@ -357,6 +371,8 @@ const DriveScreen = ({
         <Suspense fallback={null}>
           {onGoogle ? (
             <DriveMapGoogle
+              key={theme}
+              theme={theme}
               line={route.line}
               car={guidance.snapped}
               lineIndex={guidance.lineIndex}
@@ -366,6 +382,8 @@ const DriveScreen = ({
             />
           ) : (
             <DriveMap
+              key={theme}
+              theme={theme}
               line={route.line}
               car={guidance.snapped}
               lineIndex={guidance.lineIndex}
@@ -482,6 +500,18 @@ const DriveScreen = ({
                     : "Finding you"}
               </p>
             </div>
+            <button
+              type="button"
+              aria-label={`Switch to the ${otherTheme(theme)} map`}
+              onClick={() => {
+                const wanted = otherTheme(theme);
+                setTheme(wanted);
+                rememberMapTheme(wanted);
+              }}
+              className="p-3 text-champagne"
+            >
+              {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
             <button
               type="button"
               aria-label={speaking ? "Turn the voice off" : "Turn the voice on"}

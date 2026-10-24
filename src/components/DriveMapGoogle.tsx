@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Crosshair } from "lucide-react";
 import { loadGoogleMaps, mapId, pointAhead, turnTowards } from "@/lib/googleMaps";
 import type { LatLng } from "@/lib/navRoute";
+import { routeColours, type MapTheme } from "@/lib/mapTheme";
 
 /** Close enough to see which lane, tilted so the road ahead fills the screen. */
 const DRIVE_ZOOM = 17;
@@ -18,15 +19,16 @@ const AHEAD_M = 130;
 /** Roughly the gap between fixes, so the car is nearly always moving. */
 const GLIDE_MS = 900;
 
-const CAR = `
+const car = (theme: MapTheme) => `
 <svg viewBox="0 0 38 38" width="38" height="38" aria-hidden="true">
-  <circle cx="19" cy="19" r="15" fill="#14120f" stroke="#cdbb95" stroke-width="2"/>
-  <path d="M19 9.5 27 27l-8-4.2L11 27Z" fill="#cdbb95"/>
+  <circle cx="19" cy="19" r="15" fill="#14120f" stroke="${theme === "light" ? "#ffffff" : "#cdbb95"}" stroke-width="2"/>
+  <path d="M19 9.5 27 27l-8-4.2L11 27Z" fill="${theme === "light" ? "#cdbb95" : "#cdbb95"}"/>
 </svg>`;
 
-const DOOR = `
+/** The door, picked out against whichever map is underneath it. */
+const door = (theme: MapTheme) => `
 <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
-  <circle cx="10" cy="10" r="6" fill="#ffffff" stroke="#14120f" stroke-width="3"/>
+  <circle cx="10" cy="10" r="6" fill="${theme === "light" ? "#14120f" : "#ffffff"}" stroke="${theme === "light" ? "#ffffff" : "#14120f"}" stroke-width="3"/>
 </svg>`;
 
 const pin = (svg: string): HTMLDivElement => {
@@ -47,6 +49,8 @@ interface Props {
   course: number;
   /** The address itself, as a pin. */
   to: LatLng | null;
+  /** Light or dark, as the chauffeur asked for. */
+  theme: MapTheme;
   /** Google would not load, so the screen can fall back to the other map. */
   onUnavailable: () => void;
 }
@@ -62,14 +66,14 @@ interface Props {
  * at something, at which point it stays where they put it and offers to go
  * back. A map that fights the hand holding it is worse than no map.
  */
-const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Props) => {
+const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, onUnavailable }: Props) => {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const carRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const doorRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const doneRef = useRef<google.maps.Polyline | null>(null);
   const leftRef = useRef<google.maps.Polyline | null>(null);
-  const camera = useRef({ lat: car.lat, lng: car.lng, heading: course });
+  const camera = useRef({ lat: at.lat, lng: at.lng, heading: course });
   const gliding = useRef(0);
   const [ready, setReady] = useState(false);
   const [following, setFollowing] = useState(true);
@@ -101,7 +105,7 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
         const maps = await loadGoogleMaps();
         if (dropped || !holder.current) return;
 
-        const aim = pointAhead(car.lat, car.lng, course, AHEAD_M);
+        const aim = pointAhead(at.lat, at.lng, course, AHEAD_M);
         const map = new maps.Map(holder.current, {
           mapId: mapId(),
           center: aim,
@@ -116,7 +120,7 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
           // year here. Asked for by name rather than built as a custom style,
           // so Google keeps it current. Older builds of the API ignore it and
           // simply draw the daytime map
-          colorScheme: "DARK",
+          colorScheme: theme === "light" ? "LIGHT" : "DARK",
         } as google.maps.MapOptions);
         mapRef.current = map;
         camera.current = { lat: aim.lat, lng: aim.lng, heading: course };
@@ -128,15 +132,15 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
 
         carRef.current = new AdvancedMarkerElement({
           map,
-          position: car,
-          content: pin(CAR),
+          position: at,
+          content: pin(car(theme)),
           zIndex: 3,
         });
 
         doneRef.current = new maps.Polyline({
           map,
           path: [],
-          strokeColor: "#534d41",
+          strokeColor: routeColours(theme).done,
           strokeOpacity: 1,
           strokeWeight: 7,
           zIndex: 1,
@@ -144,7 +148,7 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
         leftRef.current = new maps.Polyline({
           map,
           path: [],
-          strokeColor: "#cdbb95",
+          strokeColor: routeColours(theme).line,
           strokeOpacity: 1,
           strokeWeight: 7,
           zIndex: 2,
@@ -176,10 +180,10 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
   useEffect(() => {
     if (!ready || line.length < 2) return;
     guarded(() => {
-      doneRef.current?.setPath([...line.slice(0, Math.max(1, lineIndex + 1)), car]);
-      leftRef.current?.setPath([car, ...line.slice(lineIndex + 1)]);
+      doneRef.current?.setPath([...line.slice(0, Math.max(1, lineIndex + 1)), at]);
+      leftRef.current?.setPath([at, ...line.slice(lineIndex + 1)]);
     });
-  }, [ready, line, lineIndex, car, guarded]);
+  }, [ready, line, lineIndex, at, guarded]);
 
   /** The door. */
   useEffect(() => {
@@ -200,7 +204,7 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
         doorRef.current = new AdvancedMarkerElement({
           map: mapRef.current,
           position: to,
-          content: pin(DOOR),
+          content: pin(door(theme)),
           zIndex: 2,
         });
       } catch (err) {
@@ -209,7 +213,7 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
         console.error("drive map: could not place the destination pin", err);
       }
     })();
-  }, [ready, to, guarded]);
+  }, [ready, to, guarded, theme]);
 
   /**
    * Follow the car.
@@ -222,11 +226,11 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
     const map = mapRef.current;
     if (!ready || !map) return;
     guarded(() => {
-      if (carRef.current) carRef.current.position = car;
+      if (carRef.current) carRef.current.position = at;
     });
     if (!following) return;
 
-    const aim = pointAhead(car.lat, car.lng, course, AHEAD_M);
+    const aim = pointAhead(at.lat, at.lng, course, AHEAD_M);
     const from = { ...camera.current };
     const toHeading = turnTowards(from.heading, course);
     const began = performance.now();
@@ -251,7 +255,7 @@ const DriveMapGoogle = ({ line, car, lineIndex, course, to, onUnavailable }: Pro
       if (part < 1) gliding.current = requestAnimationFrame(walk);
     };
     gliding.current = requestAnimationFrame(walk);
-  }, [ready, car, course, following, guarded]);
+  }, [ready, at, course, following, guarded]);
 
   return (
     <div className="absolute inset-0">
