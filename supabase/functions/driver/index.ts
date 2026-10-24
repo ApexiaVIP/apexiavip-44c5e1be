@@ -146,6 +146,14 @@ Deno.serve(async (req) => {
         .eq("reference", reference);
       if (statusError) throw statusError;
 
+      if (kind === "clear") {
+        const { error: etaClear } = await admin
+          .from("bookings")
+          .update({ driver_eta_at: null })
+          .eq("reference", reference);
+        if (etaClear) console.error("Could not clear the arrival estimate:", etaClear);
+      }
+
       const { error: logError } = await admin.from("booking_waypoints").insert({
         booking_reference: reference,
         driver_id: user.id,
@@ -212,6 +220,28 @@ Deno.serve(async (req) => {
         .eq("driver_id", user.id)
         .neq("driver_status", "clear");
       if (error) throw error;
+
+      // The arrival time the chauffeur's own navigation is working to, so the
+      // passenger reads the same number rather than ringing to ask. Written
+      // on its own and never fatal: losing an estimate must never cost us the
+      // position, which is the thing the map actually needs.
+      const etaSeconds =
+        typeof body.etaSeconds === "number" && Number.isFinite(body.etaSeconds)
+          ? Math.max(0, Math.min(body.etaSeconds, 6 * 60 * 60))
+          : null;
+      const { error: etaError } = await admin
+        .from("bookings")
+        .update({
+          driver_eta_at:
+            etaSeconds === null
+              ? null
+              : new Date(Date.now() + etaSeconds * 1000).toISOString(),
+        })
+        .eq("reference", reference)
+        .eq("driver_id", user.id)
+        .neq("driver_status", "clear");
+      if (etaError) console.error("Could not record the arrival estimate:", etaError);
+
       return json(200, { success: true });
     }
 

@@ -10,10 +10,12 @@
 /**
  * How long the car takes to glide to a newly reported position.
  *
- * Close to the gap between reports, so the car is almost always moving rather
- * than darting and then sitting still, which reads as a map that has frozen.
+ * Matched to the gap between reports, so the car arrives just as the next
+ * position does and never stops. At four seconds against a six second beat it
+ * glided, then sat still for two, and a car that stutters every few seconds
+ * reads as a map that keeps freezing rather than a car that keeps driving.
  */
-export const GLIDE_MS = 4000;
+export const GLIDE_MS = 6000;
 
 /** Below this many metres a new fix is GPS noise, not a change of direction. */
 const HEADING_THRESHOLD_M = 8;

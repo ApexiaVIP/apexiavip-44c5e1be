@@ -102,6 +102,13 @@ export interface DriveScreenProps {
   onAdvance: (kind: "arrived" | "pob") => void;
   /** Setting down, which needs the office form and so ends the drive. */
   onSetDown: () => void;
+  /**
+   * How long this drive still has to run, so the passenger can be told.
+   *
+   * Null when there is nothing worth quoting, which also clears whatever the
+   * passenger was last shown rather than leaving it to rot on their screen.
+   */
+  onEta?: (secondsLeft: number | null) => void;
   onClose: () => void;
 }
 
@@ -127,6 +134,7 @@ const DriveScreen = ({
   status,
   onAdvance,
   onSetDown,
+  onEta,
   onClose,
 }: DriveScreenProps) => {
   const [stage, setStage] = useState<Stage>("finding");
@@ -293,6 +301,18 @@ const DriveScreen = ({
   }, [stage]);
 
   useEffect(() => () => hush(), []);
+
+  /**
+   * Pass the arrival time out while navigating, and withdraw it on the way
+   * out. A time left behind after the chauffeur stops navigating is exactly
+   * the stale number a passenger would ring about.
+   */
+  useEffect(() => {
+    if (!onEta) return;
+    onEta(stage === "driving" && guidance ? Math.round(guidance.secondsLeft) : null);
+  }, [onEta, stage, guidance]);
+
+  useEffect(() => () => onEta?.(null), [onEta]);
 
   const toggleVoice = () => {
     const wanted = !speaking;

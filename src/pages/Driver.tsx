@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   destinationQuery, googleMapsLink, nextDestination, openNavigation, wazeLink,
 } from "@/lib/navigation";
@@ -200,6 +200,8 @@ const Driver = () => {
   const [driveFor, setDriveFor] = useState<{ reference: string; what: "pickup" | "dropoff" } | null>(
     null
   );
+  /** How long the drive has left, carried to the next position report. */
+  const etaSeconds = useRef<number | null>(null);
   const [clearFor, setClearFor] = useState<string | null>(null);
   const [clearNotes, setClearNotes] = useState("");
   const [waitPlace, setWaitPlace] = useState("");
@@ -274,7 +276,15 @@ const Driver = () => {
     const releaseScreen = keepScreenAwake();
     const stopFollowing = followPosition((lat, lng) => {
       void supabase.functions.invoke("driver", {
-        body: { action: "position", reference: reportingFor, lat, lng },
+        body: {
+          action: "position",
+          reference: reportingFor,
+          lat,
+          lng,
+          // Whatever the navigation last worked out, so the passenger is
+          // reading the same arrival time the chauffeur is driving to
+          etaSeconds: etaSeconds.current,
+        },
       });
     });
     return () => {
@@ -580,6 +590,9 @@ const Driver = () => {
           status={driving.driver_status}
           onAdvance={(kind) => advance(driving, kind)}
           onSetDown={() => reachedIt(driving, "dropoff")}
+          onEta={(seconds) => {
+            etaSeconds.current = seconds;
+          }}
           onClose={() => setDriveFor(null)}
         />
       )}

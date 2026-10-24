@@ -16,6 +16,7 @@ import {
   stillRunning,
 } from "@/lib/bookingLive";
 import { locationFreshness } from "@/lib/locationAge";
+import { whenDue } from "@/lib/eta";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
@@ -68,6 +69,8 @@ interface BookingRow {
   driver_lat?: number | null;
   driver_lng?: number | null;
   driver_position_at?: string | null;
+  /** When their navigation says the car is due */
+  driver_eta_at?: string | null;
 }
 
 const seatFor = (age: number) =>
@@ -159,7 +162,9 @@ const Bookings = () => {
 
       // The chauffeur column arrives with its migration, which lands after the
       // site does. Until then the member's bookings must still open.
-      let { data, error } = await ask(`${columns}, driver_status, driver_lat, driver_lng, driver_position_at`);
+      let { data, error } = await ask(
+        `${columns}, driver_status, driver_lat, driver_lng, driver_position_at, driver_eta_at`
+      );
       if (error) {
         ({ data, error } = await ask(columns));
       }
@@ -436,6 +441,16 @@ const Bookings = () => {
 
         {mapVisible && (
           <div className="space-y-2">
+            {(() => {
+              const due = whenDue(b.driver_eta_at, b.driver_position_at, b.driver_status);
+              if (!due) return null;
+              return (
+                <div className="border border-champagne-muted bg-champagne/5 px-4 py-3">
+                  <p className="text-champagne text-lg font-light tracking-wide">{due.headline}</p>
+                  <p className="text-smoke text-xs tracking-[0.1em] mt-0.5">{due.detail}</p>
+                </div>
+              );
+            })()}
             <TrackMap
               lat={driverLat}
               lng={driverLng}
