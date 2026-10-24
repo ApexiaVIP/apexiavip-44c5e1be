@@ -32,19 +32,27 @@ export function destinationQuery(place: Place): string {
   return parts.join(", ");
 }
 
-/** Where a chauffeur on this job is actually driving to right now. */
+/**
+ * Where a chauffeur on this job is actually driving to right now.
+ *
+ * On an hourly hire the passenger says where, in the car, and the chauffeur
+ * puts it in. Until they have, there is nowhere to drive to; once they have,
+ * it is wherever the passenger named.
+ */
 export function nextDestination(
   job: { pickup: Place; dropoff: Place; as_directed?: boolean | null },
-  driverStatus: string | null
+  driverStatus: string | null,
+  chosen?: Place
 ): { place: Place; what: "pickup" | "dropoff" } | null {
   const collected = driverStatus === "pob" || driverStatus === "waiting";
 
   if (!collected) {
     return job.pickup ? { place: job.pickup, what: "pickup" } : null;
   }
-  // An as directed hire has no destination to head for: the passenger says
-  // where, and will say it in the car
-  if (job.as_directed || !job.dropoff) return null;
+  if (job.as_directed) {
+    return chosen ? { place: chosen, what: "dropoff" } : null;
+  }
+  if (!job.dropoff) return null;
   return { place: job.dropoff, what: "dropoff" };
 }
 

@@ -199,6 +199,47 @@ Deno.serve(async (req) => {
     }
 
     // --- Where the car is, while a job is running ---
+    /**
+     * Where an hourly hire is going next, as the passenger just said.
+     *
+     * The chauffeur does not know this when the job starts. Recording it here
+     * is what puts the address on the job for the office and for accounts: a
+     * hire that wandered round Cheshire all afternoon ends the day with every
+     * place it actually went, in order.
+     */
+    if (action === "destination") {
+      const reference = typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
+      const place = typeof body.place === "string" ? body.place.trim().slice(0, 200) : "";
+      if (!reference || !place) return json(400, { error: "Where to?" });
+      const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;
+      const lng = typeof body.lng === "number" && Number.isFinite(body.lng) ? body.lng : null;
+
+      // Only the chauffeur the job belongs to, and only while it is running
+      const { data: job } = await admin
+        .from("bookings")
+        .select("reference, driver_id, driver_status")
+        .eq("reference", reference)
+        .maybeSingle();
+      if (!job || job.driver_id !== user.id) {
+        return json(403, { error: "That job is not assigned to you" });
+      }
+      if (job.driver_status === "clear") {
+        return json(409, { error: "That job is finished" });
+      }
+
+      const { error } = await admin.from("booking_waypoints").insert({
+        booking_reference: reference,
+        driver_id: user.id,
+        kind: "destination",
+        place,
+        note: "",
+        lat,
+        lng,
+      });
+      if (error) throw error;
+      return json(200, { success: true });
+    }
+
     if (action === "position") {
       const reference = typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
       const lat = typeof body.lat === "number" && Number.isFinite(body.lat) ? body.lat : null;

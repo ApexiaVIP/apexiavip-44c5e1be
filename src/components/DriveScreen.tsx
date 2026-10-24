@@ -92,6 +92,13 @@ export interface DriveScreenProps {
   /** Where the job has got to, so the screen offers the right next step. */
   status: string | null;
   /**
+   * An hourly hire, where pulling up is a wait rather than the end.
+   *
+   * The passenger goes into a meeting and comes back out, so arriving offers
+   * to wait, not to set them down and finish the job.
+   */
+  asDirected?: boolean;
+  /**
    * Move the job on without leaving the drive.
    *
    * This is the part Waze could never do. Marking a passenger aboard here
@@ -99,7 +106,7 @@ export interface DriveScreenProps {
    * than making a chauffeur come out of navigation, find the job, press a
    * button and start again.
    */
-  onAdvance: (kind: "arrived" | "pob") => void;
+  onAdvance: (kind: "arrived" | "pob" | "waiting") => void;
   /** Setting down, which needs the office form and so ends the drive. */
   onSetDown: () => void;
   /**
@@ -132,6 +139,7 @@ const DriveScreen = ({
   to,
   what,
   status,
+  asDirected = false,
   onAdvance,
   onSetDown,
   onEta,
@@ -328,13 +336,16 @@ const DriveScreen = ({
    * Only ever one, and only when it is actually due: a screen with four
    * buttons on it at seventy miles an hour is a screen nobody reads.
    */
-  const due: "arrived" | "pob" | "setdown" | null =
+  const due: "arrived" | "pob" | "waiting" | "setdown" | null =
     what === "pickup" && status !== "arrived" && stage === "arrived"
       ? "arrived"
       : status === "arrived"
         ? "pob"
         : what === "dropoff" && stage === "arrived"
-          ? "setdown"
+          ? // An hourly hire pulls up and waits; a booked journey ends here
+            asDirected
+            ? "waiting"
+            : "setdown"
           : null;
 
   const Arrow = guidance ? ARROWS[guidance.next.turn] : ArrowUp;
@@ -440,6 +451,7 @@ const DriveScreen = ({
                     onSetDown();
                     return;
                   }
+                  if (due === "waiting") hush();
                   onAdvance(due);
                 }}
                 className="h-16 w-full rounded-none text-sm tracking-[0.2em] uppercase font-light"
@@ -448,7 +460,9 @@ const DriveScreen = ({
                   ? "I have arrived"
                   : due === "pob"
                     ? "Passenger on board"
-                    : "Set the passenger down"}
+                    : due === "waiting"
+                      ? "Wait here for the passenger"
+                      : "Set the passenger down"}
               </Button>
             </div>
           )}

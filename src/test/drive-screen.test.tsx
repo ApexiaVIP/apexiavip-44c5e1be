@@ -219,6 +219,29 @@ describe("the screen a chauffeur drives by", () => {
     expect(screen.queryByRole("button", { name: /i have arrived|passenger on board/i })).toBeNull();
   });
 
+  /**
+   * An hourly hire does not finish when the car pulls up. The passenger goes
+   * into a meeting and comes back out, so offering to set them down there
+   * would end a job that has hours left to run.
+   */
+  it("offers to wait, not to set down, when the passenger is directing", async () => {
+    const onAdvance = vi.fn();
+    const onSetDown = vi.fn();
+    driving({
+      what: "dropoff",
+      status: "pob",
+      asDirected: true,
+      onAdvance,
+      onSetDown,
+      to: { line1: "Spinningfields", town: "Manchester", postcode: "WA15 9QA" },
+    });
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    sendFix?.(53.489, -2.24);
+    fireEvent.click(await screen.findByRole("button", { name: /wait here for the passenger/i }));
+    expect(onAdvance).toHaveBeenCalledWith("waiting");
+    expect(onSetDown).not.toHaveBeenCalled();
+  });
+
   it("calls it a set down at the other end of the job", async () => {
     const onSetDown = vi.fn();
     driving({

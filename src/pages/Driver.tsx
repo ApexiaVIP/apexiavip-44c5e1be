@@ -29,6 +29,9 @@ import { currentPlace, followPosition, keepScreenAwake } from "@/lib/whereAmI";
 import DriveScreen from "@/components/DriveScreen";
 import { wakeVoice } from "@/lib/navVoice";
 import { splitJobs } from "@/lib/driverQueue";
+import { destinationNow, placeFrom } from "@/lib/asDirected";
+import DestinationBox from "@/components/DestinationBox";
+import type { PlaceSuggestion } from "@/lib/mfa";
 
 type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
 
@@ -60,7 +63,7 @@ interface Job {
 interface Waypoint {
   id: string;
   booking_reference: string;
-  kind: Step | "set_down" | "collected" | "note";
+  kind: Step | "set_down" | "collected" | "note" | "destination";
   place: string;
   note: string;
   recorded_at: string;
@@ -136,15 +139,19 @@ const whereItIs = (status: Step | null) =>
 export function NavigateRow({
   job,
   asDirected,
+  chosen,
   onDrive,
 }: {
   job: Job;
   asDirected: boolean;
+  /** On an hourly hire, where the passenger has asked to go. */
+  chosen?: { line1?: string; town?: string; postcode?: string } | null;
   onDrive?: (what: "pickup" | "dropoff") => void;
 }) {
   const heading = nextDestination(
     { pickup: job.pickup, dropoff: job.dropoff, as_directed: asDirected },
-    job.driver_status
+    job.driver_status,
+    chosen ?? undefined
   );
   if (!heading) return null;
 
@@ -200,6 +207,8 @@ const Driver = () => {
   const [driveFor, setDriveFor] = useState<{ reference: string; what: "pickup" | "dropoff" } | null>(
     null
   );
+  /** Which job's destination box is open, on an hourly hire. */
+  const [naming, setNaming] = useState<string | null>(null);
   /** How long the drive has left, carried to the next position report. */
   const etaSeconds = useRef<number | null>(null);
   const [clearFor, setClearFor] = useState<string | null>(null);
@@ -335,9 +344,34 @@ const Driver = () => {
    * the spot, so the chauffeur never comes out of navigation between the two
    * halves of a job.
    */
-  const advance = (job: Job, kind: "arrived" | "pob") => {
-    step(job, kind);
+  const advance = (job: Job, kind: "arrived" | "pob" | "waiting", place = "") => {
+    step(job, kind, place);
     if (kind === "pob") setDriveFor({ reference: job.reference, what: "dropoff" });
+    // Pulling up on an hourly hire ends the drive but not the job: the
+    // passenger is inside, and the chauffeur waits for them
+    if (kind === "waiting") setDriveFor(null);
+  };
+
+  /**
+   * The passenger has said where they are going.
+   *
+   * Recorded before anything else, so the address is on the job whether or
+   * not the chauffeur then navigates to it, and so accounts have every place
+   * the car actually went.
+   */
+  const setDestination = async (job: Job, picked: PlaceSuggestion) => {
+    const place = [picked.line1, picked.town, picked.postcode].filter(Boolean).join(", ");
+    setNaming(null);
+    try {
+      await callDriver({ action: "destination", reference: job.reference, place });
+    } catch (err) {
+      toast({
+        title: "Could not save that",
+        description: err instanceof Error ? err.message : "Try again",
+      });
+      return;
+    }
+    await queryClient.invalidateQueries({ queryKey: ["driver-day"] });
   };
 
   /**
@@ -517,6 +551,12 @@ const Driver = () => {
     );
   };
 
+  /** The passenger is in the car, so an hourly hire has somewhere to go. */
+  const aboard = (job: Job) => job.driver_status === "pob" || job.driver_status === "waiting";
+
+  /** Where this hourly hire is heading, as last said by the passenger. */
+  const named = (job: Job) => destinationNow(waypoints, job.reference);
+
   const jobHead = (job: Job) => {
     const asDirected = job.journey_type === "hourly";
     return (
@@ -559,7 +599,21 @@ const Driver = () => {
           )}
         </div>
 
-        <NavigateRow job={job} asDirected={asDirected} onDrive={(what) => startDrive(job, what)} />
+        {asDirected && aboard(job) && (
+          <DestinationBox
+            chosen={named(job)?.place ?? null}
+            changing={naming === job.reference}
+            onChange={() => setNaming(job.reference)}
+            onPick={(picked) => void setDestination(job, picked)}
+          />
+        )}
+
+        <NavigateRow
+          job={job}
+          asDirected={asDirected}
+          chosen={named(job) ? placeFrom(named(job)!.place) : null}
+          onDrive={(what) => startDrive(job, what)}
+        />
 
         {(job.notes || (job.children?.length ?? 0) > 0) && (
           <div className="border border-champagne-muted bg-champagne/5 px-3 py-2 text-xs text-smoke space-y-1">
@@ -585,10 +639,25 @@ const Driver = () => {
       {driving && driveFor && (
         <DriveScreen
           reference={driving.reference}
-          to={driveFor.what === "pickup" ? driving.pickup : driving.dropoff}
+          to={
+            driveFor.what === "pickup"
+              ? driving.pickup
+              : driving.journey_type === "hourly"
+                ? (named(driving) ? placeFrom(named(driving)!.place) : null)
+                : driving.dropoff
+          }
           what={driveFor.what}
           status={driving.driver_status}
-          onAdvance={(kind) => advance(driving, kind)}
+          asDirected={driving.journey_type === "hourly"}
+          onAdvance={(kind) =>
+            advance(
+              driving,
+              kind,
+              // Waiting on an hourly hire happens at the address they drove
+              // to, which is better than asking the phone where it is
+              kind === "waiting" && named(driving) ? named(driving)!.place : ""
+            )
+          }
           onSetDown={() => reachedIt(driving, "dropoff")}
           onEta={(seconds) => {
             etaSeconds.current = seconds;

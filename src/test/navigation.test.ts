@@ -50,8 +50,33 @@ describe("where the chauffeur is driving to", () => {
     expect(nextDestination(job, "waiting")).toEqual({ place: dropoff, what: "dropoff" });
   });
 
-  it("offers nothing on an as directed hire, because the passenger decides", () => {
+  it("offers nothing on an as directed hire until the passenger has said", () => {
     expect(nextDestination({ ...job, as_directed: true }, "pob")).toBeNull();
+  });
+
+  /**
+   * On an hourly hire the passenger names the place in the car, the chauffeur
+   * puts it into the Apexia sat nav, and that is what the car drives to.
+   */
+  it("drives an hourly hire to wherever the passenger named", () => {
+    const named = { line1: "Spinningfields", town: "Manchester", postcode: "M3 3EB" };
+    expect(nextDestination({ ...job, as_directed: true }, "pob", named)).toEqual({
+      place: named,
+      what: "dropoff",
+    });
+  });
+
+  it("ignores the booked destination on an hourly hire, which is not where they are going", () => {
+    const named = { line1: "Hale Barns", town: "Altrincham", postcode: "WA15 0AA" };
+    expect(nextDestination({ ...job, as_directed: true }, "pob", named)?.place).toBe(named);
+  });
+
+  it("still heads for the collection on an hourly hire before anybody is aboard", () => {
+    const named = { line1: "Spinningfields", town: "Manchester", postcode: "M3 3EB" };
+    expect(nextDestination({ ...job, as_directed: true }, "en_route", named)).toEqual({
+      place: pickup,
+      what: "pickup",
+    });
   });
 
   it("offers nothing when the job has no destination recorded", () => {
