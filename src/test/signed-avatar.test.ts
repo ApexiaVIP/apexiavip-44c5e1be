@@ -10,14 +10,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * These exercise the real resolver, with only the storage call mocked.
  */
 const createSignedUrl = vi.fn();
+const list = vi.fn();
 
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: { storage: { from: () => ({ createSignedUrl }) } },
+  supabase: { storage: { from: () => ({ createSignedUrl, list }) } },
 }));
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 let resolveAvatarUrl: typeof import("@/components/SignedAvatar")["resolveAvatarUrl"];
+let findStoredAvatar: typeof import("@/components/SignedAvatar")["findStoredAvatar"];
+let avatarLoads: typeof import("@/components/SignedAvatar")["avatarLoads"];
 let clearCache: () => void;
 
 beforeEach(async () => {
@@ -25,9 +28,12 @@ beforeEach(async () => {
   vi.setSystemTime(new Date("2026-10-01T09:00:00Z"));
   const mod = await import("@/components/SignedAvatar");
   resolveAvatarUrl = mod.resolveAvatarUrl;
+  findStoredAvatar = mod.findStoredAvatar;
+  avatarLoads = mod.avatarLoads;
   clearCache = mod.__clearAvatarCache;
   clearCache();
   createSignedUrl.mockReset();
+  list.mockReset();
   let n = 0;
   createSignedUrl.mockImplementation(async () => ({
     data: { signedUrl: `https://storage.test/faz.jpg?sig=${++n}` },
@@ -119,5 +125,77 @@ describe("resolving an avatar", () => {
   it("passes an object URL through, so a just-chosen photo previews", async () => {
     expect(await resolveAvatarUrl("blob:abc123")).toBe("blob:abc123");
     expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Faz uploaded a photograph more than once and it never stuck, because
+ * choosing one uploaded the file but only recorded it if the form was saved
+ * afterwards. The files are still in his folder. These cover going to find
+ * them rather than asking him again.
+ */
+describe("recovering a photograph nothing points at", () => {
+  it("finds the newest file in the member's own folder", async () => {
+    list.mockResolvedValue({
+      data: [
+        { name: "avatar-1761300000000.jpg" },
+        { name: "avatar-1760000000000.jpg" },
+      ],
+      error: null,
+    });
+    expect(await findStoredAvatar("faz-id")).toBe("faz-id/avatar-1761300000000.jpg");
+  });
+
+  it("asks storage for the newest first, so the first row is the right one", async () => {
+    list.mockResolvedValue({ data: [{ name: "a.jpg" }], error: null });
+    await findStoredAvatar("faz-id");
+    expect(list).toHaveBeenCalledWith(
+      "faz-id",
+      expect.objectContaining({ sortBy: { column: "created_at", order: "desc" } })
+    );
+  });
+
+  it("ignores the placeholder row in an empty folder", async () => {
+    list.mockResolvedValue({ data: [{ name: ".emptyFolderPlaceholder" }], error: null });
+    expect(await findStoredAvatar("faz-id")).toBeNull();
+  });
+
+  it("returns nothing when the folder is empty", async () => {
+    list.mockResolvedValue({ data: [], error: null });
+    expect(await findStoredAvatar("faz-id")).toBeNull();
+  });
+
+  it("returns nothing when storage refuses", async () => {
+    list.mockResolvedValue({ data: null, error: { message: "denied" } });
+    expect(await findStoredAvatar("faz-id")).toBeNull();
+  });
+
+  it("does not ask storage about nobody", async () => {
+    expect(await findStoredAvatar("")).toBeNull();
+    expect(list).not.toHaveBeenCalled();
+  });
+});
+
+describe("telling a working picture from a dead one", () => {
+  it("accepts a URL that hands something back", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 206 }));
+    expect(await avatarLoads("https://storage.test/faz.jpg")).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects a signed URL whose file has gone", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+    expect(await avatarLoads("https://storage.test/gone.jpg")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("does not call a picture dead just because the device is offline", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await avatarLoads("https://storage.test/faz.jpg")).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("treats an empty URL as nothing to show", async () => {
+    expect(await avatarLoads("")).toBe(false);
   });
 });

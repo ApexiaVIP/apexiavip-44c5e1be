@@ -44,6 +44,45 @@ const storagePathFrom = (url: string): string | null => {
 export const __clearAvatarCache = () => cache.clear();
 
 /**
+ * The newest photograph sitting in somebody's own avatar folder.
+ *
+ * Until recently, choosing a photo uploaded the file but only recorded it
+ * against the profile if the form was then saved, so there are members whose
+ * picture is sitting in storage with nothing pointing at it. Rather than ask
+ * them to upload it again, go and find it.
+ */
+export const findStoredAvatar = async (userId: string): Promise<string | null> => {
+  if (!userId) return null;
+  const { data, error } = await supabase.storage.from("avatars").list(userId, {
+    limit: 100,
+    sortBy: { column: "created_at", order: "desc" },
+  });
+  if (error || !data?.length) return null;
+
+  // Supabase puts a placeholder row in an empty folder, and some clients
+  // leave dotfiles behind
+  const newest = data.find((f) => f.name && !f.name.startsWith("."));
+  return newest ? `${userId}/${newest.name}` : null;
+};
+
+/**
+ * Whether a URL actually hands back a picture.
+ *
+ * A signed URL for a file that is no longer there still looks like a perfectly
+ * good URL, so the only way to know is to ask for it.
+ */
+export const avatarLoads = async (url: string): Promise<boolean> => {
+  if (!url) return false;
+  try {
+    const res = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" } });
+    return res.ok || res.status === 206;
+  } catch {
+    // Offline, which is not evidence the picture has gone
+    return true;
+  }
+};
+
+/**
  * Resolve an avatar reference to a displayable URL.
  *
  * The avatars bucket is private, so storage paths are exchanged for signed

@@ -6,7 +6,7 @@ import MemberLayout from "@/components/MemberLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { invokeMemberFamily } from "@/lib/mfa";
-import SignedAvatar, { resolveAvatarUrl } from "@/components/SignedAvatar";
+import SignedAvatar, { avatarLoads, findStoredAvatar, resolveAvatarUrl } from "@/components/SignedAvatar";
 import CountryCodeSelect from "@/components/CountryCodeSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,8 +78,38 @@ const Profile = () => {
     setTown(profile.town);
     setPostcode(profile.postcode);
     setAvatarUrl(profile.avatar_url);
-    resolveAvatarUrl(profile.avatar_url).then(setAvatarPreview);
+    void showAvatar(profile.avatar_url);
   }, [profile]);
+
+  /**
+   * Put the member's picture on screen, and repair the record if it is wrong.
+   *
+   * Some profiles point at nothing, because choosing a photo used to upload
+   * the file without recording it unless the form was saved afterwards. Others
+   * point at a file that has gone. In both cases the picture is often still
+   * in the member's own storage folder, so look there before giving up, and
+   * write back what is found so it is right from then on.
+   */
+  const showAvatar = async (stored: string) => {
+    if (!user) return;
+
+    const direct = await resolveAvatarUrl(stored);
+    if (direct && (await avatarLoads(direct))) {
+      setAvatarPreview(direct);
+      return;
+    }
+
+    const found = await findStoredAvatar(user.id);
+    if (!found || found === stored) return;
+
+    const recovered = await resolveAvatarUrl(found);
+    if (!recovered) return;
+
+    setAvatarPreview(recovered);
+    setAvatarUrl(found);
+    await supabase.from("profiles").update({ avatar_url: found }).eq("id", user.id);
+    await refreshProfile();
+  };
 
   const isPrimary = !!profile && !profile.primary_member_id;
 
