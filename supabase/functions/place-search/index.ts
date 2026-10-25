@@ -132,8 +132,43 @@ const addressesAtPostcode = async (postcode: string): Promise<Suggestion[]> => {
   return found.slice(0, MAX_ADDRESSES);
 };
 
+/**
+ * The post town for a postcode, which is the one thing postcodes.io lacks.
+ *
+ * It has no post_town field, so the old code fell through to admin_district
+ * and wrote the council into the town line of a booking: SK9 5PN came back
+ * as "Cheshire East" rather than Wilmslow, on every booking made by typing a
+ * postcode. Google knows the post town, and asking it for a postcode is one
+ * request that returns exactly one result.
+ */
+const postTownFromGoogle = async (postcode: string, apiKey: string): Promise<string> => {
+  try {
+    const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "places.addressComponents",
+      },
+      body: JSON.stringify({ textQuery: postcode, regionCode: "GB", maxResultCount: 1 }),
+    });
+    if (!res.ok) {
+      console.error("Google post town error:", res.status, await res.text());
+      return "";
+    }
+    const data = await res.json();
+    const components = data?.places?.[0]?.addressComponents ?? [];
+    const pick = (type: string) =>
+      components.find((c: { types?: string[] }) => c.types?.includes(type))?.longText ?? "";
+    return pick("postal_town") || pick("locality") || "";
+  } catch (err) {
+    console.error("Google post town failed:", err);
+    return "";
+  }
+};
+
 /** Full UK postcode: authoritative lookup via postcodes.io (ONS data) */
-const searchPostcode = async (query: string): Promise<Suggestion[]> => {
+const searchPostcode = async (query: string, town?: string): Promise<Suggestion[]> => {
   const res = await fetch(
     `https://api.postcodes.io/postcodes/${encodeURIComponent(query.replace(/\s/g, ""))}`
   );
@@ -141,13 +176,15 @@ const searchPostcode = async (query: string): Promise<Suggestion[]> => {
   const data = await res.json();
   const r = data?.result;
   if (!r) return [];
-  const town = r.post_town || r.admin_district || "";
+  // Google's post town first, then the parish, which is the town often enough
+  // in the shires, and the council only when there is nothing better
+  const named = town || r.parish || r.admin_district || "";
   return [
     {
-      label: `${r.postcode} · ${town} · use the postcode only`,
+      label: `${r.postcode} · ${named} · postcode only`,
       line1: "",
       line2: "",
-      town,
+      town: named,
       postcode: r.postcode,
       country: "United Kingdom",
     },
@@ -246,6 +283,10 @@ const searchGoogle = async (query: string, apiKey: string): Promise<Suggestion[]
     const isPoi = !!name && name !== road;
     const line1 = isPoi ? name : road || name;
     if (!line1) continue;
+    // Google names a postcode result after the postcode, and a postcode is
+    // not an address line. Picking one filled the first line of a booking
+    // with "SK9 5PN"
+    if (UK_POSTCODE.test(line1)) continue;
     const town = comp("postal_town") || comp("locality") || comp("administrative_area_level_2");
     const suggestion: Suggestion = {
       label: place.formattedAddress ? `${name ? name + ", " : ""}${place.formattedAddress}` : name,
@@ -302,27 +343,24 @@ serve(async (req) => {
     let suggestions: Suggestion[];
     if (UK_POSTCODE.test(query)) {
       /*
-       * A postcode is a request for a list to pick from, not for one row.
+       * A postcode is a request for a list of doors to pick from.
        *
-       * Returning only the postcode centroid, which is what this used to do,
-       * left a member who typed their postcode with an address that had no
-       * building in it and no hint that they now had to type one. So: the
-       * doors at that postcode first, then the named places the map knows
-       * there, and the bare postcode last for anyone who wants only that.
+       * Only Royal Mail's address file can give that, so it is asked first.
+       * Nothing else comes close: checked on 25 Oct 2026 against our own key,
+       * Google answers a postcode with one result that is the postcode
+       * itself, and the open sources know only the handful of businesses
+       * somebody has tagged. So with no address file this returns one honest
+       * row carrying the right post town, and the member types their building
+       * into the line the form has always asked them for.
        */
-      const [doors, centroid] = await Promise.all([
-        addressesAtPostcode(query),
-        searchPostcode(query),
-      ]);
-      const places =
-        doors.length > 0
-          ? []
-          : GOOGLE_MAPS_API_KEY
-            ? await searchGoogle(query, GOOGLE_MAPS_API_KEY)
-            : await searchPhoton(query);
-      suggestions = [];
-      for (const s of [...doors, ...places, ...centroid]) {
-        if (!suggestions.some((seen) => seen.label === s.label)) suggestions.push(s);
+      const doors = await addressesAtPostcode(query);
+      if (doors.length > 0) {
+        suggestions = doors;
+      } else {
+        const town = GOOGLE_MAPS_API_KEY
+          ? await postTownFromGoogle(query, GOOGLE_MAPS_API_KEY)
+          : "";
+        suggestions = await searchPostcode(query, town);
       }
     } else if (GOOGLE_MAPS_API_KEY) {
       suggestions = await searchGoogle(query, GOOGLE_MAPS_API_KEY);
