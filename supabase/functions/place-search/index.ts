@@ -288,8 +288,14 @@ const searchGoogle = async (query: string, apiKey: string): Promise<Suggestion[]
     // with "SK9 5PN"
     if (UK_POSTCODE.test(line1)) continue;
     const town = comp("postal_town") || comp("locality") || comp("administrative_area_level_2");
+    // Google names an address result after the address, so prepending the
+    // name gave "5 Broad Walk, 5 Broad Walk, Wilmslow SK9 5PJ". Only put the
+    // name in front when it is something the address does not already say,
+    // which is what it is for on a restaurant or a hotel
+    const formatted = place.formattedAddress ?? "";
+    const named = name && !formatted.toLowerCase().startsWith(name.toLowerCase());
     const suggestion: Suggestion = {
-      label: place.formattedAddress ? `${name ? name + ", " : ""}${place.formattedAddress}` : name,
+      label: formatted ? (named ? `${name}, ${formatted}` : formatted) : name,
       line1,
       line2: isPoi ? road : "",
       town,
