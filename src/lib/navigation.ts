@@ -56,44 +56,13 @@ export function nextDestination(
   return { place: job.dropoff, what: "dropoff" };
 }
 
-/**
- * Waze, which is what Apexia's chauffeurs actually use.
+/*
+ * There were link builders here for Waze, Google Maps and Apple Maps, and an
+ * opener that pushed them out to the system app.
  *
- * `navigate=yes` starts the drive rather than only dropping a pin, so it is
- * one tap from the job to moving.
+ * They are gone deliberately. Leaving the app is what suspends it, and a
+ * suspended app reports no positions, so the passenger watched a car that
+ * never moved for the whole journey. That is the fault the in-app sat nav was
+ * built to fix, and a button offering the old way undoes it. If a route will
+ * not come, the drive screen asks again rather than sending anybody out.
  */
-export function wazeLink(place: Place): string {
-  const q = destinationQuery(place);
-  return q ? `https://waze.com/ul?q=${encodeURIComponent(q)}&navigate=yes` : "";
-}
-
-/**
- * Google Maps, for the ones who prefer it, and as the fallback when Waze is
- * not installed. Live traffic is the default for driving directions.
- */
-export function googleMapsLink(place: Place): string {
-  const q = destinationQuery(place);
-  return q
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}&travelmode=driving`
-    : "";
-}
-
-/** Apple Maps, since every one of these chauffeurs is carrying an iPhone. */
-export function appleMapsLink(place: Place): string {
-  const q = destinationQuery(place);
-  return q ? `https://maps.apple.com/?daddr=${encodeURIComponent(q)}&dirflg=d` : "";
-}
-
-/**
- * Open a navigation app from inside the native shell.
- *
- * A plain anchor would load the map inside our own webview, stranding the
- * chauffeur in a browser with no way back to the job, so this pushes it out
- * to the system which hands it to the real app.
- */
-export function openNavigation(url: string): void {
-  if (!url) return;
-  // The native shell hands "_system" to the real app instead of our webview
-  const opened = window.open(url, "_system", "location=yes");
-  if (!opened) window.open(url, "_blank");
-}

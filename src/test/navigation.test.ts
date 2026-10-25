@@ -1,11 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  destinationQuery,
-  nextDestination,
-  wazeLink,
-  googleMapsLink,
-  appleMapsLink,
-} from "@/lib/navigation";
+import { destinationQuery, nextDestination } from "@/lib/navigation";
 
 const pickup = { line1: "Alderley Mill Cottage", town: "Macclesfield", postcode: "SK10 4TW" };
 const dropoff = { line1: "The Lowry Hotel", town: "Salford", postcode: "M3 5LH" };
@@ -88,36 +82,8 @@ describe("where the chauffeur is driving to", () => {
   });
 });
 
-describe("the links themselves", () => {
-  it("tells Waze to start driving, not just drop a pin", () => {
-    const url = wazeLink(pickup);
-    expect(url).toContain("navigate=yes");
-    expect(url).toContain(encodeURIComponent("SK10 4TW"));
-  });
-
-  it("asks Google Maps for driving directions, which carry live traffic", () => {
-    const url = googleMapsLink(dropoff);
-    expect(url).toContain("travelmode=driving");
-    expect(url).toContain("dir/?api=1");
-    expect(url).toContain(encodeURIComponent("The Lowry Hotel"));
-  });
-
-  it("asks Apple Maps for driving too", () => {
-    expect(appleMapsLink(dropoff)).toContain("dirflg=d");
-  });
-
-  it("escapes an address rather than breaking the link", () => {
-    const url = wazeLink({ line1: "Flat 2, King's Court", town: "Hale", postcode: "WA15 9QA" });
-    expect(url).not.toContain(" ");
-    // An ampersand in an address would otherwise look like another parameter
-    const amp = wazeLink({ line1: "Marks & Spencer", town: "Manchester", postcode: "M1 1AA" });
-    expect(amp).toContain("%26");
-    expect(amp.split("&").length).toBe(2); // only the real navigate= parameter
-  });
-
-  it("gives back nothing when there is no address, so no button is offered", () => {
-    expect(wazeLink(null)).toBe("");
-    expect(googleMapsLink(null)).toBe("");
-    expect(appleMapsLink(null)).toBe("");
-  });
-});
+/*
+ * The block that tested the Waze, Google Maps and Apple Maps links has gone
+ * with the links. Keeping a chauffeur inside the app is the point of the
+ * sat nav, so there is nothing left here to hand a job out to.
+ */
