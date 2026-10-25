@@ -75,6 +75,18 @@ export const cancelBooking = async (reference: string): Promise<CancelOutcome> =
   return { handedToOps: data?.handedToOps === true, message: data?.message };
 };
 
+/**
+ * Tell the chauffeur where you would like to go, mid journey.
+ *
+ * Only while a chauffeur is actually on the job: before that the office owns
+ * the journey and a change has to go through them. The chauffeur is told and
+ * chooses when to turn, so this records the address rather than steering the
+ * car.
+ */
+export const tellChauffeur = async (reference: string, place: string): Promise<void> => {
+  await invokeFn("booking-status", { action: "destination", reference, place });
+};
+
 export interface PlaceSuggestion {
   label: string;
   line1: string;

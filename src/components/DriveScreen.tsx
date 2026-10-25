@@ -176,6 +176,14 @@ const DriveScreen = ({
    * seeing the car.
    */
   const [attempt, setAttempt] = useState(0);
+  /**
+   * The passenger has asked for somewhere else while the car is moving.
+   *
+   * Held rather than acted on. A route that redraws itself at speed, for a
+   * reason the chauffeur has not been told, is worse than a chauffeur who
+   * has to be asked: they are shown the address and decide when to turn.
+   */
+  const [redirect, setRedirect] = useState<string | null>(null);
   const [route, setRoute] = useState<NavRoute | null>(null);
   const [guidance, setGuidance] = useState<Guidance | null>(null);
   const [target, setTarget] = useState<LatLng | null>(null);
@@ -203,13 +211,22 @@ const DriveScreen = ({
   const asking = useRef(false);
   const spoken = useRef<Set<string>>(new Set());
   const latest = useRef<Fix | null>(null);
+  /** The address the route on screen was worked out for. */
+  const routedFor = useRef("");
 
   const where = what === "pickup" ? "the collection" : "the destination";
   const address = useMemo(() => destinationQuery(to), [to]);
 
-  /** Ask for a route from wherever the car is now. */
+  /**
+   * Ask for a route from wherever the car is now.
+   *
+   * The address is passed in rather than read from the props, because the
+   * props can change under a drive in progress: the passenger asks for
+   * somewhere else and, until the chauffeur takes it, a refresh has to keep
+   * asking about the place they are actually driving to.
+   */
   const plot = useCallback(
-    async (from: Fix, door: LatLng) => {
+    async (from: Fix, door: LatLng, forAddress: string) => {
       if (asking.current) return;
       asking.current = true;
       askedAt.current = Date.now();
@@ -218,7 +235,7 @@ const DriveScreen = ({
           body: {
             from: { lat: from.lat, lng: from.lng },
             to: door,
-            address,
+            address: forAddress,
             heading: from.heading,
             reference,
           },
@@ -236,6 +253,7 @@ const DriveScreen = ({
         const first = follow(worked, from, -1);
         lineIndex.current = first.lineIndex;
         along.current = first.along;
+        routedFor.current = forAddress;
         setRoute(worked);
         setGuidance(first);
         setStage((was) => (was === "arrived" ? was : "driving"));
@@ -246,7 +264,7 @@ const DriveScreen = ({
         asking.current = false;
       }
     },
-    [address, reference]
+    [reference]
   );
 
   /**
@@ -264,6 +282,12 @@ const DriveScreen = ({
     const begin = async () => {
       if (askingWhere) {
         setStage("asking");
+        return;
+      }
+      // Somewhere else has been asked for since this route was worked out.
+      // Hold it up and tell the chauffeur rather than turning the car
+      if (routedFor.current && address && address !== routedFor.current) {
+        setRedirect(address);
         return;
       }
       const postcode = to?.postcode?.trim();
@@ -295,7 +319,7 @@ const DriveScreen = ({
         setStage("arrived");
         return;
       }
-      const worked = await plot(from, door);
+      const worked = await plot(from, door, address);
       if (dropped) return;
       if (!worked) {
         setTrouble("Could not work out a route just now.");
@@ -306,7 +330,7 @@ const DriveScreen = ({
     return () => {
       dropped = true;
     };
-  }, [to?.postcode, plot, askingWhere, attempt]);
+  }, [to?.postcode, plot, askingWhere, attempt, address]);
 
   /** Have another go at finding the way, after a route would not come. */
   const tryAgain = useCallback(() => {
@@ -339,13 +363,29 @@ const DriveScreen = ({
       const settled = Date.now() - askedAt.current > SETTLE_MS;
       const stale = Date.now() - route.at > STALE_MS;
       const worthIt = next.metresLeft > NEARLY_THERE_M;
+      // Never refresh while somewhere else is waiting to be accepted: the
+      // door on screen belongs to the old address and the words would belong
+      // to the new one, which is a route to neither
       if (settled && worthIt && (strayed.current >= STRAY_FIXES || stale)) {
         strayed.current = 0;
-        void plot(fix, target);
+        // Against the address this route was plotted for, which is not
+        // necessarily the one on the props any more
+        void plot(fix, target, routedFor.current);
       }
     });
     return stop;
   }, [route, target, plot]);
+
+  /**
+   * Tell the chauffeur out loud that somewhere else has been asked for.
+   *
+   * They are looking at the road, not at the screen, so a banner on its own
+   * would be missed until the next set of lights.
+   */
+  useEffect(() => {
+    if (!redirect || !speaking) return;
+    say(`Your passenger has asked for ${redirect}`, { urgent: true });
+  }, [redirect, speaking]);
 
   /** Read the turns out. */
   useEffect(() => {
@@ -440,6 +480,44 @@ const DriveScreen = ({
       )}
 
       </div>
+
+      {/*
+        Somewhere else, asked for from the back seat.
+
+        Sits above the turn because it matters more, and takes one tap. The
+        turn underneath still belongs to the route being driven, so a
+        chauffeur who ignores this carries on to where they were going.
+      */}
+      {redirect && (
+        <div className="order-first shrink-0 bg-champagne/15 border-b border-champagne pt-[env(safe-area-inset-top)]">
+          <div className="px-4 py-3 space-y-2">
+            <p className="text-[10px] tracking-[0.2em] uppercase text-champagne">
+              Your passenger has asked for
+            </p>
+            <p className="text-sm text-foreground">{redirect}</p>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  setRedirect(null);
+                  routedFor.current = address;
+                  setStage("finding");
+                  setAttempt((n) => n + 1);
+                }}
+                className="flex-1 h-12 rounded-none text-xs tracking-[0.15em] uppercase font-light"
+              >
+                Drive there
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setRedirect(null)}
+                className="h-12 px-4 rounded-none text-xs tracking-[0.15em] uppercase font-light text-smoke"
+              >
+                Not yet
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* What to do next, across the top where it can be read at a glance */}
       {stage === "driving" && guidance && (

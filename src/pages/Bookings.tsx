@@ -17,6 +17,8 @@ import {
 } from "@/lib/bookingLive";
 import { locationFreshness } from "@/lib/locationAge";
 import { whenDue } from "@/lib/eta";
+import { canAskChauffeur } from "@/lib/whereTo";
+import WhereTo from "@/components/WhereTo";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
@@ -438,6 +440,16 @@ const Bookings = () => {
               if it does not, they are still coming and you can call them above.
             </p>
           )}
+
+        {/*
+          Where to, asked from the back seat.
+
+          Shown whenever a chauffeur is actually on the job, which is the only
+          time there is a screen in a car for it to reach.
+        */}
+        {canAskChauffeur(b.driver_status, b.status) && (
+          <WhereTo reference={b.reference ?? ""} asDirected={b.journey_type === "hourly"} />
+        )}
 
         {mapVisible && (
           <div className="space-y-2">

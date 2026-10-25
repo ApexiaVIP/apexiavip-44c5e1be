@@ -344,6 +344,165 @@ describe("the screen a chauffeur drives by", () => {
     expect(screen.queryByText(/where have they asked for/i)).not.toBeInTheDocument();
   });
 
+  /**
+   * The passenger asking for somewhere else, mid journey.
+   *
+   * The car must not turn on its own. A route that redraws itself at speed,
+   * for a reason the chauffeur has not been told, is more dangerous than the
+   * typing it saves.
+   */
+  describe("when the passenger asks for somewhere else", () => {
+    const AWAY = { line1: "The Lowry Hotel", town: "Salford", postcode: "M3 5LH" };
+    const INSTEAD = { line1: "Australasia", town: "Manchester", postcode: "M3 3AP" };
+
+    const drivingTo = () =>
+      render(
+        <DriveScreen
+          reference="APX-1001"
+          to={AWAY}
+          what="dropoff"
+          status="pob"
+          onAdvance={vi.fn()}
+          onSetDown={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+
+    it("tells the chauffeur rather than turning the car", async () => {
+      const screenUnder = drivingTo();
+      await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+      const asked = invoke.mock.calls.length;
+
+      screenUnder.rerender(
+        <DriveScreen
+          reference="APX-1001"
+          to={INSTEAD}
+          what="dropoff"
+          status="pob"
+          onAdvance={vi.fn()}
+          onSetDown={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+
+      expect(await screen.findByText(/your passenger has asked for/i)).toBeInTheDocument();
+      expect(screen.getByText(/australasia/i)).toBeInTheDocument();
+      // No new route was asked for, so the car is still going where it was
+      expect(invoke.mock.calls.length).toBe(asked);
+    });
+
+    it("works the new way out once the chauffeur takes it", async () => {
+      const screenUnder = drivingTo();
+      await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+      const asked = invoke.mock.calls.length;
+
+      screenUnder.rerender(
+        <DriveScreen
+          reference="APX-1001"
+          to={INSTEAD}
+          what="dropoff"
+          status="pob"
+          onAdvance={vi.fn()}
+          onSetDown={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+      fireEvent.click(await screen.findByRole("button", { name: /drive there/i }));
+
+      await waitFor(() => expect(invoke.mock.calls.length).toBeGreaterThan(asked));
+      const last = invoke.mock.calls[invoke.mock.calls.length - 1] as [
+        string,
+        { body: Record<string, unknown> },
+      ];
+      expect(last[1].body.address).toContain("M3 3AP");
+    });
+
+    it("carries on to the old address when the chauffeur says not yet", async () => {
+      const screenUnder = drivingTo();
+      await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+
+      screenUnder.rerender(
+        <DriveScreen
+          reference="APX-1001"
+          to={INSTEAD}
+          what="dropoff"
+          status="pob"
+          onAdvance={vi.fn()}
+          onSetDown={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+      fireEvent.click(await screen.findByRole("button", { name: /not yet/i }));
+      expect(screen.queryByText(/your passenger has asked for/i)).not.toBeInTheDocument();
+      // Still navigating, not stuck and not asking
+      expect(screen.getByTestId("drive-map")).toBeInTheDocument();
+    });
+
+    /**
+     * After "not yet" the car is still going to the old address while the
+     * props hold the new one, so a traffic refresh has to keep asking about
+     * the place being driven to. Ask about the new place from the door of the
+     * old one and the answer is a route to neither.
+     *
+     * Today the watcher cannot re-read the props while a change is pending,
+     * so the address it sends is passed in explicitly rather than left to
+     * that being true. This pins the behaviour either way.
+     */
+    it("refreshes against the address it is actually driving to, not the new one", async () => {
+      const screenUnder = drivingTo();
+      await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+
+      screenUnder.rerender(
+        <DriveScreen
+          reference="APX-1001"
+          to={INSTEAD}
+          what="dropoff"
+          status="pob"
+          onAdvance={vi.fn()}
+          onSetDown={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+      fireEvent.click(await screen.findByRole("button", { name: /not yet/i }));
+
+      // Far enough past the settle and staleness windows that the next fix
+      // makes the screen ask about the traffic again
+      const realNow = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(realNow + 400_000);
+      const asked = invoke.mock.calls.length;
+      sendFix?.(53.4805, -2.24);
+
+      await waitFor(() => expect(invoke.mock.calls.length).toBeGreaterThan(asked));
+      const last = invoke.mock.calls[invoke.mock.calls.length - 1] as [
+        string,
+        { body: Record<string, unknown> },
+      ];
+      expect(last[1].body.address).toContain("M3 5LH");
+      expect(last[1].body.address).not.toContain("M3 3AP");
+    });
+
+    it("says it out loud, because the chauffeur is watching the road", async () => {
+      voice.on = true;
+      const screenUnder = drivingTo();
+      await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+      voice.said = [];
+
+      screenUnder.rerender(
+        <DriveScreen
+          reference="APX-1001"
+          to={INSTEAD}
+          what="dropoff"
+          status="pob"
+          onAdvance={vi.fn()}
+          onSetDown={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+      await screen.findByText(/your passenger has asked for/i);
+      expect(voice.said.some((s) => /passenger has asked for/i.test(s.words))).toBe(true);
+    });
+  });
+
   it("asks for a route from where the car actually is, pointing the way it points", async () => {
     driving();
     await waitFor(() => expect(invoke).toHaveBeenCalled());

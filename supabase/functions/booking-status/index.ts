@@ -19,6 +19,18 @@ const MAX_REFERENCES = 15;
 // account, while still stopping a client stuck in a loop.
 const MAX_CHECKS_PER_HOUR = 900;
 
+/**
+ * The job states where there is a chauffeur to tell.
+ *
+ * Before the car sets off the office owns the journey, so a change then goes
+ * through the travel team rather than appearing on a screen nobody is
+ * looking at. Once the job is cleared it is over.
+ */
+const ON_THE_ROAD = ["en_route", "arrived", "pob", "waiting"];
+
+/** Written against the address so accounts can see who asked for it. */
+const PASSENGER_ASKED = "Asked for by the passenger";
+
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
     status,
@@ -212,6 +224,56 @@ serve(async (req) => {
         .update({ status: "Cancelled", status_checked_at: new Date().toISOString() })
         .eq("reference", reference)
         .eq("user_id", user.id);
+
+      return json(200, { success: true });
+    }
+
+    /**
+     * The passenger says where they would like to go, from their own phone.
+     *
+     * On an hourly hire this is the only place the destination comes from,
+     * and the chauffeur was typing it while driving, which is the part worth
+     * removing. On a booked journey it is the passenger changing their mind
+     * on the way, which costs nothing to honour because the journey is
+     * invoiced on what was actually driven rather than quoted up front.
+     *
+     * It records the address and nothing else. The chauffeur is told, and
+     * they decide when to turn: a car that silently redraws its route at
+     * speed is worse than a chauffeur who has to be asked.
+     */
+    if (body?.action === "destination") {
+      const reference = typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
+      const place = typeof body.place === "string" ? body.place.trim().slice(0, 200) : "";
+      if (!reference || !place) return json(400, { error: "Where would you like to go?" });
+
+      const { data: booking } = await admin
+        .from("bookings")
+        .select("reference, user_id, corporate, name, driver_id, driver_status, status")
+        .eq("reference", reference)
+        .maybeSingle();
+      // The same rule as cancelling: your own journey, or the desk's. A
+      // primary member may watch a family member's car but not redirect it
+      if (!booking || (booking.user_id !== user.id && !(await deskColleagueMayAct(booking)))) {
+        return json(404, { error: "Booking not found" });
+      }
+      if (booking.status === "Cancelled") {
+        return json(409, { error: "That journey has been cancelled" });
+      }
+      // Only while a chauffeur is actually on it, or there is nobody to tell
+      if (!ON_THE_ROAD.includes(String(booking.driver_status ?? ""))) {
+        return json(409, {
+          error:
+            "Your chauffeur has not started this journey yet. Your travel team can change it for you.",
+        });
+      }
+
+      const { error: wayError } = await admin.from("booking_waypoints").insert({
+        booking_reference: reference,
+        kind: "destination",
+        place,
+        note: PASSENGER_ASKED,
+      });
+      if (wayError) throw wayError;
 
       return json(200, { success: true });
     }

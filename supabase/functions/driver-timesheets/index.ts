@@ -314,7 +314,13 @@ serve(async (req) => {
                     w.recorded_at as string
                   )}</span></td><td ${TD}>${esc(STEP_LABEL[w.kind as string] ?? w.kind)}</td><td ${TD}>${esc(
                     (w.place as string) || ""
-                  )}</td></tr>`
+                  )}${
+                    // Two people can name a destination now, the chauffeur and
+                    // the passenger, and accounts should see which
+                    w.kind === "destination" && (w.note as string)?.trim()
+                      ? ` <span style="color:#6b6355;">(${esc((w.note as string).trim())})</span>`
+                      : ""
+                  }</td></tr>`
               )
               .join("")}
           </table>`
