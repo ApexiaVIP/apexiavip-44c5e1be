@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  destinationQuery, googleMapsLink, nextDestination, openNavigation, wazeLink,
-} from "@/lib/navigation";
+import { destinationQuery, nextDestination } from "@/lib/navigation";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
@@ -29,7 +27,7 @@ import { currentPlace, followPosition, keepScreenAwake } from "@/lib/whereAmI";
 import DriveScreen from "@/components/DriveScreen";
 import { wakeVoice } from "@/lib/navVoice";
 import { splitJobs } from "@/lib/driverQueue";
-import { destinationNow, placeFrom } from "@/lib/asDirected";
+import { canSayWhere, destinationNow, placeFrom } from "@/lib/asDirected";
 import DestinationBox from "@/components/DestinationBox";
 import type { PlaceSuggestion } from "@/lib/mfa";
 
@@ -125,13 +123,11 @@ const whereItIs = (status: Step | null) =>
 /**
  * One tap from the job to driving it.
  *
- * The app does the navigating itself. Handing over to Waze put this app to
- * sleep, and a sleeping app reports no positions, so the passenger watched a
- * car that never moved for the whole journey. Driving here keeps the app in
- * front of the chauffeur and the car moving on the passenger's map.
- *
- * Waze and Maps are left underneath for the night the route will not come,
- * and the cost of using them is written next to them.
+ * The app does the navigating itself, and it is the only way out of this row
+ * on purpose. Handing over to Waze put this app to sleep, and a sleeping app
+ * reports no positions, so the passenger watched a car that never moved for
+ * the whole journey. There is nothing here to tempt a chauffeur out of the
+ * app on a job that is going fine.
  *
  * Where it heads follows the job: the collection until the passenger is
  * aboard, the destination afterwards.
@@ -173,28 +169,6 @@ export function NavigateRow({
           <Navigation className="w-4 h-4 mr-2" />
           Drive
         </Button>
-      )}
-      <div className="flex gap-2">
-        <Button
-          variant="outline"
-          onClick={() => openNavigation(wazeLink(heading.place))}
-          className="flex-1 h-11 rounded-none text-xs tracking-[0.15em] uppercase font-light text-smoke"
-        >
-          Waze
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => openNavigation(googleMapsLink(heading.place))}
-          className="flex-1 h-11 rounded-none text-xs tracking-[0.15em] uppercase font-light text-smoke"
-        >
-          <MapPin className="w-4 h-4 mr-2" />
-          Maps
-        </Button>
-      </div>
-      {onDrive && (
-        <p className="text-[10px] text-smoke/70 leading-relaxed">
-          Leaving the app for Waze stops the passenger seeing the car move.
-        </p>
       )}
     </div>
   );
@@ -552,8 +526,6 @@ const Driver = () => {
   };
 
   /** The passenger is in the car, so an hourly hire has somewhere to go. */
-  const aboard = (job: Job) => job.driver_status === "pob" || job.driver_status === "waiting";
-
   /** Where this hourly hire is heading, as last said by the passenger. */
   const named = (job: Job) => destinationNow(waypoints, job.reference);
 
@@ -599,7 +571,7 @@ const Driver = () => {
           )}
         </div>
 
-        {asDirected && aboard(job) && (
+        {asDirected && canSayWhere(job.driver_status) && (
           <DestinationBox
             chosen={named(job)?.place ?? null}
             changing={naming === job.reference}
@@ -662,6 +634,7 @@ const Driver = () => {
           onEta={(seconds) => {
             etaSeconds.current = seconds;
           }}
+          onDestination={(picked) => void setDestination(driving, picked)}
           onClose={() => setDriveFor(null)}
         />
       )}

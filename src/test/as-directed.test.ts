@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationNow, everyDestination, placeFrom, type Logged } from "@/lib/asDirected";
+import { canSayWhere, destinationNow, everyDestination, placeFrom, type Logged } from "@/lib/asDirected";
 
 let clock = 0;
 const at = (kind: string, place = "", reference = "APX-1"): Logged => ({
@@ -132,5 +132,38 @@ describe("turning a recorded destination back into something to drive to", () =>
 
   it("copes with nothing at all", () => {
     expect(placeFrom("")).toEqual({ line1: "", town: "", postcode: "" });
+  });
+});
+
+/**
+ * The address arrives by word of mouth, through the window or over a
+ * shoulder, and it arrives before anybody presses anything. If the box that
+ * takes it is not already on the screen, the chauffeur has nowhere to put it
+ * and the office never learns where the car went.
+ */
+describe("when the chauffeur can be asked where to", () => {
+  it("asks from the moment the car is on the kerb", () => {
+    expect(canSayWhere("arrived")).toBe(true);
+  });
+
+  it("keeps asking once the passenger is in", () => {
+    expect(canSayWhere("pob")).toBe(true);
+  });
+
+  it("asks again while waiting, which is where the next leg comes from", () => {
+    expect(canSayWhere("waiting")).toBe(true);
+  });
+
+  it("does not ask on the way to the collection, with nobody to ask", () => {
+    expect(canSayWhere("en_route")).toBe(false);
+  });
+
+  it("does not ask before the job has started", () => {
+    expect(canSayWhere(null)).toBe(false);
+    expect(canSayWhere(undefined)).toBe(false);
+  });
+
+  it("stops asking once the job is cleared", () => {
+    expect(canSayWhere("clear")).toBe(false);
   });
 });

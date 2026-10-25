@@ -9,6 +9,13 @@ const corsHeaders = {
 
 const MAX_SEARCHES_PER_HOUR = 300;
 const MAX_RESULTS = 6;
+/**
+ * How many doors a postcode may offer.
+ *
+ * A postcode holds a few dozen addresses, and the point of typing one is to
+ * scroll the list and pick yours, so this is not the six of a text search.
+ */
+const MAX_ADDRESSES = 60;
 // Bias results toward the home patch; national and international still work
 const BIAS_LAT = 53.4808;
 const BIAS_LON = -2.2426;
@@ -41,6 +48,90 @@ const countryName = (code: string | undefined, fallback: string) => {
   }
 };
 
+/** TOWN as Royal Mail writes it, back into the way an address is read. */
+const titleCase = (s: string) =>
+  s.replace(/\w[\w']*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+
+const addressFrom = (
+  line1: string,
+  line2: string,
+  town: string,
+  postcode: string
+): Suggestion | null => {
+  if (!line1) return null;
+  return {
+    label: [line1, line2, town, postcode].filter(Boolean).join(", "),
+    line1,
+    line2,
+    town,
+    postcode,
+    country: "United Kingdom",
+  };
+};
+
+/**
+ * Every address at a full postcode, so the member picks their door.
+ *
+ * This is the "find my address" list every UK checkout has, and it can only
+ * come from Royal Mail's address file, which is licensed. So it asks
+ * whichever provider has been set up and says nothing if neither has: the
+ * postcode itself still resolves below, and the address is typed by hand as
+ * it was before.
+ *
+ * Either key is enough. Both are a single GET and neither is billed when no
+ * postcode is looked up.
+ */
+const addressesAtPostcode = async (postcode: string): Promise<Suggestion[]> => {
+  const tidy = postcode.replace(/\s+/g, " ").toUpperCase().trim();
+  const found: Suggestion[] = [];
+  try {
+    const getAddressKey = Deno.env.get("GETADDRESS_API_KEY");
+    if (getAddressKey) {
+      const res = await fetch(
+        `https://api.getaddress.io/find/${encodeURIComponent(tidy)}` +
+          `?api-key=${encodeURIComponent(getAddressKey)}&expand=true&sort=true`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        for (const a of data?.addresses ?? []) {
+          const line1 = [a.line_1, a.line_2].filter(Boolean).join(", ");
+          const line2 = [a.line_3, a.line_4].filter(Boolean).join(", ");
+          const one = addressFrom(line1, line2, a.town_or_city ?? "", tidy);
+          if (one) found.push(one);
+        }
+      } else {
+        console.error("getAddress error:", res.status, await res.text());
+      }
+    }
+  } catch (err) {
+    console.error("getAddress failed:", err);
+  }
+  if (found.length > 0) return found.slice(0, MAX_ADDRESSES);
+
+  try {
+    const idealKey = Deno.env.get("IDEAL_POSTCODES_API_KEY");
+    if (idealKey) {
+      const res = await fetch(
+        `https://api.ideal-postcodes.co.uk/v1/postcodes/${encodeURIComponent(tidy)}` +
+          `?api_key=${encodeURIComponent(idealKey)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        for (const a of data?.result ?? []) {
+          const line1 = [a.line_1, a.line_2].filter(Boolean).join(", ");
+          const one = addressFrom(line1, a.line_3 ?? "", titleCase(a.post_town ?? ""), tidy);
+          if (one) found.push(one);
+        }
+      } else {
+        console.error("Ideal Postcodes error:", res.status, await res.text());
+      }
+    }
+  } catch (err) {
+    console.error("Ideal Postcodes failed:", err);
+  }
+  return found.slice(0, MAX_ADDRESSES);
+};
+
 /** Full UK postcode: authoritative lookup via postcodes.io (ONS data) */
 const searchPostcode = async (query: string): Promise<Suggestion[]> => {
   const res = await fetch(
@@ -53,7 +144,7 @@ const searchPostcode = async (query: string): Promise<Suggestion[]> => {
   const town = r.post_town || r.admin_district || "";
   return [
     {
-      label: `${r.postcode} · ${town}`,
+      label: `${r.postcode} · ${town} · use the postcode only`,
       line1: "",
       line2: "",
       town,
@@ -210,11 +301,28 @@ serve(async (req) => {
     const GOOGLE_MAPS_API_KEY = Deno.env.get("GOOGLE_MAPS_API_KEY");
     let suggestions: Suggestion[];
     if (UK_POSTCODE.test(query)) {
-      suggestions = await searchPostcode(query);
-      if (suggestions.length === 0) {
-        suggestions = GOOGLE_MAPS_API_KEY
-          ? await searchGoogle(query, GOOGLE_MAPS_API_KEY)
-          : await searchPhoton(query);
+      /*
+       * A postcode is a request for a list to pick from, not for one row.
+       *
+       * Returning only the postcode centroid, which is what this used to do,
+       * left a member who typed their postcode with an address that had no
+       * building in it and no hint that they now had to type one. So: the
+       * doors at that postcode first, then the named places the map knows
+       * there, and the bare postcode last for anyone who wants only that.
+       */
+      const [doors, centroid] = await Promise.all([
+        addressesAtPostcode(query),
+        searchPostcode(query),
+      ]);
+      const places =
+        doors.length > 0
+          ? []
+          : GOOGLE_MAPS_API_KEY
+            ? await searchGoogle(query, GOOGLE_MAPS_API_KEY)
+            : await searchPhoton(query);
+      suggestions = [];
+      for (const s of [...doors, ...places, ...centroid]) {
+        if (!suggestions.some((seen) => seen.label === s.label)) suggestions.push(s);
       }
     } else if (GOOGLE_MAPS_API_KEY) {
       suggestions = await searchGoogle(query, GOOGLE_MAPS_API_KEY);

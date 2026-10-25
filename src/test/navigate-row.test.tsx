@@ -34,10 +34,25 @@ beforeEach(() => {
 });
 
 describe("the navigate row on a job", () => {
-  it("offers Waze and Maps", () => {
-    render(<NavigateRow job={job} asDirected={false} />);
-    expect(screen.getByRole("button", { name: /waze/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /maps/i })).toBeInTheDocument();
+  /**
+   * The chauffeur leaving for another app is the whole problem this app was
+   * built to fix: the phone suspends it, positions stop going up, and the
+   * passenger watches a parked car for the length of their journey. So there
+   * is nothing on the job to tap but our own drive.
+   */
+  it("offers nothing but our own drive, so nobody leaves the app", () => {
+    render(<NavigateRow job={job} asDirected={false} onDrive={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /drive/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /waze/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /maps/i })).not.toBeInTheDocument();
+  });
+
+  it("never opens another app, however the row is pressed", () => {
+    const onDrive = vi.fn();
+    render(<NavigateRow job={job} asDirected={false} onDrive={onDrive} />);
+    for (const button of screen.getAllByRole("button")) fireEvent.click(button);
+    expect(onDrive).toHaveBeenCalledWith("pickup");
+    expect(opened).not.toHaveBeenCalled();
   });
 
   it("says it is heading for the collection before anybody is aboard", () => {
@@ -48,21 +63,6 @@ describe("the navigate row on a job", () => {
   it("says it is heading for the destination once they are in", () => {
     render(<NavigateRow job={{ ...job, driver_status: "pob" }} asDirected={false} />);
     expect(screen.getByText(/drive to the destination/i)).toBeInTheDocument();
-  });
-
-  it("sends Waze the collection, out of the app rather than inside it", () => {
-    render(<NavigateRow job={job} asDirected={false} />);
-    fireEvent.click(screen.getByRole("button", { name: /waze/i }));
-    const [url, target] = opened.mock.calls[0];
-    expect(url).toContain(encodeURIComponent("SK10 4TW"));
-    expect(url).toContain("navigate=yes");
-    expect(target).toBe("_system");
-  });
-
-  it("sends Maps the destination once the passenger is aboard", () => {
-    render(<NavigateRow job={{ ...job, driver_status: "pob" }} asDirected={false} />);
-    fireEvent.click(screen.getByRole("button", { name: /maps/i }));
-    expect(opened.mock.calls[0][0]).toContain(encodeURIComponent("M3 5LH"));
   });
 
   it("shows nothing on an as directed hire, where there is nowhere to send them", () => {

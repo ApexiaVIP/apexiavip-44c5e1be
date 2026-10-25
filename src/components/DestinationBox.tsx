@@ -51,7 +51,7 @@ const DestinationBox = ({ chosen, changing, onChange, onPick }: DestinationBoxPr
       {settled && !placeFrom(chosen).postcode && (
         <p className="text-[10px] text-smoke/70 leading-relaxed">
           That address has no postcode, so it is on the job for the office but the sat nav
-          cannot take you there. Use Waze, or pick a nearby postcode.
+          cannot take you there. Change it and search the postcode instead.
         </p>
       )}
     </div>

@@ -44,6 +44,20 @@ export const destinationNow = (logged: Logged[], reference: string): Logged | nu
   return heading;
 };
 
+/**
+ * Whether the chauffeur can be asked where the passenger wants to go.
+ *
+ * The passenger says it as they open the door, which is while the job still
+ * reads "arrived". Asking only once they had been marked aboard meant the one
+ * box that takes the address was not on the screen at the moment the address
+ * was spoken, so there was nowhere to put it.
+ *
+ * Before arriving there is nobody in the car to ask, and once the job is
+ * cleared it is over, so neither offers the box.
+ */
+export const canSayWhere = (status: string | null | undefined): boolean =>
+  status === "arrived" || status === "pob" || status === "waiting";
+
 /** Every address this job was actually driven to, in order, for the office. */
 export const everyDestination = (logged: Logged[], reference: string): string[] =>
   logged

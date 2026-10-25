@@ -257,23 +257,91 @@ describe("the screen a chauffeur drives by", () => {
   });
 
   /**
-   * A chauffeur stood at a kerb with a screen that will not route is worse off
-   * than before any of this existed, so there is always a way out to Waze.
+   * A route can fail for a tunnel or an underground car park, and the answer
+   * to that is to ask again. Sending the chauffeur out to another app is the
+   * one thing that stops the passenger seeing the car at all.
    */
-  it("hands over to Waze when there is no postcode to navigate to", async () => {
+  it("says why it cannot route, and offers another go rather than another app", async () => {
     driving({ to: { line1: "Somewhere", town: "Manchester", postcode: "" } });
-    expect(
-      await screen.findByRole("button", { name: /open in waze instead/i })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /try again/i })).toBeInTheDocument();
     expect(screen.getByText(/no postcode/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /waze/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /maps/i })).not.toBeInTheDocument();
   });
 
-  it("hands over to Waze when the route will not come", async () => {
+  it("offers another go when the route will not come", async () => {
     invoke.mockResolvedValue({ data: null, error: new Error("down") });
     driving();
-    expect(
-      await screen.findByRole("button", { name: /open in waze instead/i })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /try again/i })).toBeInTheDocument();
+  });
+
+  it("actually asks again when another go is taken", async () => {
+    invoke.mockResolvedValue({ data: null, error: new Error("down") });
+    driving();
+    fireEvent.click(await screen.findByRole("button", { name: /try again/i }));
+    invoke.mockResolvedValue({ data: openRoute, error: null });
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+  });
+
+  /**
+   * The hourly hire dead end.
+   *
+   * Marking the passenger aboard turns the drive round to the destination,
+   * and on an hourly hire there is no destination yet because the passenger
+   * has only just said it out loud. The screen used to call that a fault and
+   * offer a way out of the app. It has to ask instead.
+   */
+  it("asks where to on an hourly hire, rather than calling it a fault", async () => {
+    driving({
+      what: "dropoff",
+      status: "pob",
+      asDirected: true,
+      to: null,
+      onDestination: vi.fn(),
+    });
+    expect(await screen.findByText(/where have they asked for/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/no postcode/i)).not.toBeInTheDocument();
+  });
+
+  it("hands the address straight back to the job, so the office gets it", async () => {
+    const onDestination = vi.fn();
+    driving({
+      what: "dropoff",
+      status: "pob",
+      asDirected: true,
+      to: null,
+      onDestination,
+    });
+    const box = await screen.findByPlaceholderText(/address, place or postcode/i);
+    expect(box).toBeInTheDocument();
+    expect(onDestination).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A booked journey with no address is still a fault: the office should have
+   * put one on the job, and there is nobody in the car to ask.
+   */
+  it("still calls a missing address a fault on a booked journey", async () => {
+    driving({
+      what: "dropoff",
+      status: "pob",
+      to: { line1: "Somewhere", town: "Manchester", postcode: "" },
+      onDestination: vi.fn(),
+    });
+    expect(await screen.findByRole("button", { name: /try again/i })).toBeInTheDocument();
+  });
+
+  it("drives on once the destination has been put in", async () => {
+    driving({
+      what: "dropoff",
+      status: "pob",
+      asDirected: true,
+      to: { line1: "Australasia", town: "Manchester", postcode: "M3 3AP" },
+      onDestination: vi.fn(),
+    });
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    expect(screen.queryByText(/where have they asked for/i)).not.toBeInTheDocument();
   });
 
   it("asks for a route from where the car actually is, pointing the way it points", async () => {

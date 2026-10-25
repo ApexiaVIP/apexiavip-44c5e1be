@@ -19,7 +19,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { lookUpPostcode, metresBetween } from "@/lib/trackMarker";
-import { destinationQuery, openNavigation, wazeLink } from "@/lib/navigation";
+import { destinationQuery } from "@/lib/navigation";
+import DestinationBox from "./DestinationBox";
+import type { PlaceSuggestion } from "@/lib/mfa";
 import { fromGoogle, fromOsrm, type LatLng, type NavRoute, type Turn } from "@/lib/navRoute";
 import {
   announcement,
@@ -124,10 +126,19 @@ export interface DriveScreenProps {
    * passenger was last shown rather than leaving it to rot on their screen.
    */
   onEta?: (secondsLeft: number | null) => void;
+  /**
+   * The passenger has said where, while the chauffeur is still in the drive.
+   *
+   * On an hourly hire the destination only exists once it is said in the car,
+   * so the drive has to be able to ask for it. Without this, marking the
+   * passenger aboard turned the screen round to a destination that was not
+   * there yet and the chauffeur was left looking at an error.
+   */
+  onDestination?: (picked: PlaceSuggestion) => void;
   onClose: () => void;
 }
 
-type Stage = "finding" | "driving" | "arrived" | "stuck";
+type Stage = "finding" | "asking" | "driving" | "arrived" | "stuck";
 
 /**
  * Navigating inside the app.
@@ -151,10 +162,20 @@ const DriveScreen = ({
   onAdvance,
   onSetDown,
   onEta,
+  onDestination,
   onClose,
 }: DriveScreenProps) => {
   const [stage, setStage] = useState<Stage>("finding");
   const [trouble, setTrouble] = useState("");
+  /**
+   * Bumped to ask for the route again.
+   *
+   * A route can fail for a minute of bad signal in a tunnel or a car park,
+   * and the answer to that is to ask again rather than to send the chauffeur
+   * out to another app, which is the one thing that stops the passenger
+   * seeing the car.
+   */
+  const [attempt, setAttempt] = useState(0);
   const [route, setRoute] = useState<NavRoute | null>(null);
   const [guidance, setGuidance] = useState<Guidance | null>(null);
   const [target, setTarget] = useState<LatLng | null>(null);
@@ -228,10 +249,23 @@ const DriveScreen = ({
     [address, reference]
   );
 
+  /**
+   * Whether this drive is waiting to be told where it is going.
+   *
+   * An hourly hire has no destination until the passenger says one, so an
+   * empty address here is the normal state of the job rather than a fault
+   * with it, and the screen asks instead of complaining.
+   */
+  const askingWhere = asDirected && what === "dropoff" && !to?.postcode?.trim() && !!onDestination;
+
   /** Find the door, find the car, and work out the way there. */
   useEffect(() => {
     let dropped = false;
     const begin = async () => {
+      if (askingWhere) {
+        setStage("asking");
+        return;
+      }
       const postcode = to?.postcode?.trim();
       if (!postcode) {
         setTrouble("This job has no postcode, so there is nothing to navigate to.");
@@ -272,7 +306,14 @@ const DriveScreen = ({
     return () => {
       dropped = true;
     };
-  }, [to?.postcode, plot]);
+  }, [to?.postcode, plot, askingWhere, attempt]);
+
+  /** Have another go at finding the way, after a route would not come. */
+  const tryAgain = useCallback(() => {
+    setTrouble("");
+    setStage("finding");
+    setAttempt((n) => n + 1);
+  }, []);
 
   /** Follow the car along the route. */
   useEffect(() => {
@@ -429,15 +470,48 @@ const DriveScreen = ({
         </div>
       )}
 
+      {/*
+        Where to, asked in the car.
+
+        This is the whole of an hourly hire: the passenger gets in, says a
+        place, and this is where it goes. It sits on the drive screen so the
+        chauffeur never has to come out of navigation to record it, and the
+        route starts the moment it is picked.
+      */}
+      {stage === "asking" && (
+        <div className="absolute inset-0 flex flex-col justify-center gap-4 px-5">
+          <p className="text-center text-sm text-foreground">
+            Your passenger is aboard. Where have they asked for?
+          </p>
+          <DestinationBox
+            chosen={null}
+            changing={false}
+            onChange={() => undefined}
+            onPick={(picked) => onDestination?.(picked)}
+          />
+          <p className="text-center text-[11px] text-smoke leading-relaxed">
+            Search the place, the address or the postcode. Driving starts as soon as you
+            pick it, and the address goes on the job for the office.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs tracking-[0.15em] uppercase text-smoke"
+          >
+            Back to the job
+          </button>
+        </div>
+      )}
+
       {stage === "stuck" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 px-8 text-center">
           <p className="text-sm text-foreground">{trouble}</p>
           <Button
             variant="outline"
-            onClick={() => openNavigation(wazeLink(to))}
+            onClick={() => void tryAgain()}
             className="h-14 w-full rounded-none text-sm tracking-[0.15em] uppercase font-light"
           >
-            Open in Waze instead
+            Try again
           </Button>
           <button
             type="button"
@@ -450,7 +524,7 @@ const DriveScreen = ({
       )}
 
       {/* The strip along the bottom: the next step, when the car is due, the way out */}
-      {stage !== "stuck" && (
+      {stage !== "stuck" && stage !== "asking" && (
         <div className="shrink-0 bg-charcoal border-t border-champagne/20 pb-[env(safe-area-inset-bottom)]">
           {route && !route.withTraffic && stage !== "arrived" && (
             <p className="px-4 pt-2 text-[10px] tracking-[0.15em] uppercase text-smoke/70">
