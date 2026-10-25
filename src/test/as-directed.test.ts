@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canSayWhere, destinationNow, everyDestination, placeFrom, type Logged } from "@/lib/asDirected";
+import { canSayWhere, destinationNow, placeFrom, type Logged } from "@/lib/asDirected";
 
 let clock = 0;
 const at = (kind: string, place = "", reference = "APX-1"): Logged => ({
@@ -73,31 +73,11 @@ describe("where an hourly hire is heading", () => {
   });
 });
 
-describe("what the office gets at the end of the day", () => {
-  it("lists every address the car was actually driven to, in order", () => {
-    const log = [
-      at("pob"),
-      at("destination", "Spinningfields"),
-      at("waiting"),
-      at("pob"),
-      at("destination", "The Ivy, Manchester"),
-      at("waiting"),
-      at("pob"),
-      at("destination", "Hale Barns"),
-      at("clear"),
-    ];
-    expect(everyDestination(log, "APX-1")).toEqual([
-      "Spinningfields",
-      "The Ivy, Manchester",
-      "Hale Barns",
-    ]);
-  });
-
-  it("keeps one job's addresses out of another's", () => {
-    const log = [at("destination", "Mine"), at("destination", "Theirs", "APX-2")];
-    expect(everyDestination(log, "APX-1")).toEqual(["Mine"]);
-  });
-});
+/*
+ * The end-of-day list used to be built here and was never read. The office
+ * email builds it server side now, in driver-timesheets, which is where
+ * accounts actually sees it.
+ */
 
 describe("turning a recorded destination back into something to drive to", () => {
   it("takes the postcode off the end, where it is written", () => {

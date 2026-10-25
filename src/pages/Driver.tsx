@@ -114,6 +114,7 @@ const stepLabel: Record<string, string> = {
   set_down: "Set down",
   collected: "Collected",
   note: "Note",
+  destination: "Destination given",
 };
 
 /** Where a job has got to, in the chauffeur's own words. */

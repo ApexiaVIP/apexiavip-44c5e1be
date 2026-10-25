@@ -122,6 +122,7 @@ const STEP_LABEL: Record<string, string> = {
   set_down: "Set down",
   collected: "Collected",
   note: "Note",
+  destination: "Destination given",
 };
 
 const addressLine = (a: Job["pickup"]) =>
@@ -267,9 +268,17 @@ serve(async (req) => {
           .filter((w) => w.kind === "clear" && (w.note as string)?.trim())
           .map((w) => (w.note as string).trim());
 
+        // Every address the passenger actually asked for, in order
+        const drivenTo = (steps ?? [])
+          .filter((w) => w.kind === "destination" && (w.place as string)?.trim())
+          .map((w) => (w.place as string).trim());
+
         const route =
           job.journey_type === "hourly"
-            ? `As directed${job.as_directed_hours ? `, ${job.as_directed_hours} hours` : ""}`
+            ? `As directed${job.as_directed_hours ? `, ${job.as_directed_hours} hours` : ""}` +
+              (drivenTo.length > 0
+                ? `<br/><span style="color:#b89b5e;">${drivenTo.map(esc).join(" &rarr; ")}</span>`
+                : `<br/><span style="color:#6b6355;">No destination was recorded</span>`)
             : `${esc(addressLine(job.pickup as Job["pickup"]))} &rarr; ${esc(
                 addressLine(job.dropoff as Job["dropoff"])
               )}`;

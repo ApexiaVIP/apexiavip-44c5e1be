@@ -58,15 +58,6 @@ export const destinationNow = (logged: Logged[], reference: string): Logged | nu
 export const canSayWhere = (status: string | null | undefined): boolean =>
   status === "arrived" || status === "pob" || status === "waiting";
 
-/** Every address this job was actually driven to, in order, for the office. */
-export const everyDestination = (logged: Logged[], reference: string): string[] =>
-  logged
-    .filter((w) => w.booking_reference === reference && w.kind === "destination")
-    .slice()
-    .sort((a, b) => Date.parse(a.recorded_at) - Date.parse(b.recorded_at))
-    .map((w) => w.place)
-    .filter(Boolean);
-
 const UK_POSTCODE = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i;
 
 /**
