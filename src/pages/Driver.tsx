@@ -525,7 +525,6 @@ const Driver = () => {
     );
   };
 
-  /** The passenger is in the car, so an hourly hire has somewhere to go. */
   /** Where this hourly hire is heading, as last said by the passenger. */
   const named = (job: Job) => destinationNow(waypoints, job.reference);
 
