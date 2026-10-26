@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { followLink, recipientsFor, trySendSms, ukWhen } from "../_shared/notify.ts";
+import { transferAuth } from "../_shared/dispatch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,6 +9,8 @@ const corsHeaders = {
 };
 
 const DISPATCH_TRANSFER_REFERENCE = Deno.env.get("DISPATCH_TRANSFER_REFERENCE") ?? "";
+// Preferred over the reference for the password; see _shared/dispatch.ts
+const DISPATCH_TRANSFER_API_KEY = Deno.env.get("DISPATCH_TRANSFER_API_KEY") ?? "";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -398,7 +401,7 @@ Deno.serve(async (req) => {
 
       const refs = (candidates ?? []).map((b) => b.reference as string);
       if (refs.length > 0) {
-        const auth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
+        const auth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
         try {
           const res = await fetch(
             `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(

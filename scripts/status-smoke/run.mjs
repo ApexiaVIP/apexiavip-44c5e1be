@@ -30,20 +30,26 @@ await esbuild.build({
   }],
 });
 
-globalThis.Deno = { env: { get: (k) => ({
+// Read live, so a test can change what is configured between calls
+const env = {
   SUPABASE_URL: "https://x.supabase.co",
   SUPABASE_SERVICE_ROLE_KEY: "service-key",
   DISPATCH_TRANSFER_REFERENCE: "REF",
-})[k] } };
+};
+globalThis.Deno = { env: { get: (k) => env[k] } };
 
 // Which references Dispatch was asked about, and what it chose to answer
 let asked = [];
+let sentAuth = "";
+let lastUrl = "";
 let dispatchHttp = 200;
 let answerFor = [];
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.includes("deversoftware")) {
+    lastUrl = u;
     asked = JSON.parse(init.body).Bookings.map((b) => b.Reference);
+    sentAuth = init.headers.Authorization;
     if (dispatchHttp !== 200) {
       return new Response("Too many requests. Please wait 30 seconds.", { status: dispatchHttp });
     }
@@ -139,6 +145,24 @@ const stranger = async () => {
 const other = await stranger();
 is("another member's booking returns nothing", other.body.statuses.length, 0);
 is("and Dispatch is never asked about it", asked.length, 0);
+
+/*
+ * How we prove who we are to Dispatch.
+ *
+ * Dever moved the password from the transfer reference to a per company
+ * transfer API key in October 2026, and still accept the old one for now. The
+ * key is used the moment it is configured, and until then nothing changes.
+ */
+{
+  await ask(["APEXIA-1"]);
+  is("it signs in with the reference while no key is configured", sentAuth, `Basic ${Buffer.from("TRANSFERAPIUSER:REF").toString("base64")}`);
+
+  env.DISPATCH_TRANSFER_API_KEY = "KEY-9";
+  await ask(["APEXIA-1"]);
+  is("it uses the transfer API key as soon as there is one", sentAuth, `Basic ${Buffer.from("TRANSFERAPIUSER:KEY-9").toString("base64")}`);
+  is("and still addresses the company by its reference", lastUrl.includes("TransferToReference=REF"), true);
+  delete env.DISPATCH_TRANSFER_API_KEY;
+}
 
 console.log(bad === 0 ? "\nevery booking asked about is recorded as asked" : `\n${bad} FAILED`);
 process.exit(bad ? 1 : 0);

@@ -25,6 +25,7 @@ import {
   describeClientCar,
   detailLines,
 } from "../_shared/bookingDetails.ts";
+import { transferAuth } from "../_shared/dispatch.ts";
 
 const CLIENT_CAR_VEHICLE = "Client's own car";
 
@@ -129,6 +130,8 @@ serve(async (req) => {
     }
 
     const DISPATCH_TRANSFER_REFERENCE = Deno.env.get("DISPATCH_TRANSFER_REFERENCE");
+    // Preferred over the reference for the password; see _shared/dispatch.ts
+    const DISPATCH_TRANSFER_API_KEY = Deno.env.get("DISPATCH_TRANSFER_API_KEY") ?? "";
     if (!DISPATCH_TRANSFER_REFERENCE) {
       throw new Error("DISPATCH_TRANSFER_REFERENCE is not configured");
     }
@@ -547,7 +550,7 @@ serve(async (req) => {
       ...(returnPayload ? [{ reference: returnReference!, payload: returnPayload }] : []),
     ];
 
-    const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
+    const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
 
     const dispatchUrl = `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`;
 

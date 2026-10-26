@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { followLink } from "../_shared/notify.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
+import { transferAuth } from "../_shared/dispatch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -116,6 +117,8 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const DISPATCH_TRANSFER_REFERENCE = Deno.env.get("DISPATCH_TRANSFER_REFERENCE");
+    // Preferred over the reference for the password; see _shared/dispatch.ts
+    const DISPATCH_TRANSFER_API_KEY = Deno.env.get("DISPATCH_TRANSFER_API_KEY") ?? "";
     if (!DISPATCH_TRANSFER_REFERENCE) {
       throw new Error("DISPATCH_TRANSFER_REFERENCE is not configured");
     }
@@ -159,7 +162,7 @@ serve(async (req) => {
     }
 
     // Ask Dispatch where each of them stands
-    const auth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
+    const auth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
     const res = await fetch(
       `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(
         DISPATCH_TRANSFER_REFERENCE

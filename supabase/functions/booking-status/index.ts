@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { transferAuth } from "../_shared/dispatch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -52,6 +53,8 @@ serve(async (req) => {
 
   try {
     const DISPATCH_TRANSFER_REFERENCE = Deno.env.get("DISPATCH_TRANSFER_REFERENCE");
+    // Preferred over the reference for the password; see _shared/dispatch.ts
+    const DISPATCH_TRANSFER_API_KEY = Deno.env.get("DISPATCH_TRANSFER_API_KEY") ?? "";
     if (!DISPATCH_TRANSFER_REFERENCE) {
       throw new Error("DISPATCH_TRANSFER_REFERENCE is not configured");
     }
@@ -126,7 +129,7 @@ serve(async (req) => {
         return json(200, { success: true });
       }
 
-      const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
+      const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
       const cancelRes = await fetch(
         `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=` +
           `${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`,
@@ -317,7 +320,7 @@ serve(async (req) => {
     if (ownRefs.length === 0) return json(200, { statuses: [] });
 
     // Ask Dispatch for current status of these bookings
-    const dispatchAuth = btoa(`TRANSFERAPIUSER:${DISPATCH_TRANSFER_REFERENCE}`);
+    const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
     const dispatchUrl =
       `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=` +
       `${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&CheckBookingStatus=true`;
