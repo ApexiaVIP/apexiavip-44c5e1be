@@ -135,6 +135,43 @@ const Admin = () => {
       toast({ title: "Could not do that", description: err.message, variant: "destructive" }),
   });
 
+  /**
+   * The applicant who is already a member.
+   *
+   * Approving would try to build a second membership on an email address
+   * that already has one, and declining tells a client we actually have that
+   * we do not want them. This files the application against the membership
+   * it belongs to and fills in whatever that membership was missing.
+   */
+  const inWords = (fields: string[]) =>
+    fields.map((f) => (f === "full_name" ? "name" : f)).join(" and ");
+
+  const linkApplication = useMutation({
+    mutationFn: (id: string) =>
+      invokeAdmin({ action: "link_application", application_id: id }),
+    onSuccess: (data) => {
+      const filled = (data.filled as string[]) ?? [];
+      const differs = (data.differs as string[]) ?? [];
+      toast({
+        title: `Filed against ${(data.member_name as string) || "their membership"}`,
+        description: [
+          filled.length
+            ? `Added their ${inWords(filled)}, which was missing.`
+            : "Their membership already had everything on the application.",
+          differs.length
+            ? `Their ${inWords(differs)} on file differs from the application and was left as it is.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-applications"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Could not file it", description: err.message, variant: "destructive" }),
+  });
+
   const { data: members, isLoading: membersLoading, error: membersError } = useQuery({
     queryKey: ["admin-members"],
     queryFn: async () => (await invokeAdmin({ action: "list" })).members as Member[],
@@ -655,8 +692,17 @@ const Admin = () => {
                       </Button>
                       <Button
                         size="sm"
+                        variant="outline"
+                        disabled={linkApplication.isPending || decideApplication.isPending}
+                        onClick={() => linkApplication.mutate(a.id)}
+                        className="tracking-[0.15em] uppercase text-smoke"
+                      >
+                        Already a member
+                      </Button>
+                      <Button
+                        size="sm"
                         variant="ghost"
-                        disabled={decideApplication.isPending}
+                        disabled={decideApplication.isPending || linkApplication.isPending}
                         onClick={() => decideApplication.mutate({ id: a.id, approve: false })}
                         className="text-smoke hover:text-destructive"
                       >

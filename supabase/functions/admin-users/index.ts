@@ -401,6 +401,104 @@ serve(async (req) => {
       return json(200, { success: true, user_id: result.userId });
     }
 
+    /**
+     * Somebody who is already a member, applying again.
+     *
+     * It happens: a member fills the enquiry form from the website months
+     * after they joined, or a PA sends one on their behalf. Approving would
+     * try to build a second membership on an email address that already has
+     * one, and declining says something untrue to a client we actually have.
+     * Neither is what the desk wants, so the application was being left in
+     * the queue forever.
+     *
+     * This takes it off the queue as accepted, against the membership it
+     * belongs to, and fills in anything that membership was missing.
+     */
+    if (action === "link_application") {
+      const applicationId = body?.application_id;
+      if (!applicationId || typeof applicationId !== "string") {
+        return json(400, { error: "Invalid application" });
+      }
+      const { data: application } = await admin
+        .from("membership_applications")
+        .select("id, full_name, email, phone, status")
+        .eq("id", applicationId)
+        .maybeSingle();
+      if (!application) return json(404, { error: "No such application" });
+      if (application.status === "accepted" || application.status === "declined") {
+        return json(400, { error: "That application has already been dealt with" });
+      }
+
+      const chosen = body?.member_id;
+      let member: { id: string; full_name?: string; email?: string; phone?: string } | null = null;
+      if (typeof chosen === "string" && chosen) {
+        const { data } = await admin
+          .from("profiles")
+          .select("id, full_name, email, phone")
+          .eq("id", chosen)
+          .maybeSingle();
+        member = data;
+      } else {
+        const email = String(application.email ?? "").trim().toLowerCase();
+        if (email) {
+          const pattern = email.replace(/([\\%_])/g, "\\$1");
+          const { data } = await admin
+            .from("profiles")
+            .select("id, full_name, email, phone")
+            .ilike("email", pattern)
+            .limit(1);
+          member = data?.[0] ?? null;
+        }
+      }
+      if (!member) {
+        return json(400, {
+          error: "No membership uses that email address. Open the member and link it from there.",
+        });
+      }
+
+      /*
+       * Blanks only, never a replacement.
+       *
+       * What the desk holds on a membership has usually been checked, and an
+       * application that arrives long afterwards must not quietly overwrite a
+       * corrected number with whatever somebody typed into a web form. Where
+       * the two disagree, both are kept and the difference is reported, so a
+       * person decides rather than this function.
+       */
+      const patch: Record<string, string> = {};
+      const differs: string[] = [];
+      const consider = (field: "full_name" | "phone", offered: string) => {
+        const have = String(member?.[field] ?? "").trim();
+        const want = offered.trim();
+        if (!want) return;
+        if (!have) patch[field] = want;
+        else if (have.toLowerCase() !== want.toLowerCase()) differs.push(field);
+      };
+      consider("full_name", String(application.full_name ?? ""));
+      consider("phone", String(application.phone ?? "").replace(/[\s\-()]/g, ""));
+
+      if (Object.keys(patch).length > 0) {
+        const { error: fillError } = await admin.from("profiles").update(patch).eq("id", member.id);
+        if (fillError) throw fillError;
+      }
+
+      // Only once the membership is right, so a failure leaves the
+      // application in the queue to try again rather than lost
+      const { error } = await admin
+        .from("membership_applications")
+        .update({ status: "accepted", handled_by: caller.id, handled_at: new Date().toISOString() })
+        .eq("id", applicationId);
+      if (error) throw error;
+
+      return json(200, {
+        success: true,
+        member_id: member.id,
+        member_name: String(member.full_name ?? ""),
+        filled: Object.keys(patch),
+        differs,
+      });
+    }
+
     if (action === "update_member") {
       const userId = body?.user_id;
       if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });
