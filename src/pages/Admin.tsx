@@ -38,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "@/hooks/use-toast";
+import { guessMember, matchMembers } from "@/lib/linkApplication";
 
 interface Application {
   id: string;
@@ -106,6 +107,9 @@ const Admin = () => {
   const [editPrimary, setEditPrimary] = useState("");
   const [resetCountryCode, setResetCountryCode] = useState("+44");
   const [resetPhone, setResetPhone] = useState("");
+  const [linkTarget, setLinkTarget] = useState<Application | null>(null);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkChoice, setLinkChoice] = useState("");
 
   // People who asked to join through the website, waiting on the office
   const { data: applications, error: applicationsError } = useQuery({
@@ -147,9 +151,10 @@ const Admin = () => {
     fields.map((f) => (f === "full_name" ? "name" : f)).join(" and ");
 
   const linkApplication = useMutation({
-    mutationFn: (id: string) =>
-      invokeAdmin({ action: "link_application", application_id: id }),
+    mutationFn: ({ id, memberId }: { id: string; memberId: string }) =>
+      invokeAdmin({ action: "link_application", application_id: id, member_id: memberId }),
     onSuccess: (data) => {
+      setLinkTarget(null);
       const filled = (data.filled as string[]) ?? [];
       const differs = (data.differs as string[]) ?? [];
       toast({
@@ -177,6 +182,21 @@ const Admin = () => {
     queryFn: async () => (await invokeAdmin({ action: "list" })).members as Member[],
     enabled: !!user && isAdmin,
   });
+
+  const linkMatches = matchMembers(members ?? [], linkSearch)
+    // The preselected guess stays in sight rather than somewhere down the list
+    .slice()
+    .sort((a, b) => {
+      if (a.id === linkChoice) return -1;
+      if (b.id === linkChoice) return 1;
+      return (a.full_name ?? "").localeCompare(b.full_name ?? "");
+    });
+
+  const openLink = (a: Application) => {
+    setLinkTarget(a);
+    setLinkSearch("");
+    setLinkChoice(guessMember(a, members ?? []));
+  };
 
   const invite = useMutation({
     mutationFn: () =>
@@ -694,7 +714,7 @@ const Admin = () => {
                         size="sm"
                         variant="outline"
                         disabled={linkApplication.isPending || decideApplication.isPending}
-                        onClick={() => linkApplication.mutate(a.id)}
+                        onClick={() => openLink(a)}
                         className="tracking-[0.15em] uppercase text-smoke"
                       >
                         Already a member
@@ -715,6 +735,82 @@ const Admin = () => {
             </div>
           </div>
         )}
+
+        {/* Choosing the membership by hand, because an application that
+            arrives on a different email address cannot be matched for us */}
+        <Dialog
+          open={!!linkTarget}
+          onOpenChange={(open) => {
+            if (!open) setLinkTarget(null);
+          }}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="tracking-[0.2em] uppercase text-sm">
+                Already a member
+              </DialogTitle>
+              <DialogDescription>
+                {linkTarget?.full_name} applied as {linkTarget?.email}
+                {linkTarget?.phone ? ` · ${linkTarget.phone}` : ""}. Choose the membership this
+                belongs to. Anything missing from it is filled in, anything that disagrees is left
+                alone, and nothing is deleted.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={linkSearch}
+              onChange={(e) => setLinkSearch(e.target.value)}
+              placeholder="Search by name, email or number"
+              className="bg-transparent"
+            />
+            <div className="max-h-72 overflow-y-auto border border-border divide-y divide-border">
+              {linkMatches.length === 0 ? (
+                <p className="text-smoke text-sm p-4">No member matches that.</p>
+              ) : (
+                linkMatches.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setLinkChoice(m.id)}
+                    className={`w-full text-left p-3 flex items-start justify-between gap-3 ${
+                      linkChoice === m.id ? "bg-champagne/10" : "hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-foreground text-sm font-light tracking-wide">
+                        {m.full_name || "No name on file"}
+                      </span>
+                      <span className="block text-smoke text-xs mt-0.5 truncate">
+                        {m.email || "No email"}
+                        {m.phone ? ` · ${m.phone}` : ""}
+                      </span>
+                    </span>
+                    {linkChoice === m.id && (
+                      <Check className="h-4 w-4 text-champagne flex-none mt-0.5" />
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setLinkTarget(null)} className="text-smoke">
+                Cancel
+              </Button>
+              <Button
+                disabled={!linkChoice || linkApplication.isPending}
+                onClick={() =>
+                  linkTarget && linkApplication.mutate({ id: linkTarget.id, memberId: linkChoice })
+                }
+                className="tracking-[0.15em] uppercase"
+              >
+                {linkApplication.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "File against this member"
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {membersLoading ? (
           <div className="py-20 text-center">

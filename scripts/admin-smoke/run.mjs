@@ -118,7 +118,7 @@ console.log("\nfiling an application against the membership it belongs to\n");
   setUp([{ id: "u-other", full_name: "Someone Else", email: "someone@example.com", phone: "" }]);
   const { status, body } = await call({ action: "link_application", application_id: "app-1" });
   ok("it refuses when no membership uses that email", status, 400);
-  ok("and says what to do instead", /link it from there/.test(body.error), true);
+  ok("and says what to do instead", /Choose the member from the list/.test(body.error), true);
   ok("and leaves the application in the queue", writesTo("membership_applications", "update").length, 0);
   ok("and touches no membership", writesTo("profiles", "update").length, 0);
 }
@@ -135,6 +135,35 @@ console.log("\nfiling an application against the membership it belongs to\n");
     member_id: "u-chosen",
   });
   ok("an explicit member wins over the email match", body.member_id, "u-chosen");
+}
+
+{
+  // The desk picked somebody who has since been removed
+  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mike.jones@example.com", phone: "" }]);
+  const { status, body } = await call({
+    action: "link_application",
+    application_id: "app-1",
+    member_id: "u-gone",
+  });
+  ok("it refuses a membership that is not there", status, 400);
+  ok("and says to reload", /no longer exists/.test(body.error), true);
+  ok("and leaves the application alone", writesTo("membership_applications", "update").length, 0);
+  ok("and does not fall back to the email match", writesTo("profiles", "update").length, 0);
+}
+
+{
+  // Filed by hand against a membership on a different address. The email is
+  // their sign-in, so it is reported and never written.
+  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mj@example.com", phone: "" }]);
+  const { body } = await call({
+    action: "link_application",
+    application_id: "app-1",
+    member_id: "u-mike",
+  });
+  ok("it reports the different email", body.differs, ["email"]);
+  ok("it fills the missing phone", body.filled, ["phone"]);
+  const filled = writesTo("profiles", "update")[0];
+  ok("and writes no email onto the membership", "email" in (filled?.payload ?? {}), false);
 }
 
 {

@@ -438,6 +438,9 @@ serve(async (req) => {
           .eq("id", chosen)
           .maybeSingle();
         member = data;
+        if (!member) {
+          return json(400, { error: "That membership no longer exists. Reload and try again." });
+        }
       } else {
         const email = String(application.email ?? "").trim().toLowerCase();
         if (email) {
@@ -449,11 +452,11 @@ serve(async (req) => {
             .limit(1);
           member = data?.[0] ?? null;
         }
-      }
-      if (!member) {
-        return json(400, {
-          error: "No membership uses that email address. Open the member and link it from there.",
-        });
+        if (!member) {
+          return json(400, {
+            error: "No membership uses that email address. Choose the member from the list.",
+          });
+        }
       }
 
       /*
@@ -476,6 +479,18 @@ serve(async (req) => {
       };
       consider("full_name", String(application.full_name ?? ""));
       consider("phone", String(application.phone ?? "").replace(/[\s\-()]/g, ""));
+
+      /*
+       * The email address is reported and never written. It is what they sign
+       * in with, and that lives in the auth records rather than here, so
+       * writing a new one onto the profile would leave them signing in with
+       * one address and shown another.
+       */
+      const haveEmail = String(member.email ?? "").trim();
+      const wantEmail = String(application.email ?? "").trim();
+      if (haveEmail && wantEmail && haveEmail.toLowerCase() !== wantEmail.toLowerCase()) {
+        differs.push("email");
+      }
 
       if (Object.keys(patch).length > 0) {
         const { error: fillError } = await admin.from("profiles").update(patch).eq("id", member.id);
