@@ -42,6 +42,67 @@ const trySendSms = async (to: string, bodyText: string) => {
   }
 };
 
+const APPLICATION_FIELDS =
+  "id, full_name, email, phone, address_line1, address_line2, town, postcode, country, status";
+
+const MEMBER_FIELDS =
+  "id, full_name, email, phone, address_line1, address_line2, town, postcode, country";
+
+type Row = Record<string, unknown>;
+
+/*
+ * Fill in what a membership is missing from an application, and nothing else.
+ *
+ * Blanks only, never a replacement. What the desk holds on a membership has
+ * usually been checked, and an application that arrives long afterwards must
+ * not quietly overwrite a corrected number with whatever somebody typed into
+ * a web form. Where the two disagree, both are kept and the difference is
+ * reported, so a person decides rather than this function.
+ *
+ * The email address is reported and never written. It is what they sign in
+ * with, and that lives in the auth records rather than on the profile, so
+ * writing a new one here would leave them signing in with one address and
+ * shown another.
+ */
+const fillBlanks = async (
+  admin: ReturnType<typeof createClient>,
+  member: Row,
+  application: Row,
+) => {
+  const patch: Record<string, string> = {};
+  const differs: string[] = [];
+
+  const consider = (field: string, offered: string) => {
+    const have = String(member[field] ?? "").trim();
+    const want = offered.trim();
+    if (!want) return;
+    if (!have) patch[field] = want;
+    else if (have.toLowerCase() !== want.toLowerCase()) differs.push(field);
+  };
+
+  consider("full_name", String(application.full_name ?? ""));
+  consider("phone", String(application.phone ?? "").replace(/[\s\-()]/g, ""));
+  // Where to collect them from, which is most of what an application is for
+  consider("address_line1", String(application.address_line1 ?? ""));
+  consider("address_line2", String(application.address_line2 ?? ""));
+  consider("town", String(application.town ?? ""));
+  consider("postcode", String(application.postcode ?? ""));
+  consider("country", String(application.country ?? ""));
+
+  const haveEmail = String(member.email ?? "").trim();
+  const wantEmail = String(application.email ?? "").trim();
+  if (haveEmail && wantEmail && haveEmail.toLowerCase() !== wantEmail.toLowerCase()) {
+    differs.push("email");
+  }
+
+  const filled = Object.keys(patch);
+  if (filled.length > 0) {
+    const { error } = await admin.from("profiles").update(patch).eq("id", member.id as string);
+    if (error) throw error;
+  }
+  return { filled, differs };
+};
+
 interface NewMember {
   fullName: string;
   email: string;
@@ -344,16 +405,69 @@ serve(async (req) => {
     // office had no way to add one.
     // --- Applications people sent in themselves ---
     if (action === "list_applications") {
+      /*
+       * Handled applications are asked for separately.
+       *
+       * One that has been dealt with used to disappear from the desk
+       * entirely, which meant what somebody had written on it, their address
+       * above all, could not be read again afterwards. The queue stays the
+       * short list of people waiting; the rest is there when it is wanted.
+       */
+      const handled = body?.handled === true;
       const { data, error } = await admin
         .from("membership_applications")
         .select(
           "id, created_at, full_name, email, phone, address_line1, address_line2, town, postcode, country, heard_from, message, status, handled_at"
         )
-        .in("status", ["new", "contacted"])
-        .order("created_at", { ascending: false })
-        .limit(100);
+        .in("status", handled ? ["accepted", "declined"] : ["new", "contacted"])
+        .order(handled ? "handled_at" : "created_at", { ascending: false })
+        .limit(handled ? 50 : 100);
       if (error) throw error;
       return json(200, { success: true, applications: data ?? [] });
+    }
+
+    /*
+     * Fill a membership's blanks from an application, without filing it.
+     *
+     * For an application already dealt with, where something on it was never
+     * copied across. It changes nothing about the application itself, so it
+     * can be run again without consequence, and it writes only into fields
+     * the membership has left empty.
+     */
+    if (action === "fill_from_application") {
+      const applicationId = body?.application_id;
+      const chosen = body?.member_id;
+      if (!applicationId || typeof applicationId !== "string") {
+        return json(400, { error: "Invalid application" });
+      }
+      if (!chosen || typeof chosen !== "string") {
+        return json(400, { error: "Choose the member to fill in" });
+      }
+
+      const { data: application } = await admin
+        .from("membership_applications")
+        .select(APPLICATION_FIELDS)
+        .eq("id", applicationId)
+        .maybeSingle();
+      if (!application) return json(404, { error: "No such application" });
+
+      const { data: member } = await admin
+        .from("profiles")
+        .select(MEMBER_FIELDS)
+        .eq("id", chosen)
+        .maybeSingle();
+      if (!member) {
+        return json(400, { error: "That membership no longer exists. Reload and try again." });
+      }
+
+      const { filled, differs } = await fillBlanks(admin, member, application);
+      return json(200, {
+        success: true,
+        member_id: member.id as string,
+        member_name: String(member.full_name ?? ""),
+        filled,
+        differs,
+      });
     }
 
     if (action === "approve_application" || action === "decline_application") {
@@ -363,7 +477,7 @@ serve(async (req) => {
       }
       const { data: application } = await admin
         .from("membership_applications")
-        .select("id, full_name, email, phone, status")
+        .select(APPLICATION_FIELDS)
         .eq("id", applicationId)
         .maybeSingle();
       if (!application) return json(404, { error: "No such application" });
@@ -430,11 +544,11 @@ serve(async (req) => {
       }
 
       const chosen = body?.member_id;
-      let member: { id: string; full_name?: string; email?: string; phone?: string } | null = null;
+      let member: Row | null = null;
       if (typeof chosen === "string" && chosen) {
         const { data } = await admin
           .from("profiles")
-          .select("id, full_name, email, phone")
+          .select(MEMBER_FIELDS)
           .eq("id", chosen)
           .maybeSingle();
         member = data;
@@ -447,7 +561,7 @@ serve(async (req) => {
           const pattern = email.replace(/([\\%_])/g, "\\$1");
           const { data } = await admin
             .from("profiles")
-            .select("id, full_name, email, phone")
+            .select(MEMBER_FIELDS)
             .ilike("email", pattern)
             .limit(1);
           member = data?.[0] ?? null;
@@ -459,43 +573,7 @@ serve(async (req) => {
         }
       }
 
-      /*
-       * Blanks only, never a replacement.
-       *
-       * What the desk holds on a membership has usually been checked, and an
-       * application that arrives long afterwards must not quietly overwrite a
-       * corrected number with whatever somebody typed into a web form. Where
-       * the two disagree, both are kept and the difference is reported, so a
-       * person decides rather than this function.
-       */
-      const patch: Record<string, string> = {};
-      const differs: string[] = [];
-      const consider = (field: "full_name" | "phone", offered: string) => {
-        const have = String(member?.[field] ?? "").trim();
-        const want = offered.trim();
-        if (!want) return;
-        if (!have) patch[field] = want;
-        else if (have.toLowerCase() !== want.toLowerCase()) differs.push(field);
-      };
-      consider("full_name", String(application.full_name ?? ""));
-      consider("phone", String(application.phone ?? "").replace(/[\s\-()]/g, ""));
-
-      /*
-       * The email address is reported and never written. It is what they sign
-       * in with, and that lives in the auth records rather than here, so
-       * writing a new one onto the profile would leave them signing in with
-       * one address and shown another.
-       */
-      const haveEmail = String(member.email ?? "").trim();
-      const wantEmail = String(application.email ?? "").trim();
-      if (haveEmail && wantEmail && haveEmail.toLowerCase() !== wantEmail.toLowerCase()) {
-        differs.push("email");
-      }
-
-      if (Object.keys(patch).length > 0) {
-        const { error: fillError } = await admin.from("profiles").update(patch).eq("id", member.id);
-        if (fillError) throw fillError;
-      }
+      const { filled, differs } = await fillBlanks(admin, member, application);
 
       // Only once the membership is right, so a failure leaves the
       // application in the queue to try again rather than lost
@@ -507,9 +585,9 @@ serve(async (req) => {
 
       return json(200, {
         success: true,
-        member_id: member.id,
+        member_id: member.id as string,
         member_name: String(member.full_name ?? ""),
-        filled: Object.keys(patch),
+        filled,
         differs,
       });
     }

@@ -68,6 +68,20 @@ const ok = (what, got, want) => {
   console.log(`${same ? "ok  " : "FAIL"}  ${what}${same ? "" : `: got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`}`);
 };
 
+/** A membership with nothing on it, so each test fills in only what it means to */
+const MEMBER = {
+  id: "u-mike",
+  full_name: "Mike Jones",
+  email: "mike.jones@example.com",
+  phone: "",
+  address_line1: "",
+  address_line2: "",
+  town: "",
+  postcode: "",
+  country: "",
+};
+const member = (over = {}) => ({ ...MEMBER, ...over });
+
 const setUp = (profiles, application = {}) => {
   globalThis.__tables = {
     mfa_sessions: [{ id: "s1", session_id: "s1" }],
@@ -85,22 +99,35 @@ console.log("\nfiling an application against the membership it belongs to\n");
 {
   // The everyday case: the membership has no phone number on it, the
   // application does, and the desk should not have to rekey it.
-  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mike.jones@example.com", phone: "" }]);
+  setUp([member()]);
   const { status, body } = await call({ action: "link_application", application_id: "app-1" });
   ok("it answers 200", status, 200);
   ok("it finds the membership on a differently cased email", body.member_id, "u-mike");
   ok("it names who it filed against", body.member_name, "Mike Jones");
-  ok("it fills in the phone that was missing", body.filled, ["phone"]);
+  ok("it fills in everything that was missing", body.filled, [
+    "phone",
+    "address_line1",
+    "town",
+    "postcode",
+  ]);
   ok("it reports nothing in disagreement", body.differs, []);
   const filled = writesTo("profiles", "update")[0];
-  ok("it writes the phone without the spaces", filled?.payload, { phone: "07700900123" });
+  ok("it writes the phone without the spaces", filled?.payload?.phone, "07700900123");
+  ok("and the address they gave", filled?.payload?.address_line1, "12 Broad Walk");
   ok("and writes it to that member", filled?.filters, [{ op: "eq", column: "id", value: "u-mike" }]);
 }
 
 {
   // The one that matters. A number the desk has corrected must not be
   // replaced by whatever somebody typed into a form months later.
-  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mike.jones@example.com", phone: "+447700111222" }]);
+  setUp([
+    member({
+      phone: "+447700111222",
+      address_line1: "12 Broad Walk",
+      town: "Wilmslow",
+      postcode: "SK9 5PJ",
+    }),
+  ]);
   const { body } = await call({ action: "link_application", application_id: "app-1" });
   ok("it fills nothing when nothing is missing", body.filled, []);
   ok("it reports the phone as different instead", body.differs, ["phone"]);
@@ -108,14 +135,23 @@ console.log("\nfiling an application against the membership it belongs to\n");
 }
 
 {
-  setUp([{ id: "u-mike", full_name: "", email: "mike.jones@example.com", phone: "07700900123" }]);
+  setUp([
+    member({
+      full_name: "",
+      phone: "07700900123",
+      address_line1: "The Old Rectory",
+      town: "Wilmslow",
+      postcode: "SK9 5PJ",
+    }),
+  ]);
   const { body } = await call({ action: "link_application", application_id: "app-1" });
   ok("it fills a missing name", body.filled, ["full_name"]);
-  ok("it does not call the same phone number a difference", body.differs, []);
+  ok("it does not call the same phone number a difference", body.differs.includes("phone"), false);
+  ok("it leaves an address the desk already holds alone", body.differs, ["address_line1"]);
 }
 
 {
-  setUp([{ id: "u-other", full_name: "Someone Else", email: "someone@example.com", phone: "" }]);
+  setUp([member({ id: "u-other", full_name: "Someone Else", email: "someone@example.com" })]);
   const { status, body } = await call({ action: "link_application", application_id: "app-1" });
   ok("it refuses when no membership uses that email", status, 400);
   ok("and says what to do instead", /Choose the member from the list/.test(body.error), true);
@@ -125,10 +161,7 @@ console.log("\nfiling an application against the membership it belongs to\n");
 
 {
   // The desk knows better than the email address when the two differ
-  setUp([
-    { id: "u-mike", full_name: "Mike Jones", email: "mike.jones@example.com", phone: "" },
-    { id: "u-chosen", full_name: "M Jones", email: "mj@example.com", phone: "" },
-  ]);
+  setUp([member(), member({ id: "u-chosen", full_name: "M Jones", email: "mj@example.com" })]);
   const { body } = await call({
     action: "link_application",
     application_id: "app-1",
@@ -139,7 +172,7 @@ console.log("\nfiling an application against the membership it belongs to\n");
 
 {
   // The desk picked somebody who has since been removed
-  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mike.jones@example.com", phone: "" }]);
+  setUp([member()]);
   const { status, body } = await call({
     action: "link_application",
     application_id: "app-1",
@@ -154,29 +187,27 @@ console.log("\nfiling an application against the membership it belongs to\n");
 {
   // Filed by hand against a membership on a different address. The email is
   // their sign-in, so it is reported and never written.
-  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mj@example.com", phone: "" }]);
+  setUp([member({ email: "mj@example.com" })]);
   const { body } = await call({
     action: "link_application",
     application_id: "app-1",
     member_id: "u-mike",
   });
   ok("it reports the different email", body.differs, ["email"]);
-  ok("it fills the missing phone", body.filled, ["phone"]);
+  ok("it fills the missing phone", body.filled.includes("phone"), true);
   const filled = writesTo("profiles", "update")[0];
   ok("and writes no email onto the membership", "email" in (filled?.payload ?? {}), false);
 }
 
 {
-  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mike.jones@example.com", phone: "" }], {
-    status: "accepted",
-  });
+  setUp([member()], { status: "accepted" });
   const { status, body } = await call({ action: "link_application", application_id: "app-1" });
   ok("it refuses one already dealt with", status, 400);
   ok("and says so", /already been dealt with/.test(body.error), true);
 }
 
 {
-  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mike.jones@example.com", phone: "" }]);
+  setUp([member()]);
   await call({ action: "link_application", application_id: "app-1" });
   const closed = writesTo("membership_applications", "update")[0];
   ok("it takes the application off the queue as accepted", closed?.payload?.status, "accepted");
@@ -187,9 +218,61 @@ console.log("\nfiling an application against the membership it belongs to\n");
 }
 
 {
-  setUp([{ id: "u-mike", full_name: "Mike Jones", email: "mike.jones@example.com", phone: "" }]);
+  setUp([member()]);
   const { status } = await call({ action: "link_application", application_id: "" });
   ok("it refuses without an application", status, 400);
+}
+
+console.log("\nfilling a membership from an application already dealt with\n");
+
+{
+  // Mike's own case: filed months ago, with the address never copied across
+  setUp([member({ phone: "+447700900123" })], { status: "accepted" });
+  const { status, body } = await call({
+    action: "fill_from_application",
+    application_id: "app-1",
+    member_id: "u-mike",
+  });
+  ok("it fills one already dealt with", status, 200);
+  ok("it fills only the blanks", body.filled, ["address_line1", "town", "postcode"]);
+  ok("it leaves the application as it found it", writesTo("membership_applications", "update").length, 0);
+}
+
+{
+  // Running it twice must be as harmless as running it once
+  setUp([
+    member({ phone: "+447700900123", address_line1: "12 Broad Walk", town: "Wilmslow", postcode: "SK9 5PJ" }),
+  ], { status: "accepted" });
+  const { body } = await call({
+    action: "fill_from_application",
+    application_id: "app-1",
+    member_id: "u-mike",
+  });
+  ok("a second run fills nothing", body.filled, []);
+  ok("and writes nothing", writesTo("profiles", "update").length, 0);
+}
+
+{
+  setUp([member()], { status: "accepted" });
+  const { status, body } = await call({ action: "fill_from_application", application_id: "app-1" });
+  ok("it will not fill without being told who", status, 400);
+  ok("and says so", /Choose the member/.test(body.error), true);
+  ok("and writes nothing", writesTo("profiles", "update").length, 0);
+}
+
+console.log("\nreading back an application the desk has already handled\n");
+
+{
+  setUp([member()], { status: "accepted" });
+  const { body } = await call({ action: "list_applications", handled: true });
+  ok("a handled application can be read again", body.applications.length, 1);
+  ok("and its address is still on it", body.applications[0].address_line1, "12 Broad Walk");
+}
+
+{
+  setUp([member()], { status: "accepted" });
+  const { body } = await call({ action: "list_applications" });
+  ok("the queue holds only those still waiting", body.applications.length, 0);
 }
 
 console.log(failures === 0

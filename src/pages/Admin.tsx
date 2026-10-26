@@ -108,6 +108,9 @@ const Admin = () => {
   const [resetCountryCode, setResetCountryCode] = useState("+44");
   const [resetPhone, setResetPhone] = useState("");
   const [linkTarget, setLinkTarget] = useState<Application | null>(null);
+  /** "file" takes an application off the queue; "fill" only fills blanks in */
+  const [linkMode, setLinkMode] = useState<"file" | "fill">("file");
+  const [showHandled, setShowHandled] = useState(false);
   const [linkSearch, setLinkSearch] = useState("");
   const [linkChoice, setLinkChoice] = useState("");
 
@@ -177,6 +180,48 @@ const Admin = () => {
       toast({ title: "Could not file it", description: err.message, variant: "destructive" }),
   });
 
+  /**
+   * An application that was dealt with before everything on it was copied
+   * across. It files nothing and declines nobody: it only fills in fields the
+   * membership has left empty, so it can be run again without consequence.
+   */
+  const fillApplication = useMutation({
+    mutationFn: ({ id, memberId }: { id: string; memberId: string }) =>
+      invokeAdmin({ action: "fill_from_application", application_id: id, member_id: memberId }),
+    onSuccess: (data) => {
+      setLinkTarget(null);
+      const filled = (data.filled as string[]) ?? [];
+      const differs = (data.differs as string[]) ?? [];
+      toast({
+        title: filled.length
+          ? `${(data.member_name as string) || "Their membership"} updated`
+          : "Nothing to fill in",
+        description: [
+          filled.length
+            ? `Added their ${inWords(filled)}.`
+            : "Their membership already had everything on the application.",
+          differs.length
+            ? `Their ${inWords(differs)} on file differs from the application and was left as it is.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-members"] });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Could not fill that in", description: err.message, variant: "destructive" }),
+  });
+
+  // Applications already dealt with, asked for only when the desk wants them
+  const { data: handledApplications, isFetching: handledLoading } = useQuery({
+    queryKey: ["admin-applications-handled"],
+    queryFn: async () =>
+      (await invokeAdmin({ action: "list_applications", handled: true }))
+        .applications as Application[],
+    enabled: !!user && isAdmin && showHandled,
+  });
+
   const { data: members, isLoading: membersLoading, error: membersError } = useQuery({
     queryKey: ["admin-members"],
     queryFn: async () => (await invokeAdmin({ action: "list" })).members as Member[],
@@ -192,7 +237,8 @@ const Admin = () => {
       return (a.full_name ?? "").localeCompare(b.full_name ?? "");
     });
 
-  const openLink = (a: Application) => {
+  const openLink = (a: Application, mode: "file" | "fill" = "file") => {
+    setLinkMode(mode);
     setLinkTarget(a);
     setLinkSearch("");
     setLinkChoice(guessMember(a, members ?? []));
@@ -736,6 +782,68 @@ const Admin = () => {
           </div>
         )}
 
+        {/* Applications already dealt with.
+            One used to vanish from the desk the moment it was handled, which
+            meant what somebody had written on it could never be read again.
+            It is kept out of the way, not out of reach. */}
+        <div className="mb-12">
+          <button
+            type="button"
+            onClick={() => setShowHandled((v) => !v)}
+            className="text-smoke hover:text-foreground text-xs tracking-[0.3em] uppercase transition-colors"
+          >
+            {showHandled ? "Hide handled applications" : "Handled applications"}
+          </button>
+
+          {showHandled && (
+            <div className="mt-4 space-y-3">
+              {handledLoading && !handledApplications ? (
+                <Loader2 className="h-4 w-4 animate-spin text-champagne" />
+              ) : (handledApplications?.length ?? 0) === 0 ? (
+                <p className="text-smoke text-sm">Nothing has been dealt with yet.</p>
+              ) : (
+                handledApplications!.map((a) => (
+                  <div key={a.id} className="border border-border p-5">
+                    <div className="flex items-start justify-between gap-4 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="text-foreground text-sm font-light tracking-wide flex items-center gap-3">
+                          {a.full_name}
+                          <Badge variant={a.status === "accepted" ? "secondary" : "outline"}>
+                            {a.status === "accepted" ? "Accepted" : "Declined"}
+                          </Badge>
+                        </p>
+                        <p className="text-smoke text-xs mt-1">
+                          {a.email}
+                          {a.phone ? ` · ${a.phone}` : ""}
+                        </p>
+                        <p className="text-smoke text-xs mt-2">
+                          {[a.address_line1, a.address_line2, a.town, a.postcode, a.country]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </p>
+                        {a.message && (
+                          <p className="text-smoke text-xs mt-2 whitespace-pre-wrap border-l border-border pl-3">
+                            {a.message}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={fillApplication.isPending}
+                        onClick={() => openLink(a, "fill")}
+                        className="tracking-[0.15em] uppercase text-smoke flex-none"
+                      >
+                        Fill in a member
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Choosing the membership by hand, because an application that
             arrives on a different email address cannot be matched for us */}
         <Dialog
@@ -747,13 +855,15 @@ const Admin = () => {
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle className="tracking-[0.2em] uppercase text-sm">
-                Already a member
+                {linkMode === "fill" ? "Fill in what is missing" : "Already a member"}
               </DialogTitle>
               <DialogDescription>
                 {linkTarget?.full_name} applied as {linkTarget?.email}
                 {linkTarget?.phone ? ` · ${linkTarget.phone}` : ""}. Choose the membership this
-                belongs to. Anything missing from it is filled in, anything that disagrees is left
-                alone, and nothing is deleted.
+                belongs to.{" "}
+                {linkMode === "fill"
+                  ? "Only blanks are filled in. The application itself is left exactly as it is."
+                  : "Anything missing from it is filled in, anything that disagrees is left alone, and nothing is deleted."}
               </DialogDescription>
             </DialogHeader>
             <Input
@@ -796,14 +906,18 @@ const Admin = () => {
                 Cancel
               </Button>
               <Button
-                disabled={!linkChoice || linkApplication.isPending}
-                onClick={() =>
-                  linkTarget && linkApplication.mutate({ id: linkTarget.id, memberId: linkChoice })
-                }
+                disabled={!linkChoice || linkApplication.isPending || fillApplication.isPending}
+                onClick={() => {
+                  if (!linkTarget) return;
+                  const go = linkMode === "fill" ? fillApplication : linkApplication;
+                  go.mutate({ id: linkTarget.id, memberId: linkChoice });
+                }}
                 className="tracking-[0.15em] uppercase"
               >
-                {linkApplication.isPending ? (
+                {linkApplication.isPending || fillApplication.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
+                ) : linkMode === "fill" ? (
+                  "Fill in the blanks"
                 ) : (
                   "File against this member"
                 )}
