@@ -779,6 +779,56 @@ export type Database = {
         }
         Relationships: []
       }
+      saved_addresses: {
+        Row: {
+          country: string
+          created_at: string
+          id: string
+          is_home: boolean
+          label: string
+          line1: string
+          line2: string
+          member_id: string
+          postcode: string
+          town: string
+          updated_at: string
+        }
+        Insert: {
+          country?: string
+          created_at?: string
+          id?: string
+          is_home?: boolean
+          label: string
+          line1?: string
+          line2?: string
+          member_id: string
+          postcode?: string
+          town?: string
+          updated_at?: string
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          id?: string
+          is_home?: boolean
+          label?: string
+          line1?: string
+          line2?: string
+          member_id?: string
+          postcode?: string
+          town?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saved_addresses_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       suppressed_emails: {
         Row: {
           created_at: string

@@ -57,6 +57,13 @@
       "when": 1792875635303,
       "tag": "0007_driver_eta",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793028625556,
+      "tag": "0008_saved_addresses",
+      "breakpoints": true
     }
   ]
 }
