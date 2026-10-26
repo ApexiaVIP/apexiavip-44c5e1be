@@ -397,6 +397,43 @@ describe("the screen a chauffeur drives by", () => {
   });
 
   /**
+   * A standing car is not worth a new route.
+   *
+   * A parked phone's position wanders by tens of metres, and wandering reads
+   * as straying off route, so a car waiting on a drive with this screen open
+   * was asking for a fresh route every twenty seconds. That is more than the
+   * hourly cap allows, spent entirely on a car that has not moved, and it
+   * was taking chauffeurs' routes down with it.
+   */
+  describe("asking again only when the car has moved", () => {
+    const wellPast = () => {
+      const realNow = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(realNow + 400_000);
+    };
+
+    it("does not ask again for a car that has stood still", async () => {
+      driving();
+      await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+      wellPast();
+      const asked = invoke.mock.calls.length;
+      // Within the wander a parked phone reports, not a journey
+      sendFix?.(53.48009, -2.24001);
+      sendFix?.(53.47995, -2.23998);
+      await new Promise((settle) => setTimeout(settle, 30));
+      expect(invoke.mock.calls.length).toBe(asked);
+    });
+
+    it("asks again once the car is genuinely somewhere else", async () => {
+      driving();
+      await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+      wellPast();
+      const asked = invoke.mock.calls.length;
+      sendFix?.(53.4812, -2.24);
+      await waitFor(() => expect(invoke.mock.calls.length).toBeGreaterThan(asked));
+    });
+  });
+
+  /**
    * The passenger asking for somewhere else, mid journey.
    *
    * The car must not turn on its own. A route that redraws itself at speed,
@@ -522,7 +559,7 @@ describe("the screen a chauffeur drives by", () => {
       const realNow = Date.now();
       vi.spyOn(Date, "now").mockReturnValue(realNow + 400_000);
       const asked = invoke.mock.calls.length;
-      sendFix?.(53.4805, -2.24);
+      sendFix?.(53.4812, -2.24);
 
       await waitFor(() => expect(invoke.mock.calls.length).toBeGreaterThan(asked));
       const last = invoke.mock.calls[invoke.mock.calls.length - 1] as [

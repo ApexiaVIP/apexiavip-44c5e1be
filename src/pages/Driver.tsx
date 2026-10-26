@@ -27,6 +27,7 @@ import { currentPlace, followPosition, keepScreenAwake } from "@/lib/whereAmI";
 import DriveScreen from "@/components/DriveScreen";
 import { wakeVoice } from "@/lib/navVoice";
 import { splitJobs } from "@/lib/driverQueue";
+import { releaseLine } from "@/lib/release";
 import { canSayWhere, destinationNow, placeFrom } from "@/lib/asDirected";
 import DestinationBox from "@/components/DestinationBox";
 import type { PlaceSuggestion } from "@/lib/mfa";
@@ -852,6 +853,17 @@ const Driver = () => {
           )}
             </>
           )}
+
+          {/*
+            Which build this is.
+
+            A chauffeur reporting a fault from the kerb can read this out, and
+            twice now the answer to "what are you running" has cost a round
+            trip because the number existed nowhere a person could see it.
+          */}
+          <p className="pt-6 text-center text-[10px] tracking-[0.2em] uppercase text-smoke/50">
+            {releaseLine()}
+          </p>
         </div>
       </main>
 

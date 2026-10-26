@@ -52,6 +52,16 @@ const ALREADY_THERE_M = 60;
 
 /** Two fixes off the route before asking for a new one, so one bad fix is ignored. */
 const STRAY_FIXES = 2;
+/**
+ * How far the car has to have moved before another route is worth asking for.
+ *
+ * A standing car's position wanders by tens of metres, and wandering reads as
+ * straying off route, so a parked car with this screen open was asking for a
+ * fresh route every twenty seconds. That is up to a hundred and eighty an
+ * hour against a cap of a hundred and fifty, and it is all spent on a car
+ * that has not moved.
+ */
+const MOVED_M = 60;
 
 /** No more than one route request this often, whatever the road is doing. */
 const SETTLE_MS = 20000;
@@ -252,6 +262,8 @@ const DriveScreen = ({
   const latest = useRef<Fix | null>(null);
   /** The address the route on screen was worked out for. */
   const routedFor = useRef("");
+  /** Where the car was when that route was asked for. */
+  const askedFrom = useRef<LatLng | null>(null);
 
   const where = what === "pickup" ? "the collection" : "the destination";
   const address = useMemo(() => destinationQuery(to), [to]);
@@ -269,6 +281,7 @@ const DriveScreen = ({
       if (asking.current) return { busy: true };
       asking.current = true;
       askedAt.current = Date.now();
+      askedFrom.current = { lat: from.lat, lng: from.lng };
       try {
         const { data, error } = await supabase.functions.invoke("route", {
           body: {
@@ -410,10 +423,14 @@ const DriveScreen = ({
       const settled = Date.now() - askedAt.current > SETTLE_MS;
       const stale = Date.now() - route.at > STALE_MS;
       const worthIt = next.metresLeft > NEARLY_THERE_M;
+      // A route is only worth asking for again from somewhere else
+      const moved =
+        !askedFrom.current ||
+        metresBetween(fix.lat, fix.lng, askedFrom.current.lat, askedFrom.current.lng) > MOVED_M;
       // Never refresh while somewhere else is waiting to be accepted: the
       // door on screen belongs to the old address and the words would belong
       // to the new one, which is a route to neither
-      if (settled && worthIt && (strayed.current >= STRAY_FIXES || stale)) {
+      if (settled && worthIt && moved && (strayed.current >= STRAY_FIXES || stale)) {
         strayed.current = 0;
         // Against the address this route was plotted for, which is not
         // necessarily the one on the props any more
