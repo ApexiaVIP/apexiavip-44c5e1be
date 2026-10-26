@@ -758,6 +758,27 @@ export type Database = {
           },
         ]
       }
+      rate_limits: {
+        Row: {
+          created_at: string
+          endpoint: string
+          id: string
+          ip_address: string
+        }
+        Insert: {
+          created_at?: string
+          endpoint: string
+          id?: string
+          ip_address: string
+        }
+        Update: {
+          created_at?: string
+          endpoint?: string
+          id?: string
+          ip_address?: string
+        }
+        Relationships: []
+      }
       saved_addresses: {
         Row: {
           country: string
@@ -807,27 +828,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      rate_limits: {
-        Row: {
-          created_at: string
-          endpoint: string
-          id: string
-          ip_address: string
-        }
-        Insert: {
-          created_at?: string
-          endpoint: string
-          id?: string
-          ip_address: string
-        }
-        Update: {
-          created_at?: string
-          endpoint?: string
-          id?: string
-          ip_address?: string
-        }
-        Relationships: []
       }
       suppressed_emails: {
         Row: {
