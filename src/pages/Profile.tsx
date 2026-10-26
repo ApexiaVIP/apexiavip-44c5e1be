@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Camera, Loader2, UserPlus } from "lucide-react";
 import MemberLayout from "@/components/MemberLayout";
+import AddressBook from "@/components/AddressBook";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { invokeMemberFamily } from "@/lib/mfa";
@@ -477,6 +478,10 @@ const Profile = () => {
             )}
           </div>
         )}
+
+        {/* Saved addresses, for everybody on the membership rather than only
+            the primary member: a family member books their own journeys */}
+        <AddressBook />
       </div>
     </MemberLayout>
   );

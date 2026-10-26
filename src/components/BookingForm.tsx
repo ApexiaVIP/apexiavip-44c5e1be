@@ -31,7 +31,10 @@ import {
   availabilityNotice,
 } from "@/lib/availability";
 import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import SavedAddressChips from "@/components/SavedAddressChips";
+import { listAddresses, type SavedAddress } from "@/lib/addressBook";
 import LocationSearch from "@/components/LocationSearch";
 import type { PlaceSuggestion } from "@/lib/mfa";
 
@@ -266,7 +269,19 @@ const BookingForm = () => {
   })();
   const childAges = form.watch("children");
 
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
+
+  /*
+   * The member's saved addresses, when there is a member. This same form
+   * takes enquiries from the public website, where nobody is signed in and
+   * there is nothing to offer.
+   */
+  const { data: savedAddresses } = useQuery({
+    queryKey: ["my-addresses", user?.id],
+    queryFn: () => listAddresses(user!.id),
+    enabled: !!user,
+  });
+  const saved = savedAddresses ?? [];
 
   // Prefill contact details from the signed-in member's profile
   useEffect(() => {
@@ -404,17 +419,25 @@ const BookingForm = () => {
   }, [editRef]);
 
   type AddressPath = "pickupAddress" | "dropoffAddress" | `viaStops.${number}`;
-  const applyPlace = (prefix: AddressPath) => (s: PlaceSuggestion) => {
+  const fill = (prefix: AddressPath, a: {
+    line1: string;
+    line2: string;
+    town: string;
+    postcode: string;
+    country: string;
+  }) => {
     const set = (key: string, value: string, validate = false) =>
       form.setValue(key as Parameters<typeof form.setValue>[0], value, {
         shouldValidate: validate,
       });
-    set(`${prefix}.line1`, s.line1, true);
-    set(`${prefix}.line2`, s.line2);
-    set(`${prefix}.town`, s.town, true);
-    set(`${prefix}.postcode`, s.postcode, true);
-    set(`${prefix}.country`, s.country || "United Kingdom");
+    set(`${prefix}.line1`, a.line1, true);
+    set(`${prefix}.line2`, a.line2);
+    set(`${prefix}.town`, a.town, true);
+    set(`${prefix}.postcode`, a.postcode, true);
+    set(`${prefix}.country`, a.country || "United Kingdom");
   };
+  const applyPlace = (prefix: AddressPath) => (s: PlaceSuggestion) => fill(prefix, s);
+  const applySaved = (prefix: AddressPath) => (a: SavedAddress) => fill(prefix, a);
 
   const onSubmit = async (data: BookingFormValues) => {
     setIsSubmitting(true);
@@ -987,6 +1010,7 @@ const BookingForm = () => {
           <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">
             {journeyType === "client_car" ? "Where the car is" : "Pickup Location"}
           </h3>
+          <SavedAddressChips addresses={saved} onPick={applySaved("pickupAddress")} />
           <LocationSearch
             placeholder="Search pickup: place, airport, restaurant or postcode"
             onSelect={applyPlace("pickupAddress")}
@@ -1045,6 +1069,7 @@ const BookingForm = () => {
                     <X className="w-4 h-4" />
                   </button>
                 </div>
+                <SavedAddressChips addresses={saved} onPick={applySaved(`viaStops.${i}`)} />
                 <LocationSearch
                   placeholder="Search stop: place, restaurant or postcode"
                   onSelect={applyPlace(`viaStops.${i}`)}
@@ -1091,6 +1116,7 @@ const BookingForm = () => {
           <h3 className="text-smoke text-xs tracking-[0.2em] uppercase font-light">
             {journeyType === "client_car" ? "Where it needs to go" : "Dropoff Location"}
           </h3>
+          <SavedAddressChips addresses={saved} onPick={applySaved("dropoffAddress")} />
           <LocationSearch
             placeholder="Search dropoff: place, airport, restaurant or postcode"
             onSelect={applyPlace("dropoffAddress")}
