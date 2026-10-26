@@ -151,7 +151,10 @@ Deno.serve(async (req) => {
       .eq("endpoint", "route")
       .gte("created_at", sinceAnHourAgo);
     if ((count ?? 0) >= MAX_ROUTES_PER_HOUR) {
-      return json(429, { error: "Too many routes. Use Waze for this one." });
+      // There is nowhere else to send them any more, so say what to do instead
+      return json(429, {
+        error: "Too many routes asked for in the last hour. Wait a few minutes and try again.",
+      });
     }
     await admin.from("rate_limits").insert({ ip_address: userId, endpoint: "route" });
 

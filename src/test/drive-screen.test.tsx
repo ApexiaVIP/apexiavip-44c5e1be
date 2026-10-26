@@ -284,6 +284,58 @@ describe("the screen a chauffeur drives by", () => {
   });
 
   /**
+   * Why it would not come, not just that it would not.
+   *
+   * An hourly cap, a provider that will not answer and a signed out session
+   * all stopped the car in exactly the same words, which left a chauffeur on
+   * the kerb with nothing to report and nothing to try.
+   */
+  describe("saying why the route would not come", () => {
+    it("reads out what the route service refused with", async () => {
+      invoke.mockResolvedValue({
+        data: null,
+        error: Object.assign(new Error("non-2xx"), {
+          context: new Response(JSON.stringify({ error: "Too many routes" }), { status: 429 }),
+        }),
+      });
+      driving();
+      expect(await screen.findByText(/too many routes \(429\)/i)).toBeInTheDocument();
+    });
+
+    it("falls back to the status when the refusal says nothing", async () => {
+      invoke.mockResolvedValue({
+        data: null,
+        error: Object.assign(new Error("non-2xx"), {
+          context: new Response("gateway", { status: 502 }),
+        }),
+      });
+      driving();
+      expect(await screen.findByText(/answered 502/i)).toBeInTheDocument();
+    });
+
+    it("reads out trouble the service reports in its own answer", async () => {
+      invoke.mockResolvedValue({ data: { error: "A route needs both ends" }, error: null });
+      driving();
+      expect(await screen.findByText(/a route needs both ends/i)).toBeInTheDocument();
+    });
+
+    it("says so when the route arrives in a shape it cannot read", async () => {
+      invoke.mockResolvedValue({
+        data: { provider: "open", withTraffic: false, route: { routes: [] } },
+        error: null,
+      });
+      driving();
+      expect(await screen.findByText(/shape we could not read/i)).toBeInTheDocument();
+    });
+
+    it("keeps no reason from a failure that is not about the route", async () => {
+      driving({ to: { line1: "Somewhere", town: "Manchester", postcode: "" } });
+      expect(await screen.findByText(/no postcode/i)).toBeInTheDocument();
+      expect(screen.queryByText(/route service/i)).not.toBeInTheDocument();
+    });
+  });
+
+  /**
    * The hourly hire dead end.
    *
    * Marking the passenger aboard turns the drive round to the destination,

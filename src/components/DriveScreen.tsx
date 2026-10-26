@@ -141,6 +141,43 @@ export interface DriveScreenProps {
 type Stage = "finding" | "asking" | "driving" | "arrived" | "stuck";
 
 /**
+ * What came back from asking for a route.
+ *
+ * These used to be one falsy value between them, so a request that was still
+ * in the air read as a route that could not be found, and every genuine
+ * failure read as the same sentence however it failed.
+ */
+type Plotted =
+  | { ok: NavRoute }
+  /** Another request is already out; whatever it finds will set the screen. */
+  | { busy: true }
+  | { failed: string };
+
+/**
+ * Why a route would not come, in words a chauffeur can read out down the phone.
+ *
+ * The route service tells us whether it was the hourly cap, a provider that
+ * would not answer or a signed out session, and all of that was being thrown
+ * away for one sentence that could not be acted on.
+ */
+const reasonFor = async (error: unknown, said: { error?: string } | null): Promise<string> => {
+  if (said?.error) return said.error;
+  const response = (error as { context?: Response } | null)?.context;
+  if (response && typeof response.status === "number") {
+    const body = await response
+      .clone()
+      .json()
+      .catch(() => null);
+    const message = (body as { error?: string } | null)?.error;
+    return message
+      ? `${message} (${response.status})`
+      : `The route service answered ${response.status}.`;
+  }
+  const message = error instanceof Error ? error.message : "";
+  return message || "No answer from the route service.";
+};
+
+/**
  * Navigating inside the app.
  *
  * Chauffeurs used to leave for Waze, and the moment they did the phone put
@@ -167,6 +204,8 @@ const DriveScreen = ({
 }: DriveScreenProps) => {
   const [stage, setStage] = useState<Stage>("finding");
   const [trouble, setTrouble] = useState("");
+  /** The detail under the trouble, which is what tells us what to fix. */
+  const [reason, setReason] = useState("");
   /**
    * Bumped to ask for the route again.
    *
@@ -226,8 +265,8 @@ const DriveScreen = ({
    * asking about the place they are actually driving to.
    */
   const plot = useCallback(
-    async (from: Fix, door: LatLng, forAddress: string) => {
-      if (asking.current) return;
+    async (from: Fix, door: LatLng, forAddress: string): Promise<Plotted> => {
+      if (asking.current) return { busy: true };
       asking.current = true;
       askedAt.current = Date.now();
       try {
@@ -240,12 +279,14 @@ const DriveScreen = ({
             reference,
           },
         });
-        if (error || data?.error) throw new Error(data?.error ?? "no route");
+        if (error || data?.error) return { failed: await reasonFor(error, data) };
         const worked =
           data.provider === "google"
             ? fromGoogle(data.route)
             : fromOsrm(data.route, data.withTraffic === true);
-        if (!worked) throw new Error("no route");
+        if (!worked) {
+          return { failed: `The ${data.provider} route came back in a shape we could not read.` };
+        }
         spoken.current = new Set();
         // Put the car on the new route straight away, from the fix the route
         // was asked for. Waiting for the next fix left the chauffeur looking
@@ -257,9 +298,9 @@ const DriveScreen = ({
         setRoute(worked);
         setGuidance(first);
         setStage((was) => (was === "arrived" ? was : "driving"));
-        return worked;
-      } catch {
-        return null;
+        return { ok: worked };
+      } catch (err) {
+        return { failed: err instanceof Error && err.message ? err.message : "Nothing came back." };
       } finally {
         asking.current = false;
       }
@@ -293,6 +334,7 @@ const DriveScreen = ({
       const postcode = to?.postcode?.trim();
       if (!postcode) {
         setTrouble("This job has no postcode, so there is nothing to navigate to.");
+        setReason("");
         setStage("stuck");
         return;
       }
@@ -300,6 +342,7 @@ const DriveScreen = ({
       if (dropped) return;
       if (!door) {
         setTrouble(`Could not find ${postcode} on the map.`);
+        setReason("");
         setStage("stuck");
         return;
       }
@@ -310,6 +353,7 @@ const DriveScreen = ({
       if (dropped) return;
       if (!from) {
         setTrouble("Could not work out where you are. Check location is on for this app.");
+        setReason("");
         setStage("stuck");
         return;
       }
@@ -319,10 +363,11 @@ const DriveScreen = ({
         setStage("arrived");
         return;
       }
-      const worked = await plot(from, door, address);
+      const plotted = await plot(from, door, address);
       if (dropped) return;
-      if (!worked) {
+      if ("failed" in plotted) {
         setTrouble("Could not work out a route just now.");
+        setReason(plotted.failed);
         setStage("stuck");
       }
     };
@@ -334,7 +379,9 @@ const DriveScreen = ({
 
   /** Have another go at finding the way, after a route would not come. */
   const tryAgain = useCallback(() => {
+    if (asking.current) return;
     setTrouble("");
+    setReason("");
     setStage("finding");
     setAttempt((n) => n + 1);
   }, []);
@@ -584,6 +631,7 @@ const DriveScreen = ({
       {stage === "stuck" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 px-8 text-center">
           <p className="text-sm text-foreground">{trouble}</p>
+          {reason && <p className="text-xs text-smoke leading-relaxed">{reason}</p>}
           <Button
             variant="outline"
             onClick={() => void tryAgain()}
