@@ -21,10 +21,11 @@
     "test:live": "node scripts/booking-live.test.mjs",
     "test:fixtures": "node scripts/fixture-calendar.test.mjs",
     "typecheck": "tsc -b",
-    "check": "npm run test:release && npm run typecheck && npm run test:queue && npm run test:live && npm run test:fixtures && npm run test:search && npm run test:watch && npm run test:signin && npm run test:booking && npm run test:admin && npm run test:timesheets && npm run test:health && npm run test:status",
+    "check": "npm run test:release && npm run typecheck && npm run test:queue && npm run test:live && npm run test:fixtures && npm run test:search && npm run test:watch && npm run test:signin && npm run test:booking && npm run test:admin && npm run test:timesheets && npm run test:health && npm run test:status && npm run test:desk",
     "test:signin": "node scripts/signin-smoke/run.mjs",
     "test:search": "node scripts/search-smoke/run.mjs",
     "test:health": "node scripts/health-smoke/run.mjs",
+    "test:desk": "node scripts/desk-smoke/run.mjs",
     "test:status": "node scripts/status-smoke/run.mjs"
   },
   "dependencies": {

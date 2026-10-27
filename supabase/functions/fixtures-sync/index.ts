@@ -225,10 +225,30 @@ serve(async (req) => {
       if (!profile || profile.status !== "active" || !profile.corporate) {
         return json(403, { success: false, error: "No corporate desk access" });
       }
-      if (!DESKS[profile.corporate]) {
+      // The portal's desk switch: an admin may refresh another of our desks
+      // for the same club. The role is checked here, not taken on trust.
+      let wanted = profile.corporate as string;
+      let body: Record<string, unknown> = {};
+      try {
+        body = await req.json();
+      } catch {
+        body = {};
+      }
+      const requestedDesk = typeof body.desk === "string" ? body.desk.trim() : "";
+      if (requestedDesk && requestedDesk !== wanted) {
+        const { data: isAdmin } = await supabase.rpc("has_role", {
+          _user_id: userData.user.id,
+          _role: "admin",
+        });
+        if (!isAdmin) {
+          return json(403, { success: false, error: "That desk is not yours to refresh" });
+        }
+        wanted = requestedDesk;
+      }
+      if (!DESKS[wanted]) {
         return json(400, { success: false, error: "This desk does not track fixtures" });
       }
-      desksToSync = [profile.corporate];
+      desksToSync = [wanted];
     }
 
     const startYear = seasonStartYear(new Date());

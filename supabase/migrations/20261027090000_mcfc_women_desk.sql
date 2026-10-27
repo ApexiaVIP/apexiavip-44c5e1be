@@ -10,6 +10,12 @@
 -- The group names match the men's desk on purpose: the portal orders its tabs
 -- by name and needs no change to show them.
 --
+-- The squad is seeded from the published list (squad numbers kept as the sort
+-- order, so the directory reads as the team sheet does) and the coaching staff
+-- by name, with the travel contact left as a role until the club names them.
+-- Anyone who does not travel with the desk can be taken off in the portal,
+-- which keeps their journeys, and anyone missing can be added there.
+--
 -- Safe to run again.
 
 DO $$
@@ -18,14 +24,41 @@ DECLARE
 BEGIN
   FOR entry IN
     SELECT * FROM (VALUES
-      -- Staff stand in by role until the club gives us names, as the men's
-      -- desk did. Renaming one in the portal keeps its journeys.
-      ('Manager', 'Management', 1),
-      ('Assistant Manager', 'Management', 2),
-      ('First Team Coach', 'Management', 3),
-      ('Head of Performance', 'Management', 4),
+      ('Eartha Cumings', 'First Team', 1),
+      ('Risa Shimizu', 'First Team', 2),
+      ('Jade Rose', 'First Team', 4),
+      ('Alex Greenwood', 'First Team', 5),
+      ('Grace Clinton', 'First Team', 6),
+      ('Beth Mead', 'First Team', 7),
+      ('Mary Fowler', 'First Team', 8),
+      ('Khadija Shaw', 'First Team', 9),
+      ('Vivianne Miedema', 'First Team', 10),
+      ('Lauren Hemp', 'First Team', 11),
+      ('Laura Wienroither', 'First Team', 13),
+      ('Anna Moorhouse', 'First Team', 14),
+      ('Sam Coffey', 'First Team', 17),
+      ('Kerstin Casparij', 'First Team', 18),
+      ('Laura Blindkilde Brown', 'First Team', 19),
+      ('Aoba Fujino', 'First Team', 20),
+      ('Niamh Charles', 'First Team', 21),
+      ('Sydney Lohmann', 'First Team', 22),
+      ('Iman Beney', 'First Team', 24),
+      ('Yui Hasegawa', 'First Team', 25),
+      ('Rebecca Knaak', 'First Team', 27),
+      ('Gracie Prior', 'First Team', 28),
+      ('Ayaka Yamashita', 'First Team', 31),
+      ('Carlotta Wamser', 'First Team', 37),
+      ('Aoibhe Brennan', 'First Team', 41),
+      ('Sacha Lewis', 'First Team', 47),
+      ('Mayzee Davies', 'First Team', 53),
+      ('Amelia Oldroyd', 'First Team', 54),
+      ('Freya Hirons', 'First Team', 57),
+      ('Millie Burdon', 'First Team', 60),
+      ('Andrée Jeglertz', 'Management', 1),
+      ('Anders Bengtsson', 'Management', 2),
+      ('Lauren Smith', 'Management', 3),
+      ('Diego Restrepo', 'Management', 4),
       ('Team Operations Manager', 'Management', 5)
-      -- Squad goes here, as ('Player Name', 'First Team', n)
     ) AS v(name, grp, sort)
   LOOP
     IF NOT EXISTS (
@@ -49,4 +82,4 @@ END $$;
 -- corporate_groups NULL means the whole of their own desk, which for this
 -- desk is the women's squad and staff and nothing else. Setting corporate to
 -- 'mcfcw' is what keeps them out of the men's desk, and keeps the men's desk
--- users out of theirs.
+-- users out of theirs. Nobody on the men's desk needs changing.

@@ -277,6 +277,10 @@ serve(async (req) => {
       return json(403, { success: false, error: "Two-factor verification required" });
     }
 
+    // Read before the desk is settled, because the caller may be asking to
+    // work a desk other than their own
+    const body = await req.json();
+
     const { data: profile } = await supabase
       .from("profiles")
       .select("status, corporate, corporate_groups, full_name, email, phone")
@@ -288,12 +292,41 @@ serve(async (req) => {
     if (!profile.corporate) {
       return json(403, { success: false, error: "No corporate desk access" });
     }
-    const corporate = profile.corporate;
+    let corporate = profile.corporate as string;
     // Some assistants are limited to certain groups (for example executives
     // only). Null means the whole desk.
-    const groupScope: string[] | null = Array.isArray(profile.corporate_groups)
+    let groupScope: string[] | null = Array.isArray(profile.corporate_groups)
       ? (profile.corporate_groups as string[])
       : null;
+
+    // The portal's desk switch. Operations run more than one desk for the same
+    // club, and an admin should not need a second login to work the other one.
+    // The role is checked here rather than taken from the request, and the
+    // desk has to be one we actually keep people on, so a typo cannot file a
+    // booking against a desk that does not exist.
+    const requestedDesk = typeof body.desk === "string" ? body.desk.trim() : "";
+    if (requestedDesk && requestedDesk !== corporate) {
+      const { data: isAdmin } = await supabase.rpc("has_role", {
+        _user_id: userData.user.id,
+        _role: "admin",
+      });
+      if (!isAdmin) {
+        return json(403, { success: false, error: "That desk is not yours to work" });
+      }
+      const { data: knownDesk } = await supabase
+        .from("corporate_passengers")
+        .select("corporate")
+        .eq("corporate", requestedDesk)
+        .limit(1)
+        .maybeSingle();
+      if (!knownDesk) {
+        return json(400, { success: false, error: "That desk has nobody on it yet" });
+      }
+      corporate = requestedDesk;
+      // An admin working another desk sees all of it. Their own profile's
+      // group limit belongs to their own desk and means nothing here.
+      groupScope = null;
+    }
 
     /** Passengers this caller is allowed to see and book for. */
     const scopedPassengers = async (columns: string, includeRetired = false) => {
@@ -321,7 +354,6 @@ serve(async (req) => {
       return names.length > 0 && names.every((n) => visibleNames.has(n));
     };
 
-    const body = await req.json();
     const action = typeof body.action === "string" ? body.action : "submit";
 
     // --- Address book management (personal and global addresses) ---

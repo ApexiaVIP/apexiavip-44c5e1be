@@ -369,7 +369,7 @@ const lightInputStyle = {
 } as const;
 
 const McfcPortal = () => {
-  const { user, profile, loading, mfaVerified, mfaResolved, signOut } = useAuth();
+  const { user, profile, loading, mfaVerified, mfaResolved, signOut, isAdmin } = useAuth();
 
   const [view, setView] = useState<"desk" | "fixtures" | "people" | "addresses" | "schedule">(
     "desk"
@@ -445,15 +445,48 @@ const McfcPortal = () => {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleLoaded, setScheduleLoaded] = useState(false);
 
-  const desk = profile?.corporate ?? "";
+  // Operations run both of the club's desks, so an admin can switch between
+  // them here instead of holding a second login. Everybody else has the one
+  // desk their profile says, and the server enforces that either way.
+  const [deskSwitch, setDeskSwitch] = useState<string | null>(null);
+  const desk = (isAdmin && deskSwitch) || profile?.corporate || "";
   const hasDeskAccess = CITY_DESKS.includes(desk);
   // Says which desk you are on, so neither side wonders whose list this is
   const deskLabel = desk === "mcfcw" ? "Women's Team Travel Desk" : "Team Travel Desk";
-  // Groups this account may work with; empty means the whole desk
+  // Each desk call says which desk it is for; the server ignores it unless
+  // the caller is an admin
+  const deskInvoke = useCallback(
+    (body: Record<string, unknown>) => invokeDesk({ ...body, desk }),
+    [desk]
+  );
+
+  // Switching desk abandons anything half written. A car built around one
+  // desk's passengers means nothing on the other, and leaving it on screen
+  // would invite filing it against the wrong team.
+  const switchDesk = (next: string) => {
+    if (next === desk) return;
+    setDeskSwitch(next);
+    setView("desk");
+    setCars([emptyCar()]);
+    setAmendRef(null);
+    setViewingRef(null);
+    setCancelConfirmRef(null);
+    setSubmitted(null);
+    setSubmitError(null);
+    setRecent([]);
+    setRecentLive({});
+    setScheduleRows([]);
+    setScheduleLoaded(false);
+    setPersonId(null);
+  };
+  // Groups this account may work with; empty means the whole desk. A group
+  // limit belongs to the account's own desk, so it does not follow an admin
+  // onto another one, which is what the server does too.
+  const onOwnDesk = desk === (profile?.corporate ?? "");
   const scopeKey = (profile?.corporate_groups ?? []).join("|");
   const scopeGroups = useMemo(
-    () => (scopeKey ? scopeKey.split("|") : []),
-    [scopeKey]
+    () => (onOwnDesk && scopeKey ? scopeKey.split("|") : []),
+    [scopeKey, onOwnDesk]
   );
 
   // Approved passenger list, maintained by the operations team. Limited
@@ -540,7 +573,9 @@ const McfcPortal = () => {
     setFixturesSyncing(true);
     setFixturesError(null);
     try {
-      const { data, error } = await supabase.functions.invoke("fixtures-sync", { body: {} });
+      const { data, error } = await supabase.functions.invoke("fixtures-sync", {
+        body: { desk },
+      });
       if (error) throw new Error("We couldn't refresh the fixtures. Please try again.");
       if (!data?.success) throw new Error(data?.error ?? "We couldn't refresh the fixtures.");
       loadFixtures();
@@ -572,7 +607,7 @@ const McfcPortal = () => {
     // The whole desk's recent requests (within what this assistant may see),
     // so colleagues can amend or cancel each other's bookings
     supabase.functions
-      .invoke("corporate-booking", { body: { action: "recent" } })
+      .invoke("corporate-booking", { body: { action: "recent", desk } })
       .then(async ({ data }) => {
         const rows = (Array.isArray(data?.recent) ? data.recent : []) as RecentBooking[];
         setRecent(rows);
@@ -588,7 +623,7 @@ const McfcPortal = () => {
           // The list still shows without live details
         }
       });
-  }, [user, hasDeskAccess, mfaVerified]);
+  }, [user, hasDeskAccess, mfaVerified, desk]);
 
   useEffect(() => {
     loadRecent();
@@ -876,7 +911,7 @@ const McfcPortal = () => {
     setPersonError(null);
     setPersonSaved(false);
     try {
-      await invokeDesk({
+      await deskInvoke({
         action: "passenger_update",
         id: personId,
         name: personName.trim(),
@@ -903,7 +938,7 @@ const McfcPortal = () => {
       const grp =
         newPersonGroup ||
         (profile?.corporate_groups?.length === 1 ? profile.corporate_groups[0] : "");
-      const data = await invokeDesk({
+      const data = await deskInvoke({
         action: "passenger_add",
         name: newPersonName.trim(),
         grp,
@@ -925,7 +960,7 @@ const McfcPortal = () => {
     setPersonRemoving(true);
     setPersonError(null);
     try {
-      await invokeDesk({ action: "passenger_remove", id: personId });
+      await deskInvoke({ action: "passenger_remove", id: personId });
       setPersonId(null);
       loadPassengers();
     } catch (err) {
@@ -944,7 +979,7 @@ const McfcPortal = () => {
   const saveStopAddress = async (address: string) => {
     setSaveAddrBusy(true);
     try {
-      await invokeDesk({
+      await deskInvoke({
         action: "address_add",
         label: saveAddrLabel.trim(),
         address: address.trim(),
@@ -967,7 +1002,7 @@ const McfcPortal = () => {
     setPersonSaving(true);
     setPersonError(null);
     try {
-      await invokeDesk({
+      await deskInvoke({
         action: "address_add",
         label: personAddrLabel.trim(),
         address: personAddrText.trim(),
@@ -988,7 +1023,7 @@ const McfcPortal = () => {
     setAddrSaving(true);
     setAddrError(null);
     try {
-      await invokeDesk({
+      await deskInvoke({
         action: "address_add",
         label: addrLabel.trim(),
         address: addrText.trim(),
@@ -1011,7 +1046,7 @@ const McfcPortal = () => {
     setAddrDeletingId(id);
     setAddrError(null);
     try {
-      await invokeDesk({ action: "address_delete", id });
+      await deskInvoke({ action: "address_delete", id });
       loadAddresses();
     } catch (err) {
       setAddrError(err instanceof Error ? err.message : "We couldn't remove this address.");
@@ -1053,7 +1088,7 @@ const McfcPortal = () => {
     setScheduleLoading(true);
     setScheduleError(null);
     try {
-      const data = await invokeDesk({
+      const data = await deskInvoke({
         action: "schedule",
         date: scheduleDate,
         dateTo: scheduleDateTo,
@@ -1067,7 +1102,7 @@ const McfcPortal = () => {
     } finally {
       setScheduleLoading(false);
     }
-  }, [scheduleDate, scheduleDateTo]);
+  }, [scheduleDate, scheduleDateTo, deskInvoke]);
 
   useEffect(() => {
     if (view !== "schedule" || !hasDeskAccess || !mfaVerified) return;
@@ -1366,6 +1401,26 @@ const McfcPortal = () => {
             </div>
           </div>
           <div className="flex items-center gap-8">
+            {isAdmin && (
+              <div className="flex items-center border" style={{ borderColor: "rgba(255,255,255,0.45)" }}>
+                {CITY_DESKS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => switchDesk(d)}
+                    aria-pressed={d === desk}
+                    className="px-3 py-1.5 text-[10px] tracking-[0.2em] uppercase transition-colors"
+                    style={
+                      d === desk
+                        ? { backgroundColor: "white", color: NAVY }
+                        : { color: "rgba(255,255,255,0.8)" }
+                    }
+                  >
+                    {d === "mcfcw" ? "Women's" : "Exec"}
+                  </button>
+                ))}
+              </div>
+            )}
             <p className="text-white/60 text-[10px] tracking-[0.2em] uppercase hidden md:block">
               Operated by Apexia VIP
             </p>
