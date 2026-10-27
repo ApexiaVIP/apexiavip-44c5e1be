@@ -64,6 +64,23 @@ const DESKS: Record<string, Desk> = {
       { name: "FA Cup", source: { kind: "calendar", tag: "FA" } },
     ],
   },
+  // The women's desk. The league feed names the club without "Women" while
+  // the calendar includes it, which is what the two club fields are for. The
+  // calendar tags European nights only, so the women's domestic cups are not
+  // tracked yet rather than guessed at.
+  mcfcw: {
+    club: "Manchester City",
+    feedSlug: "manchester-city",
+    calendarUrl: "https://ics.fixtur.es/v2/manchester-city-women.ics",
+    calendarClub: "Manchester City Women",
+    // Eleven of this season's thirteen home ties, the other two at the Etihad,
+    // which the feed names itself
+    homeVenue: "Joie Stadium",
+    competitions: [
+      { name: "Women's Super League", source: { kind: "feed", slug: "wsl" } },
+      { name: "Champions League", source: { kind: "calendar", tag: "CL" } },
+    ],
+  },
 };
 
 /**

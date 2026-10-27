@@ -31,7 +31,11 @@ import mcfcBadge from "@/assets/mcfc-badge.svg";
 
 const SKY = "#6CABDD";
 const NAVY = "#1C2C5B";
-const DESK = "mcfc";
+// The club's own desks: the men's travel desk and the women's. Each sees
+// only its own passengers, address book, bookings and fixtures, because
+// every one of those is keyed on the desk. A different partner would need
+// its own branding, so it is refused here rather than shown City's.
+const CITY_DESKS = ["mcfc", "mcfcw"];
 
 const GROUP_ORDER = ["First Team", "Management", "Executives"];
 
@@ -441,7 +445,10 @@ const McfcPortal = () => {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleLoaded, setScheduleLoaded] = useState(false);
 
-  const hasDeskAccess = profile?.corporate === DESK;
+  const desk = profile?.corporate ?? "";
+  const hasDeskAccess = CITY_DESKS.includes(desk);
+  // Says which desk you are on, so neither side wonders whose list this is
+  const deskLabel = desk === "mcfcw" ? "Women's Team Travel Desk" : "Team Travel Desk";
   // Groups this account may work with; empty means the whole desk
   const scopeKey = (profile?.corporate_groups ?? []).join("|");
   const scopeGroups = useMemo(
@@ -458,7 +465,7 @@ const McfcPortal = () => {
       .select(
         "id, name, grp, sort, phone, email, notify_sms, notify_email, notify_target, is_group"
       )
-      .eq("corporate", DESK)
+      .eq("corporate", desk)
       .eq("active", true)
       .order("sort")
       .then(({ data: all }) => {
@@ -496,7 +503,7 @@ const McfcPortal = () => {
           )
         );
       });
-  }, [hasDeskAccess, mfaVerified, scopeGroups]);
+  }, [hasDeskAccess, mfaVerified, scopeGroups, desk]);
 
   useEffect(() => {
     loadPassengers();
@@ -511,19 +518,19 @@ const McfcPortal = () => {
       .select(
         "id, kickoff_utc, home_team, away_team, opponent, is_home, venue, round_number, competition"
       )
-      .eq("corporate", DESK)
+      .eq("corporate", desk)
       .gte("kickoff_utc", from)
       .order("kickoff_utc")
       .then(({ data }) => setFixtures(data ?? []));
     supabase
       .from("fixture_changes")
       .select("id, field, old_value, new_value, detected_at")
-      .eq("corporate", DESK)
+      .eq("corporate", desk)
       .gte("detected_at", new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString())
       .order("detected_at", { ascending: false })
       .limit(10)
       .then(({ data }) => setFixtureChanges(data ?? []));
-  }, [hasDeskAccess, mfaVerified]);
+  }, [hasDeskAccess, mfaVerified, desk]);
 
   useEffect(() => {
     loadFixtures();
@@ -551,10 +558,10 @@ const McfcPortal = () => {
     supabase
       .from("corporate_addresses")
       .select("id, label, address, passenger_id, grey_tarmac")
-      .eq("corporate", DESK)
+      .eq("corporate", desk)
       .order("label")
       .then(({ data }) => setAddresses(data ?? []));
-  }, [hasDeskAccess, mfaVerified]);
+  }, [hasDeskAccess, mfaVerified, desk]);
 
   useEffect(() => {
     loadAddresses();
@@ -1354,7 +1361,7 @@ const McfcPortal = () => {
                 MANCHESTER CITY
               </span>
               <p className="text-[10px] tracking-[0.35em] uppercase mt-1.5 text-white/80">
-                Team Travel Desk
+                {deskLabel}
               </p>
             </div>
           </div>
