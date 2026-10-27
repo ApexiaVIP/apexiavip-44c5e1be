@@ -18,6 +18,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
 import { refsToCheck } from "@/lib/bookingLive";
+import { appendStop, lastSetDown } from "@/lib/journey";
 import { useAuth } from "@/hooks/useAuth";
 import apexiaLogo from "@/assets/apexia-logo.svg";
 import mcfcBadge from "@/assets/mcfc-badge.svg";
@@ -166,7 +167,7 @@ const carIssues = (car: CarRequest): string[] => {
   }
   if (car.stops[0]?.type !== "pickup") issues.push("The first stop must be a pick up.");
   if (!car.asDirected && car.stops[car.stops.length - 1]?.type !== "dropoff") {
-    issues.push("The last stop must be a drop off.");
+    issues.push("Finish the run with a drop off.");
   }
   if (car.stops.some((s) => !s.address.trim())) issues.push("Every stop needs an address.");
   if (car.stops.some((s) => s.type === "pickup" && s.passengers.length === 0)) {
@@ -646,15 +647,14 @@ const McfcPortal = () => {
       )
     );
 
-  /** New stops land before the final set down, which is where they belong. */
+  /** A new stop goes on the end, after everything already in the run. The desk
+   *  builds a journey in the order it happens, so a second collection belongs
+   *  after the first set down, not squeezed in before it. */
   const addStop = (carIdx: number, type: StopType) =>
     setCars((prev) =>
-      prev.map((c, idx) => {
-        if (idx !== carIdx) return c;
-        const next = [...c.stops];
-        next.splice(Math.max(next.length - 1, 1), 0, emptyStop(type));
-        return { ...c, stops: next };
-      })
+      prev.map((c, idx) =>
+        idx !== carIdx ? c : { ...c, stops: appendStop(c.stops, emptyStop(type)) }
+      )
     );
 
   const removeStop = (carIdx: number, stopIdx: number) =>
@@ -707,13 +707,17 @@ const McfcPortal = () => {
   /** Send every car to wherever the first one finishes. */
   const copyDestinationToAll = () => {
     const first = cars[0];
-    const dest = first?.stops[first.stops.length - 1]?.address ?? "";
+    const dest = first ? first.stops[lastSetDown(first.stops)]?.address ?? "" : "";
     if (!dest) return;
     setCars((prev) =>
-      prev.map((c) => ({
-        ...c,
-        stops: c.stops.map((s, k) => (k === c.stops.length - 1 ? { ...s, address: dest } : s)),
-      }))
+      prev.map((c) => {
+        const last = lastSetDown(c.stops);
+        if (last < 0) return c;
+        return {
+          ...c,
+          stops: c.stops.map((s, k) => (k === last ? { ...s, address: dest } : s)),
+        };
+      })
     );
   };
 
@@ -880,7 +884,7 @@ const McfcPortal = () => {
     // the desk has already set (some cars run from the ground, not to it)
     setCars((prev) =>
       prev.map((c) => {
-        const last = c.stops.length - 1;
+        const last = lastSetDown(c.stops);
         if (last < 0 || c.stops[last].address.trim()) return c;
         return {
           ...c,
