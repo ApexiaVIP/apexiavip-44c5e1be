@@ -10,11 +10,16 @@
 -- The group names match the men's desk on purpose: the portal orders its tabs
 -- by name and needs no change to show them.
 --
--- The squad is seeded from the published list (squad numbers kept as the sort
--- order, so the directory reads as the team sheet does) and the coaching staff
--- by name, with the travel contact left as a role until the club names them.
--- Anyone who does not travel with the desk can be taken off in the portal,
--- which keeps their journeys, and anyone missing can be added there.
+-- Squad and staff are taken from the club's own squad page, read on 27 October
+-- 2026, with squad numbers kept as the sort order so the directory reads as
+-- the team sheet does. Players the club marks as out on loan for this season
+-- are left off, since they travel with another club; a loan the other way is
+-- included, because she travels with City. Names are spelled as the club
+-- spells them, so the desk and the chauffeur read the same thing. The travel
+-- contact stays a role until the club names the person.
+--
+-- Anyone who turns out not to travel can be taken off in the portal, which
+-- keeps their journeys, and anyone missing can be added there.
 --
 -- Safe to run again.
 
@@ -31,7 +36,7 @@ BEGIN
       ('Grace Clinton', 'First Team', 6),
       ('Beth Mead', 'First Team', 7),
       ('Mary Fowler', 'First Team', 8),
-      ('Khadija Shaw', 'First Team', 9),
+      ('Bunny Shaw', 'First Team', 9),
       ('Vivianne Miedema', 'First Team', 10),
       ('Lauren Hemp', 'First Team', 11),
       ('Laura Wienroither', 'First Team', 13),
@@ -48,16 +53,13 @@ BEGIN
       ('Gracie Prior', 'First Team', 28),
       ('Ayaka Yamashita', 'First Team', 31),
       ('Carlotta Wamser', 'First Team', 37),
-      ('Aoibhe Brennan', 'First Team', 41),
+      ('Amelia Oldroyd', 'First Team', 43),
       ('Sacha Lewis', 'First Team', 47),
       ('Mayzee Davies', 'First Team', 53),
-      ('Amelia Oldroyd', 'First Team', 54),
-      ('Freya Hirons', 'First Team', 57),
-      ('Millie Burdon', 'First Team', 60),
-      ('Andrée Jeglertz', 'Management', 1),
+      ('Andree Jeglertz', 'Management', 1),
       ('Anders Bengtsson', 'Management', 2),
-      ('Lauren Smith', 'Management', 3),
-      ('Diego Restrepo', 'Management', 4),
+      ('Diego Restrepo', 'Management', 3),
+      ('Lauren Smith', 'Management', 4),
       ('Team Operations Manager', 'Management', 5)
     ) AS v(name, grp, sort)
   LOOP
