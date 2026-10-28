@@ -154,6 +154,16 @@ const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, onUnavail
           zIndex: 2,
         });
 
+        // The traffic, in Google's own colours over Google's own roads.
+        // The arrival time already allows for it; this is so the chauffeur can
+        // see the red building a mile ahead instead of only being told a
+        // number. A layer Google cannot draw is not worth losing the map over
+        try {
+          new maps.TrafficLayer({ map, autoRefresh: true } as google.maps.TrafficLayerOptions);
+        } catch (err) {
+          console.error("drive map: no traffic layer", err);
+        }
+
         // Only a real drag counts. Moving the camera after the car does not
         // raise this, so the map keeps following through every bend
         map.addListener("dragstart", () => setFollowing(false));
