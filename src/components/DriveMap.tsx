@@ -6,6 +6,7 @@ import { Crosshair } from "lucide-react";
 import { pickupElement } from "@/lib/trackMarker";
 import type { LatLng } from "@/lib/navRoute";
 import { openMapStyle, routeColours, type MapTheme } from "@/lib/mapTheme";
+import type { CameraOnRoute } from "@/lib/speedCameras";
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
@@ -34,6 +35,8 @@ interface Props {
   to: LatLng | null;
   /** Light or dark, as the chauffeur asked for. */
   theme: MapTheme;
+  /** The cameras on this route, already filtered to the road being driven. */
+  cameras: CameraOnRoute[];
 }
 
 /**
@@ -70,7 +73,7 @@ const asLine = (points: LatLng[]): GeoJSON.Feature<GeoJSON.LineString> => ({
  * at something, at which point it stays where they put it and offers to go
  * back. A map that fights the hand holding it is worse than no map.
  */
-const DriveMap = ({ line, car, lineIndex, course, to, theme }: Props) => {
+const DriveMap = ({ line, car, lineIndex, course, to, theme, cameras }: Props) => {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const carRef = useRef<maplibregl.Marker | null>(null);
@@ -167,6 +170,44 @@ const DriveMap = ({ line, car, lineIndex, course, to, theme }: Props) => {
       .setLngLat([to.lng, to.lat])
       .addTo(map);
   }, [to]);
+
+  /**
+   * The cameras on the route.
+   *
+   * Circles rather than artwork, because this map is the stand in for when
+   * Google will not draw and it has to come up without waiting on an image
+   * to load. Dark with a white ring, which reads on the pale map and the
+   * dark one alike.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const data: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: cameras.map(({ camera }) => ({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "Point", coordinates: [camera.lng, camera.lat] },
+      })),
+    };
+    const source = map.getSource("drive-cameras") as maplibregl.GeoJSONSource | undefined;
+    if (source) source.setData(data);
+    else map.addSource("drive-cameras", { type: "geojson", data });
+
+    if (!map.getLayer("drive-cameras-dot")) {
+      map.addLayer({
+        id: "drive-cameras-dot",
+        type: "circle",
+        source: "drive-cameras",
+        paint: {
+          "circle-radius": 7,
+          "circle-color": "#1d1b18",
+          "circle-stroke-width": 2.5,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+    }
+  }, [ready, cameras]);
 
   /** Follow the car. */
   useEffect(() => {

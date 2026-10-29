@@ -10,6 +10,7 @@ import {
   Merge,
   RotateCw,
   Split,
+  Camera,
   Moon,
   Sun,
   Volume2,
@@ -43,6 +44,14 @@ import {
   type MapTheme,
 } from "@/lib/mapTheme";
 import { googleMapsConfigured } from "@/lib/googleMaps";
+import {
+  boxAround,
+  cameraAhead,
+  cameraWords,
+  onRoute,
+  type CameraOnRoute,
+} from "@/lib/speedCameras";
+import { camerasIn } from "@/lib/cameraSource";
 
 const DriveMap = lazy(() => import("./DriveMap"));
 const DriveMapGoogle = lazy(() => import("./DriveMapGoogle"));
@@ -250,6 +259,14 @@ const DriveScreen = ({
    * chauffeur can flip it in one tap without leaving the drive.
    */
   const [theme, setTheme] = useState<MapTheme>(preferredMapTheme);
+  /**
+   * The cameras on this route, worked out once when the route arrives.
+   *
+   * The route does not move while it is being driven, so where the cameras
+   * fall along it never changes. Measuring them per fix would be the same
+   * answer, three thousand times a journey.
+   */
+  const [cameras, setCameras] = useState<CameraOnRoute[]>([]);
   const onGoogle = googleMapsConfigured() && !googleOut;
 
   const lineIndex = useRef(-1);
@@ -451,6 +468,47 @@ const DriveScreen = ({
     say(`Your passenger has asked for ${redirect}`, { urgent: true });
   }, [redirect, speaking]);
 
+  /**
+   * Work out the cameras on the route, once, when the route arrives.
+   *
+   * A failed read gives an empty list, which is a drive with no warnings
+   * rather than a drive with no screen.
+   */
+  useEffect(() => {
+    if (!route) {
+      setCameras([]);
+      return;
+    }
+    let dropped = false;
+    void (async () => {
+      const found = await camerasIn(boxAround(route.line));
+      if (!dropped) setCameras(onRoute(route, found));
+    })();
+    return () => {
+      dropped = true;
+    };
+  }, [route]);
+
+  /** The one to warn about, once it is close enough to matter. */
+  const camera = useMemo(
+    () => (guidance && stage === "driving" ? cameraAhead(cameras, guidance.along) : null),
+    [cameras, guidance, stage]
+  );
+
+  /**
+   * Say the camera, once, three hundred metres out.
+   *
+   * Not urgent, so it waits its turn behind a turn instruction. A chauffeur
+   * who needs to know about the junction first needs that more than this.
+   */
+  useEffect(() => {
+    if (!speaking || !camera) return;
+    const said = `camera:${camera.camera.id}`;
+    if (spoken.current.has(said)) return;
+    spoken.current.add(said);
+    say(cameraWords(camera.camera));
+  }, [camera, speaking]);
+
   /** Read the turns out. */
   useEffect(() => {
     if (!speaking || !guidance || stage !== "driving") return;
@@ -527,6 +585,7 @@ const DriveScreen = ({
               lineIndex={guidance.lineIndex}
               course={guidance.course}
               to={target}
+              cameras={cameras}
               onUnavailable={() => setGoogleOut(true)}
             />
           ) : (
@@ -538,9 +597,41 @@ const DriveScreen = ({
               lineIndex={guidance.lineIndex}
               course={guidance.course}
               to={target}
+              cameras={cameras}
             />
           )}
         </Suspense>
+      )}
+
+      {/*
+        The camera on the road ahead.
+
+        Sits over the map rather than in the strip along the bottom, because
+        it belongs to the piece of road being looked at and because it comes
+        and goes. The limit beside it is the one that camera is watching, so a
+        chauffeur can see at a glance whether they need to do anything at all.
+      */}
+      {camera && (
+        <div className="absolute left-4 bottom-4 flex items-center gap-3 rounded-2xl bg-charcoal/95 border border-champagne/30 px-4 py-3 shadow-2xl">
+          <div className="w-10 h-10 rounded-full bg-champagne/15 border border-champagne/40 grid place-items-center shrink-0">
+            <Camera className="w-5 h-5 text-champagne" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm text-foreground leading-tight">
+              {cameraWords(camera.camera)}
+            </p>
+            <p className="text-[11px] tracking-[0.15em] uppercase text-smoke">
+              {shownDistance(camera.toCamera)}
+            </p>
+          </div>
+          {camera.camera.limitMph !== null && (
+            <div className="w-12 h-12 rounded-full bg-white border-[4px] border-red-600 grid place-items-center shrink-0">
+              <span className="text-base font-semibold text-black leading-none">
+                {camera.camera.limitMph}
+              </span>
+            </div>
+          )}
+        </div>
       )}
 
       </div>
@@ -669,6 +760,12 @@ const DriveScreen = ({
       {/* The strip along the bottom: the next step, when the car is due, the way out */}
       {stage !== "stuck" && stage !== "asking" && (
         <div className="shrink-0 bg-charcoal border-t border-champagne/20 pb-[env(safe-area-inset-bottom)]">
+          {/* The cameras are open data, and the licence asks for the credit */}
+          {cameras.length > 0 && stage === "driving" && (
+            <p className="px-4 pt-2 text-[10px] tracking-[0.15em] uppercase text-smoke/60">
+              Cameras: OpenStreetMap
+            </p>
+          )}
           {route && !route.withTraffic && stage !== "arrived" && (
             <p className="px-4 pt-2 text-[10px] tracking-[0.15em] uppercase text-smoke/70">
               Arrival time allows for no traffic

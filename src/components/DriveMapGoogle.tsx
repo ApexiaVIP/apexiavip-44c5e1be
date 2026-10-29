@@ -3,6 +3,7 @@ import { Crosshair } from "lucide-react";
 import { loadGoogleMaps, mapId, pointAhead, turnTowards } from "@/lib/googleMaps";
 import type { LatLng } from "@/lib/navRoute";
 import { routeColours, type MapTheme } from "@/lib/mapTheme";
+import type { CameraOnRoute } from "@/lib/speedCameras";
 
 /** Close enough to see which lane, tilted so the road ahead fills the screen. */
 const DRIVE_ZOOM = 17;
@@ -31,6 +32,21 @@ const door = (theme: MapTheme) => `
   <circle cx="10" cy="10" r="6" fill="${theme === "light" ? "#14120f" : "#ffffff"}" stroke="${theme === "light" ? "#ffffff" : "#14120f"}" stroke-width="3"/>
 </svg>`;
 
+/**
+ * A camera on the road, drawn small on purpose.
+ *
+ * It has to be picked out at a glance without taking the eye off the road
+ * ahead, so it is the one shape on the map that is not champagne: a grey box
+ * with a white lens, which is what the roadside ones look like.
+ */
+const cameraArt = () => `
+<svg viewBox="0 0 26 26" width="26" height="26" aria-hidden="true">
+  <rect x="2" y="2" width="22" height="22" rx="6" fill="#1d1b18" stroke="#ffffff" stroke-width="1.5"/>
+  <rect x="6.5" y="9" width="13" height="9" rx="2" fill="#ffffff"/>
+  <circle cx="13" cy="13.5" r="2.4" fill="#1d1b18"/>
+  <rect x="15.5" y="7" width="4" height="2.4" rx="1" fill="#ffffff"/>
+</svg>`;
+
 const pin = (svg: string): HTMLDivElement => {
   const el = document.createElement("div");
   el.innerHTML = svg;
@@ -51,6 +67,8 @@ interface Props {
   to: LatLng | null;
   /** Light or dark, as the chauffeur asked for. */
   theme: MapTheme;
+  /** The cameras on this route, already filtered to the road being driven. */
+  cameras: CameraOnRoute[];
   /** Google would not load, so the screen can fall back to the other map. */
   onUnavailable: () => void;
 }
@@ -66,11 +84,12 @@ interface Props {
  * at something, at which point it stays where they put it and offers to go
  * back. A map that fights the hand holding it is worse than no map.
  */
-const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, onUnavailable }: Props) => {
+const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, cameras, onUnavailable }: Props) => {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const carRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const doorRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const camerasRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const doneRef = useRef<google.maps.Polyline | null>(null);
   const leftRef = useRef<google.maps.Polyline | null>(null);
   const camera = useRef({ lat: at.lat, lng: at.lng, heading: course });
@@ -224,6 +243,52 @@ const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, onUnavail
       }
     })();
   }, [ready, to, guarded, theme]);
+
+  /**
+   * The cameras, dropped onto the map once per route.
+   *
+   * Replaced wholesale when the route changes rather than reconciled one by
+   * one: a route is replotted a handful of times in a journey and there are
+   * rarely more than a dozen cameras on it, so the simple way is also the
+   * cheap way.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    let dropped = false;
+    void (async () => {
+      try {
+        const { AdvancedMarkerElement } = (await loadGoogleMaps().then((m) =>
+          m.importLibrary("marker")
+        )) as google.maps.MarkerLibrary;
+        if (dropped || !mapRef.current) return;
+        for (const marker of camerasRef.current) marker.map = null;
+        camerasRef.current = cameras.map(
+          ({ camera }) =>
+            new AdvancedMarkerElement({
+              map: mapRef.current,
+              position: { lat: camera.lat, lng: camera.lng },
+              content: pin(cameraArt()),
+              zIndex: 1,
+            })
+        );
+      } catch (err) {
+        // A map without camera pins is still a map, and the spoken warning
+        // and the card do not depend on these
+        console.error("drive map: could not place the cameras", err);
+      }
+    })();
+    return () => {
+      dropped = true;
+    };
+  }, [ready, cameras]);
+
+  useEffect(
+    () => () => {
+      for (const marker of camerasRef.current) marker.map = null;
+      camerasRef.current = [];
+    },
+    []
+  );
 
   /**
    * Follow the car.

@@ -22,7 +22,10 @@ export default defineConfig(({ mode }) => ({
     mode === "development" && componentTagger(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["pwa-192.png", "pwa-512.png"],
+      // The cameras are precached deliberately: the warning is worth most on
+      // the roads where the signal drops, so the file has to be on the phone
+      // before it is wanted rather than fetched when it is
+      includeAssets: ["pwa-192.png", "pwa-512.png", "speed-cameras.json"],
       manifest: {
         name: "Apexia VIP",
         short_name: "Apexia VIP",

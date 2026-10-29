@@ -30,6 +30,24 @@ vi.mock("@/lib/navVoice", () => ({
   wakeVoice: vi.fn(),
 }));
 
+/**
+ * The cameras, which in the app come out of the file shipped with it. The
+ * list is hoisted so a test can put a camera on the road before rendering.
+ */
+const cameras = vi.hoisted(() => ({
+  list: [] as {
+    id: string;
+    lat: number;
+    lng: number;
+    kind: "fixed" | "average";
+    limitMph: number | null;
+    direction: number | null;
+  }[],
+}));
+vi.mock("@/lib/cameraSource", () => ({
+  camerasIn: async () => cameras.list,
+}));
+
 import DriveScreen from "@/components/DriveScreen";
 
 const PICKUP = { line1: "The Lowry Hotel", town: "Salford", postcode: "M3 5LH" };
@@ -120,6 +138,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   sendFix = null;
+  cameras.list = [];
 });
 
 const driving = (props: Partial<Parameters<typeof DriveScreen>[0]> = {}) =>
@@ -715,5 +734,104 @@ describe("light or dark, as the chauffeur prefers", () => {
     localStorage.setItem("apx.drive.map", "light");
     driving();
     expect(await screen.findByRole("button", { name: /switch to the dark map/i })).toBeInTheDocument();
+  });
+});
+
+/**
+ * The cameras, which are the reason chauffeurs were driving with a second
+ * phone on the windscreen.
+ */
+describe("the speed cameras on the road ahead", () => {
+  /** Half a kilometre up the route, which runs due north from 53.48. */
+  const onTheRoute = (over = {}) => [
+    {
+      id: "cam-1",
+      lat: 53.4845,
+      lng: -2.24,
+      kind: "fixed" as const,
+      limitMph: 40,
+      direction: null,
+      ...over,
+    },
+  ];
+
+  it("warns about one a few hundred metres out", async () => {
+    cameras.list = onTheRoute();
+    driving();
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    sendFix?.(53.4825, -2.24);
+    await waitFor(() => expect(screen.getByText("Speed camera at 40")).toBeInTheDocument());
+  });
+
+  it("shows the limit that camera is watching", async () => {
+    cameras.list = onTheRoute();
+    driving();
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    sendFix?.(53.4825, -2.24);
+    await waitFor(() => expect(screen.getByText("40")).toBeInTheDocument());
+  });
+
+  it("says nothing while the camera is still a long way off", async () => {
+    cameras.list = onTheRoute();
+    driving();
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    sendFix?.(53.4805, -2.24);
+    await waitFor(() => expect(screen.getByText(/^0\.\d miles$/)).toBeInTheDocument());
+    expect(screen.queryByText(/speed camera/i)).not.toBeInTheDocument();
+  });
+
+  it("names an average speed stretch for what it is", async () => {
+    cameras.list = onTheRoute({ kind: "average" as const, limitMph: 50 });
+    driving();
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    sendFix?.(53.4825, -2.24);
+    await waitFor(() =>
+      expect(screen.getByText("Average speed check at 50")).toBeInTheDocument()
+    );
+  });
+
+  it("leaves the screen alone on a road with no cameras", async () => {
+    cameras.list = [];
+    driving();
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    sendFix?.(53.4825, -2.24);
+    await waitFor(() => expect(screen.getByText(/^\d+ yds$/)).toBeInTheDocument());
+    expect(screen.queryByText(/speed camera/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * Said once. A camera announced on every fix is a camera the chauffeur
+   * learns to tune out, and the turn after it would be lost in the noise.
+   */
+  it("speaks the camera once, not on every fix", async () => {
+    voice.on = true;
+    cameras.list = onTheRoute();
+    driving();
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    sendFix?.(53.4825, -2.24);
+    await waitFor(() =>
+      expect(voice.said.some((s) => s.words === "Speed camera at 40")).toBe(true)
+    );
+    sendFix?.(53.4828, -2.24);
+    sendFix?.(53.483, -2.24);
+    await waitFor(() => expect(screen.getByText("Speed camera at 40")).toBeInTheDocument());
+    expect(voice.said.filter((s) => s.words === "Speed camera at 40")).toHaveLength(1);
+  });
+
+  /**
+   * Behind the turn, not in front of it. A junction is the thing that needs
+   * doing; the camera is the thing that needs knowing.
+   */
+  it("does not interrupt a turn instruction to say it", async () => {
+    voice.on = true;
+    cameras.list = onTheRoute();
+    driving();
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    sendFix?.(53.4825, -2.24);
+    await waitFor(() =>
+      expect(voice.said.some((s) => s.words === "Speed camera at 40")).toBe(true)
+    );
+    const spoken = voice.said.find((s) => s.words === "Speed camera at 40");
+    expect(spoken?.urgent).toBe(false);
   });
 });
