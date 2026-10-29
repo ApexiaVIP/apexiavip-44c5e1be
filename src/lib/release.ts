@@ -7,7 +7,7 @@
  * well, shown at the foot of the chauffeur's screen, and checked against the
  * iOS project by scripts/release.test.mjs so the two cannot drift apart.
  */
-export const VERSION = "2.0";
+export const VERSION = "2.1";
 
 /** The build Apple counts, which is what a crash report is filed against. */
 export const BUILD = "16";
