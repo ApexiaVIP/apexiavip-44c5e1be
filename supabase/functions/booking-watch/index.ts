@@ -110,14 +110,23 @@ const ukWhen = (iso: string | null) =>
       })
     : "your journey";
 
-/** Two hours out, then one. The marks either side keep a nudge single. */
+/**
+ * Two hours out, then one.
+ *
+ * Each has a window with both ends shut. Bounded only at the far end, the
+ * two hour nudge would catch a job ten minutes away and tell a chauffeur he
+ * had two hours, then the one hour nudge would text him again on top. Being
+ * told you have two hours when you have ten minutes is not a reminder, it is
+ * a reason to miss a VVIP.
+ *
+ * The lower end of the one hour window reaches back past the collection, so
+ * a job booked inside the hour, or one the sweep stepped over, still gets a
+ * single call on rather than none.
+ */
 const CALL_ON_STAGES = [
-  { column: "called_on_2h_at", hours: 2, words: "Two hours" },
-  { column: "called_on_1h_at", hours: 1, words: "One hour" },
+  { column: "called_on_2h_at", fromMinutes: 60, toMinutes: 120 },
+  { column: "called_on_1h_at", fromMinutes: -20, toMinutes: 60 },
 ] as const;
-
-/** Far enough past the mark to catch a job the five minute sweep stepped over. */
-const CALL_ON_GRACE_MINUTES = 20;
 
 /**
  * Wake the chauffeurs before their jobs, and let them answer.
@@ -137,7 +146,6 @@ const callChauffeursOn = async (
 ): Promise<number> => {
   let sent = 0;
   for (const stage of CALL_ON_STAGES) {
-    const due = now + stage.hours * 3600 * 1000;
     const { data: jobs, error } = await admin
       .from("bookings")
       .select("reference, name, collection_at, pickup, driver_id")
@@ -145,8 +153,8 @@ const callChauffeursOn = async (
       .not("collection_at", "is", null)
       .is(stage.column, null)
       .is("chauffeur_ack_at", null)
-      .gte("collection_at", new Date(now - CALL_ON_GRACE_MINUTES * 60 * 1000).toISOString())
-      .lte("collection_at", new Date(due).toISOString())
+      .gte("collection_at", new Date(now + stage.fromMinutes * 60 * 1000).toISOString())
+      .lte("collection_at", new Date(now + stage.toMinutes * 60 * 1000).toISOString())
       .not("status", "in", '("Cancelled","Failed","Completed")')
       .order("collection_at")
       .limit(MAX_WATCHED);
@@ -178,9 +186,12 @@ const callChauffeursOn = async (
 
       const from = (job.pickup as { line1?: string; town?: string } | null) ?? {};
       const where = [from.line1, from.town].filter(Boolean).join(", ");
+      // Led by the time itself rather than by how long is left. The time is
+      // true whichever nudge this is and whenever it lands; "two hours" is
+      // only true if nothing ever runs late.
       const message =
-        `APEXIA VIP: ${stage.words} to your ${ukWhen(job.collection_at as string | null)}` +
-        ` collection${where ? `, ${where}` : ""}` +
+        `APEXIA VIP: you are on at ${ukWhen(job.collection_at as string | null)}` +
+        `${where ? `, ${where}` : ""}` +
         `${job.name ? ` for ${job.name}` : ""}.` +
         ` Open the app and tap to say you are on it.`;
       if (await trySendSms(to, message)) sent += 1;
