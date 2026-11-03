@@ -196,7 +196,27 @@ club is on account, individual clients are mostly card now. Wanted: pay in the
 app. This is a build of its own and needs a decision before any code.
 
 ### D14. Call-on reminders for chauffeurs, with an answer back
-**OPEN. High value, low difficulty.** Faz 31 Oct, backed by Zed and Iman.
+**FIXED, not released. NEEDS A MIGRATION RUN FIRST.** Faz 31 Oct, backed by
+Zed and Iman.
+
+A text two hours before the collection and another at one hour, naming the
+time, the pickup and the passenger. The chauffeur opens the app and taps
+either "I am up" or "On my way", and that answer appears against the job on
+the City desk, so nobody has to message anybody to find out.
+
+Sent from the five minute sweep, which already runs. It needs nothing from
+Dispatch, so it goes out whatever Dispatch is doing. A job that has been
+answered is never called on again: being chased by a machine after you have
+said you are on your way is worse than being chased by a person, who stops.
+
+**Before this works, run `supabase/migrations/20261103160000_call_on.sql` in
+Lovable.** Until it is run, every piece of this stands down quietly rather
+than breaking: the sweep logs that it cannot read the columns and carries on
+watching, the chauffeur's day still opens, and the desk still shows the day.
+
+The general booking team see this only for City work, because the City desk
+is the one office screen we own. Everyone else sees it when our own dispatch
+lands.
 
 An alert two hours before the job and again one hour before, and the chauffeur
 taps back to say they are awake or on the way, so the booking team can see it.
@@ -250,7 +270,22 @@ Once the passenger is aboard and the chauffeur presses drive, the map should
 take over by itself.
 
 ### D18. Offer a choice of routes
-**OPEN. Feature.** Faz 2 Nov.
+**FIXED, not released.** Faz 2 Nov.
+
+Both routers are asked for alternatives now and the ways are offered at the
+kerb, with the roads each one goes by and the minutes, best first.
+
+Three rules, each there for a reason. A way only earns its place by going a
+different road, because three almost-identical choices at a kerb is a
+decision where there was not one. It is offered once per destination, or it
+would spring back over the map at seventy every time the car strayed and
+asked for a fresh route. And it goes the moment the car plainly moves,
+because a panel over the map at twenty miles an hour is a hazard, not a
+choice.
+
+This is also the answer to the country lanes in D19. Google optimises for
+time, which is how a car ends up down a single track at night, and there is
+no setting that says prefer main roads. The chauffeur choosing is the fix.
 
 Three options the way Google and Waze give them. Main roads are often worth a
 couple of extra minutes over A roads and country lanes, and that judgement
