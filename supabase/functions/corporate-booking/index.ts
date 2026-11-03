@@ -582,15 +582,24 @@ serve(async (req) => {
       const dayEnd = londonMidnightUtc(
         new Date(Date.parse(dTo) + 86400000).toISOString().slice(0, 10)
       );
-      const { data: rows, error: schedError } = await supabase
-        .from("bookings")
-        .select(
-          "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car"
-        )
-        .eq("corporate", corporate)
-        .gte("collection_at", dayStart)
-        .lt("collection_at", dayEnd)
-        .order("collection_at");
+      const schedule = (select: string) =>
+        supabase
+          .from("bookings")
+          .select(select)
+          .eq("corporate", corporate)
+          .gte("collection_at", dayStart)
+          .lt("collection_at", dayEnd)
+          .order("collection_at");
+      const columns =
+        "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car";
+      // Whether the chauffeur has said they are up, so the desk can stop
+      // messaging them one at a time. The columns arrive with their
+      // migration, which lands after this does, and a desk that cannot see
+      // the answer must still see the day.
+      let { data: rows, error: schedError } = await schedule(
+        `${columns}, chauffeur_ack_at, chauffeur_ack`
+      );
+      if (schedError) ({ data: rows, error: schedError } = await schedule(columns));
       if (schedError) throw schedError;
       let active = (rows ?? []).filter(
         (r) => r.status !== "Failed" && r.status !== "Cancelled"

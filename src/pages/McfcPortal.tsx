@@ -288,6 +288,9 @@ interface RecentBooking {
   as_directed_hours: number | null;
   /** Where the chauffeur says they have got to, from their own app */
   driver_status?: string | null;
+  /** That they are up, or already on the way, answered from their own app */
+  chauffeur_ack_at?: string | null;
+  chauffeur_ack?: string | null;
   /** Who keyed it; the desk shares bookings, this just says who to ask */
   booked_by?: string;
   mine?: boolean;
@@ -2344,12 +2347,25 @@ const McfcPortal = () => {
                           <td className="px-4 py-3 whitespace-nowrap">
                             {(() => {
                               const live = b.reference ? recentLive[b.reference] : undefined;
+                              // What the chauffeur has said back, so nobody
+                              // has to message them one at a time to find out
+                              const said =
+                                b.chauffeur_ack === "on_the_way"
+                                  ? "On the way"
+                                  : b.chauffeur_ack_at
+                                    ? "Up and has the job"
+                                    : "";
                               if (live?.driver?.name) {
                                 return (
                                   <>
                                     {live.driver.name}
                                     {live.vehicle?.registration && (
                                       <span style={{ color: `${NAVY}99` }}> {live.vehicle.registration}</span>
+                                    )}
+                                    {said && (
+                                      <span className="block text-xs" style={{ color: `${NAVY}99` }}>
+                                        {said}
+                                      </span>
                                     )}
                                   </>
                                 );

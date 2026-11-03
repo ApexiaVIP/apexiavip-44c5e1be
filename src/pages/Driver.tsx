@@ -57,6 +57,12 @@ interface Job {
   job_report_sent_at: string | null;
   dispatchStatus: string | null;
   vehicleRegistration: string;
+  /** When the office called them on, if it has. */
+  called_on_2h_at?: string | null;
+  called_on_1h_at?: string | null;
+  /** What they answered, and when, if they have. */
+  chauffeur_ack_at?: string | null;
+  chauffeur_ack?: string | null;
 }
 
 interface Waypoint {
@@ -569,6 +575,23 @@ const Driver = () => {
     );
   };
 
+  /**
+   * Whether this job is waiting on the chauffeur saying they are up.
+   *
+   * Only once the office has called them on, so an untouched job two days out
+   * does not nag. Once answered it never asks again.
+   */
+  const needsAnswer = (job: Job) =>
+    !job.chauffeur_ack_at && !!(job.called_on_2h_at || job.called_on_1h_at);
+
+  const answerCallOn = (job: Job, answer: "awake" | "on_the_way") => {
+    act.mutate({ action: "acknowledge", reference: job.reference, answer });
+    toast({
+      title: answer === "on_the_way" ? "The office knows you are on the way" : "The office knows you are up",
+      description: "They will stop chasing.",
+    });
+  };
+
   /** Where this hourly hire is heading, as last said by the passenger. */
   const named = (job: Job) => destinationNow(waypoints, job.reference);
 
@@ -768,6 +791,31 @@ const Driver = () => {
               {current ? (
                 <>
                   {/* The job in hand, then the buttons, which is most of the screen */}
+                  {needsAnswer(current) && (
+                    <div className="border border-champagne bg-champagne/10 p-4 space-y-3">
+                      <p className="text-sm text-foreground">
+                        The office has called you on for this job. Tell them you have it and
+                        they will stop chasing.
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Button
+                          disabled={act.isPending}
+                          variant="outline"
+                          onClick={() => answerCallOn(current, "awake")}
+                          className="h-14 rounded-none text-xs tracking-[0.15em] uppercase"
+                        >
+                          I am up
+                        </Button>
+                        <Button
+                          disabled={act.isPending}
+                          onClick={() => answerCallOn(current, "on_the_way")}
+                          className="h-14 rounded-none text-xs tracking-[0.15em] uppercase"
+                        >
+                          On my way
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="border border-border p-5">{jobHead(current)}</div>
                   {reportingFor === current.reference && (
                     <p className="text-smoke/70 text-[11px] tracking-[0.1em] flex items-center gap-2">
