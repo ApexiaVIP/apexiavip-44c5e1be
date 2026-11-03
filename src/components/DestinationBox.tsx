@@ -1,5 +1,6 @@
 import LocationSearch from "@/components/LocationSearch";
 import { placeFrom } from "@/lib/asDirected";
+import { postcodeFor } from "@/lib/navigation";
 import type { PlaceSuggestion } from "@/lib/mfa";
 
 interface DestinationBoxProps {
@@ -48,7 +49,7 @@ const DestinationBox = ({ chosen, changing, onChange, onPick }: DestinationBoxPr
         on the job, but the sat nav has nothing to aim at, and a chauffeur is
         better told why than left pressing a button that is not there.
       */}
-      {settled && !placeFrom(chosen).postcode && (
+      {settled && !postcodeFor(placeFrom(chosen)) && (
         <p className="text-[10px] text-smoke/70 leading-relaxed">
           That address has no postcode, so it is on the job for the office but the sat nav
           cannot take you there. Change it and search the postcode instead.

@@ -33,6 +33,29 @@ export function destinationQuery(place: Place): string {
 }
 
 /**
+ * A postcode anywhere in an address, not only in the postcode field.
+ *
+ * City jobs arrive from the booking system as one run-together line, so the
+ * postcode field is empty while the postcode itself is sitting in the middle
+ * of the street. The sat nav read the field alone and told a chauffeur stood
+ * at Signature Aviation that his job had no postcode, with M90 5NE on the
+ * screen in front of him. Look at the whole address and that job navigates.
+ */
+const POSTCODE_ANYWHERE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+
+export function postcodeFor(place: Place): string {
+  if (!place) return "";
+  const own = (place.postcode ?? "").trim();
+  if (own) return own;
+  const found = [place.line1, place.town]
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .join(", ")
+    .match(POSTCODE_ANYWHERE);
+  return found ? found[0].trim() : "";
+}
+
+/**
  * Where a chauffeur on this job is actually driving to right now.
  *
  * On an hourly hire the passenger says where, in the car, and the chauffeur

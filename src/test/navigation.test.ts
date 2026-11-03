@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationQuery, nextDestination } from "@/lib/navigation";
+import { destinationQuery, nextDestination, postcodeFor } from "@/lib/navigation";
 
 const pickup = { line1: "Alderley Mill Cottage", town: "Macclesfield", postcode: "SK10 4TW" };
 const dropoff = { line1: "The Lowry Hotel", town: "Salford", postcode: "M3 5LH" };
@@ -87,3 +87,38 @@ describe("where the chauffeur is driving to", () => {
  * with the links. Keeping a chauffeur inside the app is the point of the
  * sat nav, so there is nothing left here to hand a job out to.
  */
+
+describe("the postcode the sat nav aims at", () => {
+  it("uses the postcode field when the office filled it in", () => {
+    expect(postcodeFor(pickup)).toBe("SK10 4TW");
+  });
+
+  it("finds the postcode inside a run-together City address", () => {
+    expect(
+      postcodeFor({
+        line1: "Signature Aviation, Hangar 7, Fairey's Way, Manchester M90 5NE",
+        town: "",
+        postcode: "",
+      })
+    ).toBe("M90 5NE");
+  });
+
+  it("finds one a passenger's own search put in the town", () => {
+    expect(
+      postcodeFor({
+        line1: "City Football Academy",
+        town: "North Gate, Etihad Campus, 400 Ashton New Rd, Manchester M11 4TQ",
+        postcode: "",
+      })
+    ).toBe("M11 4TQ");
+  });
+
+  it("takes the field over anything buried in the street", () => {
+    expect(postcodeFor({ line1: "Near M90 5NE", town: "", postcode: "M3 5LH" })).toBe("M3 5LH");
+  });
+
+  it("is empty when there is genuinely no postcode anywhere", () => {
+    expect(postcodeFor({ line1: "Sydney Opera House", town: "Sydney", postcode: "" })).toBe("");
+    expect(postcodeFor(null)).toBe("");
+  });
+});

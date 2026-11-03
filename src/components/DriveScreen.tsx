@@ -20,7 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { lookUpPostcode, metresBetween } from "@/lib/trackMarker";
-import { destinationQuery } from "@/lib/navigation";
+import { destinationQuery, postcodeFor } from "@/lib/navigation";
 import DestinationBox from "./DestinationBox";
 import type { PlaceSuggestion } from "@/lib/mfa";
 import { fromGoogle, fromOsrm, type LatLng, type NavRoute, type Turn } from "@/lib/navRoute";
@@ -284,6 +284,8 @@ const DriveScreen = ({
 
   const where = what === "pickup" ? "the collection" : "the destination";
   const address = useMemo(() => destinationQuery(to), [to]);
+  /** The postcode to aim at, wherever in the address it was written. */
+  const aimAt = useMemo(() => postcodeFor(to), [to]);
 
   /**
    * Ask for a route from wherever the car is now.
@@ -345,7 +347,7 @@ const DriveScreen = ({
    * empty address here is the normal state of the job rather than a fault
    * with it, and the screen asks instead of complaining.
    */
-  const askingWhere = asDirected && what === "dropoff" && !to?.postcode?.trim() && !!onDestination;
+  const askingWhere = asDirected && what === "dropoff" && !aimAt && !!onDestination;
 
   /** Find the door, find the car, and work out the way there. */
   useEffect(() => {
@@ -361,7 +363,7 @@ const DriveScreen = ({
         setRedirect(address);
         return;
       }
-      const postcode = to?.postcode?.trim();
+      const postcode = aimAt;
       if (!postcode) {
         setTrouble("This job has no postcode, so there is nothing to navigate to.");
         setReason("");
@@ -405,7 +407,7 @@ const DriveScreen = ({
     return () => {
       dropped = true;
     };
-  }, [to?.postcode, plot, askingWhere, attempt, address]);
+  }, [aimAt, plot, askingWhere, attempt, address]);
 
   /** Have another go at finding the way, after a route would not come. */
   const tryAgain = useCallback(() => {
