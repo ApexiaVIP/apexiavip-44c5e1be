@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { minutesOnDuty, type Shift } from "../_shared/hours.ts";
+import { ukMonth, ukMonthEnd, ukMonthStart } from "../_shared/ukTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -277,6 +279,77 @@ serve(async (req) => {
         roles: (roles ?? []).filter((r) => r.user_id === p.id).map((r) => r.role),
       }));
       return json(200, { members });
+    }
+
+    /**
+     * Every chauffeur's month, for the person allocating the work.
+     *
+     * Counted by the same rule the chauffeur is shown and accounts are sent,
+     * out of _shared/hours.ts. Somebody deciding who takes tonight's job
+     * needs to know who is short of their contract while there is still a
+     * month left to put it right.
+     */
+    if (action === "driver_hours") {
+      const month =
+        typeof body?.month === "string" && /^\d{4}-\d{2}$/.test(body.month)
+          ? body.month
+          : ukMonth(new Date());
+      const from = ukMonthStart(month);
+      const to = ukMonthEnd(month);
+
+      const { data: drivers, error: driverError } = await admin
+        .from("profiles")
+        .select("id, full_name, phone, contracted_hours_monthly")
+        .eq("is_driver", true)
+        .order("full_name");
+      if (driverError) throw driverError;
+
+      const { data: shifts, error: shiftError } = await admin
+        .from("driver_shifts")
+        .select("driver_id, started_at, ended_at")
+        .gte("started_at", new Date(from.getTime() - 24 * 3600 * 1000).toISOString())
+        .lt("started_at", to.toISOString());
+      if (shiftError) throw shiftError;
+
+      const rows = (drivers ?? []).map((d) => {
+        const mine = (shifts ?? []).filter((s) => s.driver_id === d.id) as Shift[];
+        const worked = minutesOnDuty(mine, from, to);
+        return {
+          id: d.id,
+          full_name: d.full_name,
+          phone: d.phone,
+          contractedHours: (d.contracted_hours_monthly as number | null) ?? null,
+          minutes: Math.round(worked.minutes),
+          stillOpen: worked.stillOpen,
+          capped: worked.capped,
+          neverClosed: worked.neverClosed,
+        };
+      });
+      return json(200, { month, drivers: rows });
+    }
+
+    /** What a chauffeur is contracted to in a month. Null clears it. */
+    if (action === "set_contracted_hours") {
+      const userId = body?.user_id;
+      if (!userId || typeof userId !== "string") return json(400, { error: "Invalid user id" });
+      const raw = body?.hours;
+      const hours =
+        raw === null || raw === "" || raw === undefined
+          ? null
+          : Number.isFinite(Number(raw))
+            ? Math.round(Number(raw))
+            : NaN;
+      if (Number.isNaN(hours) || (hours !== null && (hours < 0 || hours > 744))) {
+        // 744 is every hour of a 31 day month, which nobody is contracted to
+        return json(400, { error: "Give a number of hours between 0 and 744, or leave it blank." });
+      }
+
+      const { error } = await admin
+        .from("profiles")
+        .update({ contracted_hours_monthly: hours })
+        .eq("id", userId);
+      if (error) throw error;
+      return json(200, { success: true, contractedHours: hours });
     }
 
     if (action === "invite") {

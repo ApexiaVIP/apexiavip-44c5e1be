@@ -1,6 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { followLink, recipientsFor, trySendSms, ukWhen } from "../_shared/notify.ts";
 import { transferAuth } from "../_shared/dispatch.ts";
+import { minutesOnDuty, type Shift } from "../_shared/hours.ts";
+import { ukMonth, ukMonthEnd, ukMonthStart } from "../_shared/ukTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,6 +33,16 @@ const phoneKey = (raw: string | null | undefined): string => {
 /** The steps a chauffeur works through, in the order they happen. */
 const PROGRESS_KINDS = ["en_route", "arrived", "pob", "waiting", "clear"] as const;
 type Progress = (typeof PROGRESS_KINDS)[number];
+
+/**
+ * How far before a month a shift can have started and still count in it.
+ *
+ * A night shift beginning at eleven on the last of the month is worked in
+ * the month that follows, and the hours helper only counts the part inside
+ * the window. Reaching back a day is enough to catch it without dragging in
+ * a fortnight of forgotten sign offs.
+ */
+const MAX_OPEN_SHIFT_MS = 24 * 60 * 60 * 1000;
 
 /** How long a finished job stays on the chauffeur's screen. */
 const KEEP_CLEARED_HOURS = 12;
@@ -223,6 +235,53 @@ Deno.serve(async (req) => {
       }
 
       return json(200, { success: true, reference, driver_status: kind });
+    }
+
+    // --- A chauffeur's own month ---
+    /**
+     * Hours worked this month, against what they are contracted to.
+     *
+     * Counted by the same rule accounts are sent, out of _shared/hours.ts,
+     * because a chauffeur reading one number in the app and being paid on
+     * another is worse than showing him nothing.
+     *
+     * A month nobody has set a contract for says so. Reporting somebody as
+     * having worked ninety two hours of none would be a different lie.
+     */
+    if (action === "hours") {
+      const month =
+        typeof body.month === "string" && /^\d{4}-\d{2}$/.test(body.month)
+          ? body.month
+          : ukMonth(new Date());
+      const from = ukMonthStart(month);
+      const to = ukMonthEnd(month);
+
+      const { data: shifts } = await admin
+        .from("driver_shifts")
+        .select("started_at, ended_at")
+        .eq("driver_id", user.id)
+        .gte("started_at", new Date(from.getTime() - MAX_OPEN_SHIFT_MS).toISOString())
+        .lt("started_at", to.toISOString())
+        .order("started_at");
+
+      const worked = minutesOnDuty((shifts ?? []) as Shift[], from, to);
+      // Contracted hours arrive with their migration, which lands after the
+      // function does, and a chauffeur must still see what he has worked
+      const { data: me } = await admin
+        .from("profiles")
+        .select("contracted_hours_monthly")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      return json(200, {
+        success: true,
+        month,
+        minutes: Math.round(worked.minutes),
+        contractedHours: (me?.contracted_hours_monthly as number | null) ?? null,
+        stillOpen: worked.stillOpen,
+        capped: worked.capped,
+        neverClosed: worked.neverClosed,
+      });
     }
 
     // --- A note on the job, written as it happens ---
