@@ -160,16 +160,21 @@ export function NavigateRow({
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] tracking-[0.15em] uppercase text-smoke">
-        {goingToPickup ? "Drive to the collection" : "Drive to the destination"}
-      </p>
+      {/* A bare "Drive" read as a step still to do, so it now says where it
+          is taking them. The caption said the same thing above the button,
+          which is why it is only there when there is no button */}
+      {!onDrive && (
+        <p className="text-[10px] tracking-[0.15em] uppercase text-smoke">
+          {goingToPickup ? "Drive to the collection" : "Drive to the destination"}
+        </p>
+      )}
       {onDrive && (
         <Button
           onClick={() => onDrive(heading.what)}
-          className="w-full h-16 rounded-none text-sm tracking-[0.2em] uppercase font-light"
+          className="w-full h-16 rounded-none text-sm tracking-[0.12em] uppercase font-light"
         >
-          <Navigation className="w-4 h-4 mr-2" />
-          Drive
+          <Navigation className="w-4 h-4 mr-2 flex-none" />
+          {goingToPickup ? "Drive to pick up" : "Drive to destination"}
         </Button>
       )}
     </div>
@@ -414,9 +419,14 @@ const Driver = () => {
     if (clearFor === job.reference) {
       return (
         <div className="space-y-3">
-          <p className="text-smoke text-xs tracking-[0.2em] uppercase">
-            Anything to charge the passenger?
-          </p>
+          <div className="space-y-1">
+            <p className="text-foreground text-sm tracking-[0.15em] uppercase">
+              Finish this job?
+            </p>
+            <p className="text-smoke text-xs">
+              Anything to charge the passenger? Leave blank if nothing.
+            </p>
+          </div>
           <Textarea
             autoFocus
             value={clearNotes}
@@ -480,13 +490,22 @@ const Driver = () => {
       );
     }
 
+    // "Passenger back on board" is the longest label in the app and at full
+    // tracking it ran off the right of the screen with the icon clipped on
+    // the left. A long label is set tighter so every button reads whole.
     const primary = (label: string, kind: Step, Icon: typeof Car) => (
       <Button
         disabled={busy}
         onClick={() => step(job, kind)}
-        className="w-full h-24 rounded-none text-xl tracking-[0.2em] uppercase font-light"
+        className={`w-full h-24 rounded-none uppercase font-light px-3 whitespace-normal leading-tight ${
+          label.length > 18 ? "text-base tracking-[0.1em]" : "text-xl tracking-[0.2em]"
+        }`}
       >
-        {busy ? <Loader2 className="w-6 h-6 animate-spin" /> : <Icon className="w-6 h-6 mr-3" />}
+        {busy ? (
+          <Loader2 className="w-6 h-6 animate-spin" />
+        ) : (
+          <Icon className="w-6 h-6 mr-3 flex-none" />
+        )}
         {label}
       </Button>
     );
@@ -511,18 +530,24 @@ const Driver = () => {
               Wait
             </Button>
           )}
-        <Button
-          disabled={busy}
-          variant={status === "waiting" ? "outline" : "default"}
-          onClick={() => {
-            setClearNotes("");
-            setClearFor(job.reference);
-          }}
-          className="w-full h-20 rounded-none text-lg tracking-[0.2em] uppercase font-light"
-        >
-          <Flag className="w-5 h-5 mr-3" />
-          Clear
-        </Button>
+        {/* Clear sat directly under the on-board button at the same size and
+            was being caught by a thumb, which ends the job. It is now set
+            apart, smaller and never the champagne button, so the one that
+            finishes the job is never the easiest one to hit by accident */}
+        <div className="pt-4 mt-2 border-t border-border">
+          <Button
+            disabled={busy}
+            variant="outline"
+            onClick={() => {
+              setClearNotes("");
+              setClearFor(job.reference);
+            }}
+            className="w-full h-14 rounded-none text-sm tracking-[0.15em] uppercase font-light text-smoke"
+          >
+            <Flag className="w-4 h-4 mr-3 flex-none" />
+            Clear
+          </Button>
+        </div>
       </div>
     );
   };
