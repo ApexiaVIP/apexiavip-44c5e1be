@@ -225,6 +225,42 @@ Deno.serve(async (req) => {
       return json(200, { success: true, reference, driver_status: kind });
     }
 
+    // --- Answering a call on ---
+    /**
+     * The chauffeur telling the office they are up, or already moving.
+     *
+     * The booking team message every chauffeur before every job to find this
+     * out and then chase the ones who do not reply. One tap here is the
+     * whole of that conversation, and it stops the texts: a job that has
+     * been answered is not called on again.
+     */
+    if (action === "acknowledge") {
+      const reference = typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
+      if (!reference) return json(400, { error: "Which job?" });
+      const answer = body.answer === "on_the_way" ? "on_the_way" : "awake";
+
+      const { data: job } = await admin
+        .from("bookings")
+        .select("reference, driver_id")
+        .eq("reference", reference)
+        .maybeSingle();
+      if (!job || job.driver_id !== user.id) {
+        return json(403, { error: "That job is not assigned to you" });
+      }
+
+      const { error } = await admin
+        .from("bookings")
+        .update({ chauffeur_ack_at: new Date().toISOString(), chauffeur_ack: answer })
+        .eq("reference", reference);
+      if (error) {
+        console.error("call on not answered", reference, answer, error);
+        return json(500, {
+          error: "That would not save. Ring the office rather than leave them wondering.",
+        });
+      }
+      return json(200, { success: true, chauffeur_ack: answer });
+    }
+
     // --- Where the car is, while a job is running ---
     /**
      * Where an hourly hire is going next, as the passenger just said.
@@ -517,12 +553,19 @@ Deno.serve(async (req) => {
 
     // 2. The day itself comes from our own records, so nothing disappears
     const clearedSince = new Date(Date.now() - KEEP_CLEARED_HOURS * 3600 * 1000).toISOString();
-    const { data: assigned } = await admin
-      .from("bookings")
-      .select(columns)
-      .eq("driver_id", user.id)
-      .not("status", "in", '("Cancelled","Failed")')
-      .order("collection_at", { nullsFirst: false });
+    // The call on columns arrive with their migration, which lands after the
+    // function does. Until then a chauffeur's day must still open.
+    const day = (select: string) =>
+      admin
+        .from("bookings")
+        .select(select)
+        .eq("driver_id", user.id)
+        .not("status", "in", '("Cancelled","Failed")')
+        .order("collection_at", { nullsFirst: false });
+    let { data: assigned, error: dayError } = await day(
+      `${columns}, called_on_2h_at, called_on_1h_at, chauffeur_ack_at, chauffeur_ack`
+    );
+    if (dayError) ({ data: assigned } = await day(columns));
 
     const jobs = (assigned ?? [])
       .filter((b) => {

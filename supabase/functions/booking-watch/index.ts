@@ -110,6 +110,85 @@ const ukWhen = (iso: string | null) =>
       })
     : "your journey";
 
+/** Two hours out, then one. The marks either side keep a nudge single. */
+const CALL_ON_STAGES = [
+  { column: "called_on_2h_at", hours: 2, words: "Two hours" },
+  { column: "called_on_1h_at", hours: 1, words: "One hour" },
+] as const;
+
+/** Far enough past the mark to catch a job the five minute sweep stepped over. */
+const CALL_ON_GRACE_MINUTES = 20;
+
+/**
+ * Wake the chauffeurs before their jobs, and let them answer.
+ *
+ * The booking team message every chauffeur on WhatsApp before every job to
+ * find out whether they are up and moving, then chase the ones who do not
+ * answer. That is a person doing by hand, every day, what a clock does.
+ *
+ * It needs nothing from Dispatch, so it runs whatever Dispatch is doing. A
+ * chauffeur who has already answered is left alone: being chased by a
+ * machine after you have said you are on your way is worse than being
+ * chased by the office, who at least stop.
+ */
+const callChauffeursOn = async (
+  admin: ReturnType<typeof createClient>,
+  now: number
+): Promise<number> => {
+  let sent = 0;
+  for (const stage of CALL_ON_STAGES) {
+    const due = now + stage.hours * 3600 * 1000;
+    const { data: jobs, error } = await admin
+      .from("bookings")
+      .select("reference, name, collection_at, pickup, driver_id")
+      .not("driver_id", "is", null)
+      .not("collection_at", "is", null)
+      .is(stage.column, null)
+      .is("chauffeur_ack_at", null)
+      .gte("collection_at", new Date(now - CALL_ON_GRACE_MINUTES * 60 * 1000).toISOString())
+      .lte("collection_at", new Date(due).toISOString())
+      .not("status", "in", '("Cancelled","Failed","Completed")')
+      .order("collection_at")
+      .limit(MAX_WATCHED);
+    if (error) {
+      // Before the migration lands these columns do not exist, and a sweep
+      // that cannot call anybody on must still watch the bookings
+      console.error("call on: could not read, skipping", error.message);
+      return sent;
+    }
+
+    for (const job of jobs ?? []) {
+      const { data: who } = await admin
+        .from("profiles")
+        .select("phone")
+        .eq("id", job.driver_id as string)
+        .maybeSingle();
+      const to = (who?.phone as string | null)?.trim();
+      // The mark goes on whether or not there is a number to text, so a
+      // chauffeur with no mobile on file is chased once in the log rather
+      // than every five minutes for two hours
+      await admin
+        .from("bookings")
+        .update({ [stage.column]: new Date().toISOString() })
+        .eq("reference", job.reference as string);
+      if (!to) {
+        console.error("call on: no mobile for the chauffeur on", job.reference);
+        continue;
+      }
+
+      const from = (job.pickup as { line1?: string; town?: string } | null) ?? {};
+      const where = [from.line1, from.town].filter(Boolean).join(", ");
+      const message =
+        `APEXIA VIP: ${stage.words} to your ${ukWhen(job.collection_at as string | null)}` +
+        ` collection${where ? `, ${where}` : ""}` +
+        `${job.name ? ` for ${job.name}` : ""}.` +
+        ` Open the app and tap to say you are on it.`;
+      if (await trySendSms(to, message)) sent += 1;
+    }
+  }
+  return sent;
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -132,6 +211,11 @@ serve(async (req) => {
     });
 
     const now = Date.now();
+
+    // Calling the chauffeurs on needs nothing from Dispatch, so it runs
+    // whatever Dispatch is doing
+    const calledOn = await callChauffeursOn(admin, now);
+
     const { data: watched } = await admin
       .from("bookings")
       .select(
@@ -157,7 +241,7 @@ serve(async (req) => {
     const heldOver = all.length - bookings.length;
     if (bookings.length === 0) {
       // A sweep that found everybody checked a moment ago still ran
-      await recordHeartbeat(admin, "booking-watch", { watched: 0, heldOver });
+      await recordHeartbeat(admin, "booking-watch", { watched: 0, heldOver, calledOn });
       return json(200, { success: true, watched: 0, notified: 0, heldOver });
     }
 
@@ -368,8 +452,22 @@ serve(async (req) => {
       }
     }
 
-    await recordHeartbeat(admin, "booking-watch", { watched: bookings.length, heldOver, changed, notified });
-    return json(200, { success: true, watched: bookings.length, heldOver, changed, notified, details });
+    await recordHeartbeat(admin, "booking-watch", {
+      watched: bookings.length,
+      heldOver,
+      changed,
+      notified,
+      calledOn,
+    });
+    return json(200, {
+      success: true,
+      watched: bookings.length,
+      heldOver,
+      changed,
+      notified,
+      calledOn,
+      details,
+    });
   } catch (error) {
     console.error("booking-watch error:", error);
     return json(500, { success: false, error: "An error occurred" });
