@@ -143,8 +143,13 @@ const CALL_ON_STAGES = [
 const callChauffeursOn = async (
   admin: ReturnType<typeof createClient>,
   now: number
-): Promise<number> => {
+): Promise<{ due: number; sent: number; noMobile: number }> => {
+  // Counted apart on purpose. A single number could not tell nothing being
+  // due from a chauffeur we failed to reach, and every fault found this week
+  // has been a silent zero.
+  let due = 0;
   let sent = 0;
+  let noMobile = 0;
   for (const stage of CALL_ON_STAGES) {
     const { data: jobs, error } = await admin
       .from("bookings")
@@ -162,10 +167,11 @@ const callChauffeursOn = async (
       // Before the migration lands these columns do not exist, and a sweep
       // that cannot call anybody on must still watch the bookings
       console.error("call on: could not read, skipping", error.message);
-      return sent;
+      return { due, sent, noMobile };
     }
 
     for (const job of jobs ?? []) {
+      due += 1;
       const { data: who } = await admin
         .from("profiles")
         .select("phone")
@@ -180,6 +186,7 @@ const callChauffeursOn = async (
         .update({ [stage.column]: new Date().toISOString() })
         .eq("reference", job.reference as string);
       if (!to) {
+        noMobile += 1;
         console.error("call on: no mobile for the chauffeur on", job.reference);
         continue;
       }
@@ -197,7 +204,7 @@ const callChauffeursOn = async (
       if (await trySendSms(to, message)) sent += 1;
     }
   }
-  return sent;
+  return { due, sent, noMobile };
 };
 
 serve(async (req) => {
