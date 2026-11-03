@@ -58,6 +58,10 @@ export type Database = {
           bags: number | null
           booking_type: string
           business: Json | null
+          called_on_1h_at: string | null
+          called_on_2h_at: string | null
+          chauffeur_ack: string | null
+          chauffeur_ack_at: string | null
           children: Json | null
           client_car: Json | null
           collection_at: string | null
@@ -102,6 +106,10 @@ export type Database = {
           bags?: number | null
           booking_type?: string
           business?: Json | null
+          called_on_1h_at?: string | null
+          called_on_2h_at?: string | null
+          chauffeur_ack?: string | null
+          chauffeur_ack_at?: string | null
           children?: Json | null
           client_car?: Json | null
           collection_at?: string | null
@@ -146,6 +154,10 @@ export type Database = {
           bags?: number | null
           booking_type?: string
           business?: Json | null
+          called_on_1h_at?: string | null
+          called_on_2h_at?: string | null
+          chauffeur_ack?: string | null
+          chauffeur_ack_at?: string | null
           children?: Json | null
           client_car?: Json | null
           collection_at?: string | null
@@ -684,6 +696,7 @@ export type Database = {
           app_platform: string | null
           avatar_url: string
           business_defaults: Json | null
+          contracted_hours_monthly: number | null
           corporate: string | null
           corporate_groups: string[] | null
           country: string
@@ -708,6 +721,7 @@ export type Database = {
           app_platform?: string | null
           avatar_url?: string
           business_defaults?: Json | null
+          contracted_hours_monthly?: number | null
           corporate?: string | null
           corporate_groups?: string[] | null
           country?: string
@@ -732,6 +746,7 @@ export type Database = {
           app_platform?: string | null
           avatar_url?: string
           business_defaults?: Json | null
+          contracted_hours_monthly?: number | null
           corporate?: string | null
           corporate_groups?: string[] | null
           country?: string
