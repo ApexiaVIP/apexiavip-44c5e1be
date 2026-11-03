@@ -74,16 +74,26 @@ interface Waypoint {
   recorded_at: string;
 }
 
+/**
+ * The signal went, rather than the server saying no.
+ *
+ * Worth telling apart: a tunnel is worth waiting out, and being told a job
+ * is not yours never will be. Every press a chauffeur makes is a live call,
+ * and the Etihad car park and the airport tunnel are both places he presses
+ * Arrived.
+ */
+class NoSignal extends Error {}
+
 const callDriver = async (body: Record<string, unknown>) => {
   const { data, error } = await supabase.functions.invoke("driver", { body });
   if (error) {
     let message = "Something went wrong";
+    const ctx = (error as { context?: Response }).context;
+    // No response at all means the request never arrived
+    if (!ctx) throw new NoSignal("No signal just now. Still trying.");
     try {
-      const ctx = (error as { context?: Response }).context;
-      if (ctx) {
-        const parsed = await ctx.json();
-        if (parsed?.error) message = parsed.error;
-      }
+      const parsed = await ctx.json();
+      if (parsed?.error) message = parsed.error;
     } catch {
       /* keep the fallback */
     }
@@ -224,6 +234,11 @@ const Driver = () => {
 
   const act = useMutation({
     mutationFn: (body: Record<string, unknown>) => callDriver(body),
+    // A press that failed for want of signal is kept and tried again rather
+    // than thrown away with an apology. This is not working offline, which
+    // is a larger piece of work: it is a tunnel being ridden out.
+    retry: (count, err) => err instanceof NoSignal && count < 5,
+    retryDelay: (count) => Math.min(2000 * 2 ** count, 20000),
     // Show the next step straight away; the refetch only confirms it
     onMutate: async (body) => {
       if (body.action !== "progress") return;

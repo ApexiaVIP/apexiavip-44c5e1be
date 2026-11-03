@@ -89,7 +89,14 @@ by itself. It does not. Either make it do that, or make the Drive button
 obviously point at the new destination once one is given.
 
 ### D6. Comments during a job
-**OPEN. Faz's own request.** 07:41.
+**FIXED, not released.** Faz's own request, 07:41.
+
+A box under the buttons while a job is running. Notes land in the same list
+as the steps, in the order things happened, and travel with the job. Tap a
+note to put it right, until the office has been sent the job: a note is
+written one-handed at a kerb and the first go is rarely the right one. After
+the office has it, it is a record, and a record that can be rewritten once it
+has been acted on is not a record.
 
 A place to type notes as the job runs, timestamped into the same list as the
 progress steps, and editable:
@@ -133,9 +140,13 @@ The place name we write against a stop is coming back as administrative
 geography rather than anywhere a person would recognise.
 
 ### D10. Job title slides under the status bar
-**OPEN. Cosmetic.** Screenshot 06:31.
+**OPEN. Needs a phone in hand.** Screenshot 06:31.
 
-Scrolling puts the passenger name behind the clock and the Dynamic Island.
+Scrolling puts the passenger name behind the clock and the Dynamic Island. In
+that screenshot the keyboard is up and the header has gone altogether, which
+points at iOS resizing the view under the keyboard rather than at anything in
+the page. Guessing at that blind risks breaking a layout that works. It wants
+reproducing on a real build first.
 
 ### D11. Faz is not on TestFlight
 **OPEN.** Only one tester is registered, so Faz is testing whatever build is on
@@ -224,7 +235,24 @@ Today the office chases every chauffeur on WhatsApp to find out. This replaces
 a daily manual job, so it is worth doing properly.
 
 ### D15. The car is in the wrong place on the map
-**OPEN.** Faz 2 Nov, screenshots 07:27 and 10:12.
+**PART FIXED, not released.** Faz 2 Nov, screenshots 07:27 and 10:12.
+
+The car was not in the wrong place. It was in an old one: that same
+screenshot says "updated 18 min ago". The phone had stopped reporting, the
+passenger was told the position was old, and the one person who could have
+done something about it was told nothing at all, because the error was
+swallowed on the grounds that he finds out when he presses Wait or Clear,
+which is the end of the job.
+
+He is told now, while it is happening, and it clears itself the moment a
+position comes through. A watch that simply goes quiet raises no error, which
+is what a tunnel and a backgrounded app both look like, so going quiet counts.
+
+**Not fixed, and it is the real one.** iOS suspends the app when it is put
+away or the phone is locked, and a suspended app reports nothing. Holding the
+screen awake helps and does not solve it. Reporting from the background needs
+a native location plugin and a reason given to Apple, which is its own piece
+of work.
 
 Faz says the car should have been on Donkey Lane. The 07:27 shot also reads
 "updated 18 min ago, your chauffeur's phone may have lost signal", so some of
@@ -449,7 +477,12 @@ a journey you are sitting in is not a thing anybody should be one tap from,
 least of all a passenger holding a phone in a moving car.
 
 ### D27. The error message covers the top of the screen
-**OPEN. Cosmetic.** Screenshots 06:32 on 31 Oct and 10:12 on 2 Nov.
+**FIXED, not released. Not seen on a phone yet.** Screenshots 06:32 on 31 Oct
+and 10:12 on 2 Nov.
+
+Messages land at the top on a phone with no allowance for the status bar, so
+the first line went behind the clock and the Dynamic Island. They now clear
+it.
 
 Both error messages sit over the header and the sign out link. Twice in two
 days, so it is where errors always land rather than bad luck.
@@ -473,13 +506,24 @@ case this is correct and only the 05:20 time is misleading. Worth ten minutes
 with the two booking references before anybody changes anything.
 
 ### D30. The app does nothing without a signal
-**OPEN. Mine, not theirs. Raise before 16 Nov.**
+**PART FIXED, not released. The rest is a real piece of work.**
 
 Every press a chauffeur makes is a live call to the server. In an airport
 tunnel or under the Etihad, pressing Arrived fails and tells them it was not
 saved. Nobody has reported it because nobody has lost signal at the wrong
 moment yet. They will. Faz already guessed at it on 2 Nov when he put the
 errors down to a bad signal area, which is a sign of where confidence sits.
+
+A press that fails for want of signal is now kept and tried again, backing
+off, for a couple of minutes, rather than thrown away with an apology. That
+rides out a tunnel and the Etihad car park, which is most of what actually
+happens.
+
+It is not working offline. That means holding presses on the phone until the
+signal comes back, which needs a queue that survives the app being closed and
+a server that cannot be made to record the same step twice. Worth doing, and
+worth doing carefully, because the failure it would introduce is a job logged
+twice rather than a job logged late.
 
 ---
 
