@@ -77,7 +77,12 @@ next. Needs the function log for 06:32 on 31 Oct to say why. The wording is our
 catch-all, so the real reason is only in the log.
 
 ### D5. Choosing a destination does not start navigation
-**OPEN.** Faz at 09:32.
+**ALREADY BUILT. It was D4 breaking it.** Faz at 09:32.
+
+Picking an address does start the drive. What happened to Faz is that the
+address never saved, so there was nothing to drive to and nothing said why.
+Verify on a real job once D4 and D20 are out; if it still misbehaves then it
+is a genuine fault and this reopens.
 
 He expected that typing where the client wants to go would bring the sat nav up
 by itself. It does not. Either make it do that, or make the Drive button
@@ -235,7 +240,11 @@ marker would take ten minutes and answer nobody's actual problem: that card
 already names the chauffeur and the registration directly above the map.
 
 ### D17. Being on board should start the navigation
-**OPEN.** Faz 2 Nov. Same ground as D5.
+**ALREADY BUILT.** Faz 2 Nov. Same ground as D5.
+
+Pressing Passenger on board opens the driving screen on the destination by
+itself. On an hourly hire it asks where to first, because nobody has said
+yet, and that ask is what D4 was breaking.
 
 Once the passenger is aboard and the chauffeur presses drive, the map should
 take over by itself.
@@ -248,7 +257,37 @@ couple of extra minutes over A roads and country lanes, and that judgement
 belongs to the chauffeur, not to us.
 
 ### D19. The navigation is not good enough to drive by
-**OPEN. Highest of the feature work.** A chauffeur via Faz, 2 Nov.
+**PART FIXED. The rest is the next piece of work.** A chauffeur via Faz, 2 Nov.
+
+Done:
+
+- **Speed.** The phone has reported it on every fix since the screen was
+  written and we threw it away. It now sits bottom right, opposite the camera
+  warning, where every sat nav puts it. It matters more than it sounds: he was
+  being warned about a camera and its limit with no way of telling whether the
+  warning concerned him without looking at the dashboard.
+- **Closing in at junctions.** The map sat at one zoom the whole way, which is
+  most of why it was called too small and hard to follow. It now opens out on
+  a clear run and closes in twice as a turn comes up.
+
+Checked and nothing wrong:
+
+- **Speed cameras.** They are drawn on both maps and spoken aloud, the voice
+  is on unless somebody turned it off, and the file ships inside the app with
+  3,557 cameras covering the whole country, 92 of them around Manchester and
+  Wilmslow. On the route he drove there were most likely none. Worth telling
+  the chauffeurs what to expect rather than changing anything.
+
+Left:
+
+- **Traffic signs**, meaning speed limits on ordinary roads. We hold a limit
+  for about half the cameras and nothing at all for the roads between them.
+  This needs a data source we do not have, so it is a decision about buying
+  one rather than a fix.
+- **Sensible roads instead of the shortest.** This is D18. Google optimises
+  for time, which is exactly how a car ends up down country lanes, and there
+  is no setting that says prefer main roads. Letting the chauffeur choose is
+  the answer, and it answers both complaints at once.
 
 All of it from one job:
 
