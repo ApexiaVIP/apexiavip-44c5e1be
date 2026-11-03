@@ -100,6 +100,14 @@ const callDriver = async (body: Record<string, unknown>) => {
     throw new Error(message);
   }
   if (data?.error) throw new Error(data.error);
+  // The Android app is the website wrapped, so it updates the moment the site
+  // does, while the function behind it waits on a deploy. An older function
+  // does not recognise a newer action and quietly answers with the day
+  // instead, which let a chauffeur watch a note save and vanish. Only the
+  // day itself comes back carrying jobs.
+  if (body.action && body.action !== "today" && data && "jobs" in data) {
+    throw new Error("Not saved. The app is ahead of the office system, tell them.");
+  }
   return data;
 };
 
