@@ -66,6 +66,14 @@ export interface NavRoute {
   withTraffic: boolean;
   /** When this was worked out, so we know when to ask again. */
   at: number;
+  /**
+   * The roads this way goes by, for telling two routes apart.
+   *
+   * A chauffeur choosing between them does it on the roads, not the minutes:
+   * the motorway and the lanes are often within a couple of minutes of each
+   * other, and one of them is a Range Rover full of guests at night.
+   */
+  via?: string;
 }
 
 /**
@@ -264,16 +272,33 @@ interface GoogleStep {
  * step times are stretched to fit the total, which keeps the countdown to the
  * next turn honest in a queue instead of promising a clear road.
  */
-export const fromGoogle = (body: unknown): NavRoute | null => {
-  const route = (body as { routes?: unknown[] })?.routes?.[0] as
-    | {
-        duration?: string;
-        distanceMeters?: number;
-        legs?: { steps?: GoogleStep[] }[];
-      }
-    | undefined;
+interface GoogleRoute {
+  duration?: string;
+  distanceMeters?: number;
+  description?: string;
+  polyline?: { encodedPolyline?: string };
+  legs?: { steps?: GoogleStep[] }[];
+}
+
+const oneGoogle = (route: GoogleRoute | undefined): NavRoute | null => {
   const raw = route?.legs?.flatMap((leg) => leg.steps ?? []) ?? [];
-  if (!raw.length) return null;
+  // A route with no steps on it is still a way there. It arrived as "a shape
+  // we could not read" and stopped the car, when the whole line was sitting
+  // in the route's own polyline the whole time. No turn by turn, but moving
+  // and drawn beats stopped and explained.
+  if (!raw.length) {
+    const only = decodePolyline(route?.polyline?.encodedPolyline ?? "");
+    if (only.length < 2) return null;
+    return {
+      line: only,
+      steps: withArrival([], only),
+      metres: route?.distanceMeters ?? 0,
+      seconds: seconds(route?.duration),
+      withTraffic: true,
+      at: Date.now(),
+      ...(route?.description ? { via: route.description } : {}),
+    };
+  }
 
   const shapes = raw.map((s) => decodePolyline(s.polyline?.encodedPolyline ?? ""));
   const { line, starts } = stitch(shapes);
@@ -304,8 +329,27 @@ export const fromGoogle = (body: unknown): NavRoute | null => {
     seconds: total || steps.reduce((sum, s) => sum + s.seconds, 0),
     withTraffic: true,
     at: Date.now(),
+    ...(route?.description ? { via: route.description } : {}),
   };
 };
+
+const googleRoutes = (body: unknown): GoogleRoute[] =>
+  ((body as { routes?: GoogleRoute[] })?.routes ?? []).filter(Boolean);
+
+export const fromGoogle = (body: unknown): NavRoute | null => oneGoogle(googleRoutes(body)[0]);
+
+/**
+ * Every way Google offered, best first.
+ *
+ * A car was being sent down country lanes all day because the fastest way and
+ * the sensible way are not the same thing, and there is no setting anywhere
+ * that says prefer main roads. Showing the chauffeur what the options are and
+ * letting him pick is the only honest answer to that.
+ */
+export const routesFromGoogle = (body: unknown): NavRoute[] =>
+  googleRoutes(body)
+    .map(oneGoogle)
+    .filter((r): r is NavRoute => r !== null);
 
 /**
  * The road out of a written instruction, for the line under it.
@@ -333,10 +377,32 @@ interface OsrmStep {
  * It gives turns as a type and a modifier and leaves the wording to us, so
  * every instruction here is phrased rather than quoted.
  */
-export const fromOsrm = (body: unknown, withTraffic = false): NavRoute | null => {
-  const route = (body as { routes?: unknown[] })?.routes?.[0] as
-    | { distance?: number; duration?: number; legs?: { steps?: OsrmStep[] }[] }
-    | undefined;
+interface OsrmRoute {
+  distance?: number;
+  duration?: number;
+  legs?: { steps?: OsrmStep[] }[];
+}
+
+/**
+ * The road a way there is mostly made of.
+ *
+ * The open router names no route, so the biggest road on it stands for the
+ * whole: the longest stretch with a number or a name, which on a motorway
+ * run is the motorway and through town is the main road.
+ */
+const biggestRoad = (steps: Step[]): string => {
+  let best = "";
+  let furthest = 0;
+  for (const step of steps) {
+    if (step.road && step.metres > furthest) {
+      furthest = step.metres;
+      best = step.road;
+    }
+  }
+  return best;
+};
+
+const oneOsrm = (route: OsrmRoute | undefined, withTraffic: boolean): NavRoute | null => {
   const raw = route?.legs?.flatMap((leg) => leg.steps ?? []) ?? [];
   if (!raw.length) return null;
 
@@ -367,8 +433,21 @@ export const fromOsrm = (body: unknown, withTraffic = false): NavRoute | null =>
     seconds: route?.duration ?? steps.reduce((sum, s) => sum + s.seconds, 0),
     withTraffic,
     at: Date.now(),
+    ...(biggestRoad(steps) ? { via: biggestRoad(steps) } : {}),
   };
 };
+
+const osrmRoutes = (body: unknown): OsrmRoute[] =>
+  ((body as { routes?: OsrmRoute[] })?.routes ?? []).filter(Boolean);
+
+export const fromOsrm = (body: unknown, withTraffic = false): NavRoute | null =>
+  oneOsrm(osrmRoutes(body)[0], withTraffic);
+
+/** Every way the open router offered, best first. */
+export const routesFromOsrm = (body: unknown, withTraffic = false): NavRoute[] =>
+  osrmRoutes(body)
+    .map((r) => oneOsrm(r, withTraffic))
+    .filter((r): r is NavRoute => r !== null);
 
 /**
  * Make sure the last step is the arrival.
@@ -395,4 +474,25 @@ const withArrival = (steps: Step[], line: LatLng[]): Step[] => {
       fromIndex: Math.max(0, line.length - 1),
     },
   ];
+};
+
+/**
+ * The ways worth putting in front of a chauffeur.
+ *
+ * Routers hand back near-identical lines with a few seconds between them,
+ * and three almost-the-same choices at a kerb is worse than no choice: it is
+ * a decision to make where there was not one. A way earns its place by going
+ * a different road, and the best is always kept.
+ */
+export const worthOffering = (ways: NavRoute[]): NavRoute[] => {
+  const kept: NavRoute[] = [];
+  const roads = new Set<string>();
+  for (const way of ways) {
+    const road = (way.via ?? "").trim().toLowerCase();
+    if (kept.length > 0 && (!road || roads.has(road))) continue;
+    kept.push(way);
+    if (road) roads.add(road);
+    if (kept.length === 3) break;
+  }
+  return kept;
 };

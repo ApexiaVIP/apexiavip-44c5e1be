@@ -64,6 +64,11 @@ const askGoogle = async (
       "X-Goog-FieldMask": [
         "routes.duration",
         "routes.distanceMeters",
+        // The roads this way goes by, which is how a chauffeur tells two
+        // routes apart, and the whole line, so a route whose steps come back
+        // empty can still be drawn and driven instead of stopping the car
+        "routes.description",
+        "routes.polyline.encodedPolyline",
         "routes.legs.steps.navigationInstruction",
         "routes.legs.steps.distanceMeters",
         "routes.legs.steps.staticDuration",
@@ -82,6 +87,10 @@ const askGoogle = async (
         : { location: { latLng: { latitude: to.lat, longitude: to.lng } } },
       travelMode: "DRIVE",
       routingPreference: "TRAFFIC_AWARE_OPTIMAL",
+      // The fastest way and the sensible way are not the same thing, and
+      // there is no setting that says prefer main roads. A car went down
+      // country lanes all day because nobody was ever offered the motorway.
+      computeAlternativeRoutes: true,
       languageCode: "en-GB",
       regionCode: "GB",
       units: "IMPERIAL",
@@ -108,7 +117,7 @@ const askOpenRouter = async (from: Point, to: Point): Promise<unknown> => {
   const path = `${from.lng},${from.lat};${to.lng},${to.lat}`;
   const res = await withTimeout(
     `https://router.project-osrm.org/route/v1/driving/${path}` +
-      `?overview=false&steps=true&geometries=geojson&annotations=false`,
+      `?overview=false&steps=true&geometries=geojson&annotations=false&alternatives=true`,
     { method: "GET" }
   );
   if (!res.ok) throw new Error(`open router ${res.status}`);
@@ -161,18 +170,11 @@ Deno.serve(async (req) => {
     const key = Deno.env.get("GOOGLE_MAPS_API_KEY") ?? "";
     if (key) {
       try {
-        const route = await askGoogle(from, to, address, heading, key);
-        // Google answers perfectly happily with an empty list when it cannot
-        // find a way through: a door inside a pedestrian area, a car park
-        // entrance, a point sat just off the road network. That came back to
-        // the chauffeur as a route in a shape we could not read, which is
-        // both wrong and no use to him. It is not a fault, it is a reason to
-        // ask the other router, which is far less fussy about where it starts.
-        const found = (route as { routes?: unknown[] } | null)?.routes;
-        if (Array.isArray(found) && found.length > 0) {
-          return json(200, { provider: "google", withTraffic: true, route });
-        }
-        console.error("route: google found no way to", address || `${to.lat},${to.lng}`);
+        return json(200, {
+          provider: "google",
+          withTraffic: true,
+          route: await askGoogle(from, to, address, heading, key),
+        });
       } catch (err) {
         // Most likely the Routes API is not switched on for this key yet. The
         // chauffeur still gets a route, it just does not know the traffic.

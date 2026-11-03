@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import real from "./fixtures/osrm-manchester-wilmslow.json";
-import { fromOsrm } from "@/lib/navRoute";
+import { fromOsrm, worthOffering, type NavRoute } from "@/lib/navRoute";
 import { cueFor, follow, offRoute, shownDistance } from "@/lib/navGuidance";
 import { metresBetween } from "@/lib/trackMarker";
 
@@ -252,5 +252,35 @@ describe("driving it with a real phone rather than a perfect one", () => {
     const gone = follow(route, { lat: point.lat + 0.004, lng: point.lng }, -1);
     expect(offRoute(wandering)).toBe(false);
     expect(offRoute(gone)).toBe(true);
+  });
+});
+
+describe("the ways worth offering a chauffeur", () => {
+  const way = (seconds: number, via?: string): NavRoute =>
+    ({ line: [], steps: [], metres: 0, seconds, withTraffic: true, at: 0, ...(via ? { via } : {}) });
+
+  it("keeps the best even when it has no road to name", () => {
+    expect(worthOffering([way(600)])).toHaveLength(1);
+  });
+
+  it("offers a genuinely different road", () => {
+    const kept = worthOffering([way(600, "M56"), way(700, "A34")]);
+    expect(kept.map((w) => w.via)).toEqual(["M56", "A34"]);
+  });
+
+  it("drops a second way down the same road", () => {
+    const kept = worthOffering([way(600, "M56"), way(640, "M56"), way(700, "A34")]);
+    expect(kept.map((w) => w.via)).toEqual(["M56", "A34"]);
+  });
+
+  it("drops one it cannot tell apart at all", () => {
+    expect(worthOffering([way(600, "M56"), way(640)])).toHaveLength(1);
+  });
+
+  it("never offers more than three", () => {
+    const kept = worthOffering([
+      way(600, "M56"), way(640, "A34"), way(700, "A538"), way(800, "A556"),
+    ]);
+    expect(kept).toHaveLength(3);
   });
 });

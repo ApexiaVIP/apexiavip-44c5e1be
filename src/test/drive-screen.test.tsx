@@ -96,6 +96,43 @@ const openRoute = {
   },
 };
 
+/**
+ * The same drive with a second way there, down a different road, as a router
+ * hands alternatives back: both ways in the one answer.
+ */
+const twoWays = {
+  provider: "open",
+  withTraffic: false,
+  route: {
+    routes: [
+      openRoute.route.routes[0],
+      {
+        distance: 1400,
+        duration: 360,
+        legs: [
+          {
+            steps: [
+              {
+                maneuver: { type: "depart", modifier: "straight" },
+                name: "Regent Road",
+                distance: 1400,
+                duration: 360,
+                geometry: {
+                  coordinates: [
+                    [-2.24, 53.48],
+                    [-2.246, 53.4865],
+                    [-2.24, 53.489],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+};
+
 /** Fixes the test can hand to the screen whenever it likes. */
 let sendFix: ((lat: number, lng: number) => void) | null = null;
 
@@ -845,5 +882,35 @@ describe("the speed cameras on the road ahead", () => {
     );
     const spoken = voice.said.find((s) => s.words === "Speed camera at 40");
     expect(spoken?.urgent).toBe(false);
+  });
+});
+
+/**
+ * A car was sent down country lanes all day because the fastest way and the
+ * sensible way are not the same thing. The choice belongs at the kerb.
+ */
+describe("choosing which way there", () => {
+  it("offers the other way before the car sets off", async () => {
+    invoke.mockResolvedValue({ data: twoWays, error: null });
+    driving();
+    expect(await screen.findByText(/which way/i)).toBeInTheDocument();
+    expect(await screen.findByText(/chapel street/i)).toBeInTheDocument();
+    expect(await screen.findByText(/regent road/i)).toBeInTheDocument();
+  });
+
+  it("says nothing when there is only one way there", async () => {
+    invoke.mockResolvedValue({ data: openRoute, error: null });
+    driving();
+    await waitFor(() => expect(screen.getByTestId("drive-map")).toBeInTheDocument());
+    expect(screen.queryByText(/which way/i)).not.toBeInTheDocument();
+  });
+
+  it("puts the choice away once the car is plainly moving", async () => {
+    invoke.mockResolvedValue({ data: twoWays, error: null });
+    driving();
+    expect(await screen.findByText(/which way/i)).toBeInTheDocument();
+    // The fixture reports ten metres a second, which is plainly moving
+    sendFix?.(53.4805, -2.24);
+    await waitFor(() => expect(screen.queryByText(/which way/i)).not.toBeInTheDocument());
   });
 });

@@ -23,7 +23,14 @@ import { lookUpPostcode, metresBetween } from "@/lib/trackMarker";
 import { destinationQuery, postcodeFor } from "@/lib/navigation";
 import DestinationBox from "./DestinationBox";
 import type { PlaceSuggestion } from "@/lib/mfa";
-import { fromGoogle, fromOsrm, type LatLng, type NavRoute, type Turn } from "@/lib/navRoute";
+import {
+  routesFromGoogle,
+  routesFromOsrm,
+  worthOffering,
+  type LatLng,
+  type NavRoute,
+  type Turn,
+} from "@/lib/navRoute";
 import {
   announcement,
   arrivalAt,
@@ -58,6 +65,9 @@ const DriveMapGoogle = lazy(() => import("./DriveMapGoogle"));
 
 /** Already there, so there is nothing to navigate. */
 const ALREADY_THERE_M = 60;
+
+/** Metres a second past which the car has plainly set off, about ten mph. */
+const MOVING_OFF_MS = 4.5;
 
 /** Two fixes off the route before asking for a new one, so one bad fix is ignored. */
 const STRAY_FIXES = 2;
@@ -231,6 +241,10 @@ const DriveScreen = ({
    * looking down at the dashboard, whether the warning concerns him.
    */
   const [speed, setSpeed] = useState<number | null>(null);
+  /** Every way there worth offering, best first. */
+  const [choices, setChoices] = useState<NavRoute[]>([]);
+  /** Whether the choice is on screen, which it is only before setting off. */
+  const [choosing, setChoosing] = useState(false);
   const [trouble, setTrouble] = useState("");
   /** The detail under the trouble, which is what tells us what to fix. */
   const [reason, setReason] = useState("");
@@ -286,6 +300,8 @@ const DriveScreen = ({
   const asking = useRef(false);
   const spoken = useRef<Set<string>>(new Set());
   const latest = useRef<Fix | null>(null);
+  /** The address a choice of ways has already been put up for. */
+  const offeredFor = useRef<string | null>(null);
   /** The address the route on screen was worked out for. */
   const routedFor = useRef("");
   /** Where the car was when that route was asked for. */
@@ -339,14 +355,28 @@ const DriveScreen = ({
           },
         });
         if (error || data?.error) return { failed: await reasonFor(error, data) };
-        const worked =
+        const ways = worthOffering(
           data.provider === "google"
-            ? fromGoogle(data.route)
-            : fromOsrm(data.route, data.withTraffic === true);
+            ? routesFromGoogle(data.route)
+            : routesFromOsrm(data.route, data.withTraffic === true)
+        );
+        const worked = ways[0];
         if (!worked) {
           // Engineer's words on a chauffeur's screen, and no use to him. By
           // the time it says this, both routers have been tried.
           return { failed: "No route could be found to this address." };
+        }
+        setChoices(ways);
+        // Offered at the kerb, where the decision belongs, and only when
+        // there is a real one to make. A chauffeur picking roads at speed is
+        // worse than a chauffeur on the road he would not have chosen.
+        //
+        // Once per destination, and no more. A car that strays asks for a
+        // fresh route, and without this the choice would spring back over
+        // the map at seventy on the motorway, every time.
+        if (ways.length > 1 && offeredFor.current !== forAddress) {
+          offeredFor.current = forAddress;
+          setChoosing(true);
         }
         spoken.current = new Set();
         // Put the car on the new route straight away, from the fix the route
@@ -368,6 +398,26 @@ const DriveScreen = ({
     },
     [reference]
   );
+
+  /**
+   * Drive the way the chauffeur picked instead.
+   *
+   * Nothing is asked of the router: every way came back in the one answer,
+   * so switching is instant and costs nothing. The spoken turns are cleared
+   * so the first instruction on the new road is given rather than skipped
+   * for having been said once already on the old one.
+   */
+  const switchTo = useCallback((way: NavRoute) => {
+    const from = latest.current;
+    setChoosing(false);
+    if (!from) return;
+    spoken.current = new Set();
+    const next = follow(way, from, -1);
+    lineIndex.current = next.lineIndex;
+    along.current = next.along;
+    setRoute(way);
+    setGuidance(next);
+  }, []);
 
   /**
    * Whether this drive is waiting to be told where it is going.
@@ -462,6 +512,10 @@ const DriveScreen = ({
     const stop = watchDriving((fix) => {
       latest.current = fix;
       setSpeed(fix.speed);
+      // Moving is the chauffeur's answer. Whatever he was going to pick, he
+      // has set off on the one underneath, and a panel over the map at
+      // twenty miles an hour is a hazard rather than a choice.
+      if (fix.speed !== null && fix.speed > MOVING_OFF_MS) setChoosing(false);
       const next = follow(route, fix, lineIndex.current, along.current);
       lineIndex.current = next.lineIndex;
       along.current = next.along;
@@ -654,7 +708,46 @@ const DriveScreen = ({
         and goes. The limit beside it is the one that camera is watching, so a
         chauffeur can see at a glance whether they need to do anything at all.
       */}
-      {camera && (
+      {/*
+        Which way there.
+
+        A car was sent down country lanes all day because the fastest way and
+        the sensible way are not the same thing, and no setting anywhere says
+        prefer main roads. The fastest is already being driven by the time
+        this appears, so ignoring it costs nothing and the choice is real.
+      */}
+      {choosing && choices.length > 1 && (
+        <div className="absolute inset-x-3 bottom-4 z-10 bg-charcoal/95 border border-champagne/30 shadow-2xl">
+          <p className="px-4 pt-3 text-[10px] tracking-[0.2em] uppercase text-smoke">
+            Which way?
+          </p>
+          <div className="p-3 pt-2 space-y-2">
+            {choices.map((way, i) => {
+              const mine = way === route;
+              return (
+                <button
+                  key={`${way.via ?? i}-${Math.round(way.seconds)}`}
+                  type="button"
+                  onClick={() => switchTo(way)}
+                  className={`w-full flex items-baseline justify-between gap-3 px-3 py-3 text-left border ${
+                    mine ? "border-champagne bg-champagne/10" : "border-border"
+                  }`}
+                >
+                  <span className="text-sm text-foreground truncate">
+                    {way.via || (i === 0 ? "Fastest" : "Another way")}
+                  </span>
+                  <span className="text-xs tracking-[0.1em] text-smoke shrink-0">
+                    {Math.max(1, Math.round(way.seconds / 60))} min
+                    {i === 0 ? " · fastest" : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {camera && !choosing && (
         <div className="absolute left-4 bottom-4 flex items-center gap-3 rounded-2xl bg-charcoal/95 border border-champagne/30 px-4 py-3 shadow-2xl">
           <div className="w-10 h-10 rounded-full bg-champagne/15 border border-champagne/40 grid place-items-center shrink-0">
             <Camera className="w-5 h-5 text-champagne" />
@@ -686,7 +779,7 @@ const DriveScreen = ({
         reports nothing at all, and a nought that is really a shrug is worse
         than an empty corner.
       */}
-      {stage === "driving" && mph !== null && (
+      {stage === "driving" && mph !== null && !choosing && (
         <div className="absolute right-4 bottom-4 w-[4.5rem] h-[4.5rem] rounded-full bg-charcoal/95 border border-champagne/30 grid place-items-center shadow-2xl">
           <span className="text-2xl font-light text-foreground leading-none">{mph}</span>
           <span className="text-[9px] tracking-[0.2em] uppercase text-smoke mt-0.5">mph</span>
