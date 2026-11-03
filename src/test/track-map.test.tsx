@@ -1,3 +1,4 @@
+import { glideFor, GLIDE_MS } from "@/lib/trackMarker";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import TrackMap from "@/components/TrackMap";
@@ -86,5 +87,24 @@ describe("the map a member watches their car on", () => {
     render(<TrackMap lat={53.48} lng={-2.24} />);
     await waitFor(() => expect(screen.getByTestId("raster-map")).toBeInTheDocument());
     expect(googleAsked.calls).toBe(0);
+  });
+});
+
+describe("how long the car takes to reach its newest position", () => {
+  it("takes the gap we actually saw, so it arrives as the next one lands", () => {
+    expect(glideFor(4000)).toBe(4000);
+  });
+
+  it("falls back to the reporting beat before there is a gap to measure", () => {
+    expect(glideFor(0)).toBe(GLIDE_MS);
+    expect(glideFor(Number.NaN)).toBe(GLIDE_MS);
+  });
+
+  it("never crawls, however long the signal was gone", () => {
+    expect(glideFor(60_000)).toBe(9000);
+  });
+
+  it("never flicks, however fast two positions arrive together", () => {
+    expect(glideFor(50)).toBe(1200);
   });
 });

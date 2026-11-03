@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
-  GLIDE_MS,
+  glideFor,
   bearing,
   carElement,
   easeInOut,
@@ -44,6 +44,8 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
   const pickupRef = useRef<L.Marker | null>(null);
   const headingRef = useRef(0);
   const frameRef = useRef<number | null>(null);
+  /** When the last position arrived, so the glide can match the real beat. */
+  const lastAtRef = useRef(0);
   const fittedRef = useRef(false);
 
   useEffect(() => {
@@ -75,6 +77,9 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
     if (!map || !car) return;
 
     const from = car.getLatLng();
+    const arrived = performance.now();
+    const glide = glideFor(lastAtRef.current ? arrived - lastAtRef.current : 0);
+    lastAtRef.current = arrived;
     const moved = metresBetween(from.lat, from.lng, lat, lng);
     if (shouldTurn(moved)) headingRef.current = bearing(from.lat, from.lng, lat, lng);
     const inner = car.getElement()?.querySelector<HTMLElement>(".apx-car");
@@ -86,7 +91,7 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
     } else {
       const started = performance.now();
       const step = (now: number) => {
-        const e = easeInOut(Math.min(1, (now - started) / GLIDE_MS));
+        const e = easeInOut(Math.min(1, (now - started) / glide));
         car.setLatLng([from.lat + (lat - from.lat) * e, from.lng + (lng - from.lng) * e]);
         if (e < 1) frameRef.current = requestAnimationFrame(step);
       };

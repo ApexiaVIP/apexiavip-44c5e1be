@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { loadGoogleMaps, mapId } from "@/lib/googleMaps";
 import {
-  GLIDE_MS,
+  glideFor,
   bearing,
   carElement,
   easeInOut,
@@ -46,7 +46,18 @@ const TrackMapGoogle = ({ lat, lng, pickupPostcode, onUnavailable }: Props) => {
   const pickupRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
   const headingRef = useRef(0);
   const frameRef = useRef<number | null>(null);
+  /**
+   * Where the car actually is on screen, not where it was last told to go.
+   *
+   * This held the target. A position arriving before the glide had finished
+   * cancelled it and started the next one from the target, so the car
+   * jumped forward to a place it had never reached and then set off again.
+   * The passenger's screen asks every four seconds against a six second
+   * glide, so that happened on every single report.
+   */
   const atRef = useRef({ lat, lng });
+  /** When the last position arrived, so the glide can match the real beat. */
+  const lastAtRef = useRef(0);
 
   /**
    * Run something against Google's map, and hand over to the open map if it
@@ -119,6 +130,9 @@ const TrackMapGoogle = ({ lat, lng, pickupPostcode, onUnavailable }: Props) => {
     if (!map || !marker) return;
 
     const from = atRef.current;
+    const arrived = performance.now();
+    const glide = glideFor(lastAtRef.current ? arrived - lastAtRef.current : 0);
+    lastAtRef.current = arrived;
     const moved = metresBetween(from.lat, from.lng, lat, lng);
     if (shouldTurn(moved)) headingRef.current = bearing(from.lat, from.lng, lat, lng);
     const inner = (marker.content as HTMLElement)?.querySelector<HTMLElement>(".apx-car");
@@ -129,14 +143,19 @@ const TrackMapGoogle = ({ lat, lng, pickupPostcode, onUnavailable }: Props) => {
       // A jump of this size is a different car or a bad fix, not a journey
       if (prefersReducedMotion() || moved < 1 || moved > 20000) {
         marker.position = { lat, lng };
+        atRef.current = { lat, lng };
       } else {
         const started = performance.now();
         const step = (now: number) => {
-          const e = easeInOut(Math.min(1, (now - started) / GLIDE_MS));
-          marker.position = {
+          const e = easeInOut(Math.min(1, (now - started) / glide));
+          const at = {
             lat: from.lat + (lat - from.lat) * e,
             lng: from.lng + (lng - from.lng) * e,
           };
+          marker.position = at;
+          // Kept as the car moves, so the next position carries on from
+          // here rather than from somewhere it never got to
+          atRef.current = at;
           if (e < 1) frameRef.current = requestAnimationFrame(step);
         };
         frameRef.current = requestAnimationFrame(step);
@@ -160,7 +179,6 @@ const TrackMapGoogle = ({ lat, lng, pickupPostcode, onUnavailable }: Props) => {
       if (moved > NUDGE_M || !comfortable) map.panTo({ lat, lng });
     });
 
-    atRef.current = { lat, lng };
   }, [lat, lng, guarded]);
 
   /** Mark where the car is headed, once we know where that is. */

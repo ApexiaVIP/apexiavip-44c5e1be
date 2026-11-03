@@ -17,6 +17,27 @@
  */
 export const GLIDE_MS = 6000;
 
+/** Short of this a glide is not worth watching; past it the car is crawling. */
+const MIN_GLIDE_MS = 1200;
+const MAX_GLIDE_MS = 9000;
+
+/**
+ * How long to take gliding to the newest position.
+ *
+ * Six seconds was the chauffeur's reporting beat, but the passenger's screen
+ * asks every four, so a glide was always still running when the next
+ * position landed. The car never arrived, trailed further behind with every
+ * report, and was re-aimed mid-stride each time, which is what a passenger
+ * sees as a car that will not sit still.
+ *
+ * Taking the gap we actually observed means the car arrives just as the next
+ * position does, whatever the beat turns out to be on the day.
+ */
+export const glideFor = (sinceLastMs: number): number => {
+  if (!Number.isFinite(sinceLastMs) || sinceLastMs <= 0) return GLIDE_MS;
+  return Math.min(MAX_GLIDE_MS, Math.max(MIN_GLIDE_MS, sinceLastMs));
+};
+
 /** Below this many metres a new fix is GPS noise, not a change of direction. */
 const HEADING_THRESHOLD_M = 8;
 
