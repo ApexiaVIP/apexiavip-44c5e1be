@@ -11,6 +11,7 @@ import {
   ukDayStart,
   ukTimeOf,
 } from "../_shared/ukTime.ts";
+import { MAX_SHIFT_HOURS, minutesOnDuty, type Shift } from "../_shared/hours.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,15 +44,6 @@ const REPORT_AFTER_MINUTES = 30;
  */
 const QUIET_MINUTES = REPORT_AFTER_MINUTES;
 
-/**
- * The longest a single shift can contribute to one day.
- *
- * A chauffeur who forgets to sign off leaves the clock running, and a shift
- * spanning a weekend would otherwise report a flat twenty four hours for the
- * Saturday as though it had been worked. Nobody is paid on a figure nobody
- * checked, so it is capped and said plainly instead.
- */
-const MAX_SHIFT_HOURS = 14;
 
 /**
  * What a chauffeur's own app says while a job is in hand. Any of these means
@@ -86,11 +78,6 @@ const dayToReport = (override: unknown): string =>
   typeof override === "string" && /^\d{4}-\d{2}-\d{2}$/.test(override)
     ? override
     : ukDayOwedASheet();
-
-interface Shift {
-  started_at: string;
-  ended_at: string | null;
-}
 
 interface Job {
   reference: string;
@@ -128,41 +115,6 @@ const STEP_LABEL: Record<string, string> = {
 const addressLine = (a: Job["pickup"]) =>
   [a?.line1, a?.town, a?.postcode].filter(Boolean).join(", ");
 
-/**
- * Minutes on duty within a day. An open shift is counted to the end of the
- * day and flagged, rather than guessed at.
- *
- * An open shift that began before the day being reported is a different
- * thing: nobody works a fortnight without signing off. Counting it to the
- * end of every later day would put fourteen hours against that chauffeur
- * every day for ever, so it earns nothing and is called out instead.
- */
-const minutesOnDuty = (shifts: Shift[], from: Date, to: Date) => {
-  let minutes = 0;
-  let stillOpen = false;
-  let capped = false;
-  let neverClosed = false;
-  for (const s of shifts) {
-    if (!s.ended_at && new Date(s.started_at).getTime() < from.getTime()) {
-      neverClosed = true;
-      continue;
-    }
-    const start = Math.max(new Date(s.started_at).getTime(), from.getTime());
-    const rawEnd = s.ended_at ? new Date(s.ended_at).getTime() : to.getTime();
-    if (!s.ended_at) stillOpen = true;
-    const end = Math.min(rawEnd, to.getTime());
-    if (end <= start) continue;
-    const worked = (end - start) / 60000;
-    // A shift left running does not become a longer day
-    if (worked > MAX_SHIFT_HOURS * 60) {
-      capped = true;
-      minutes += MAX_SHIFT_HOURS * 60;
-    } else {
-      minutes += worked;
-    }
-  }
-  return { minutes, stillOpen, capped, neverClosed };
-};
 
 const esc = (v: unknown) =>
   String(v ?? "")

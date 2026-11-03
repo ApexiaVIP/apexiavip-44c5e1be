@@ -113,3 +113,24 @@ export const ukDayOwedASheet = (now: Date = new Date()): string => {
   );
   return hour >= EVENING_FROM_HOUR ? today : ukDayPlus(today, -1);
 };
+
+/** The UK month a moment falls in, as "YYYY-MM". */
+export const ukMonth = (at: Date): string => ukDay(at).slice(0, 7);
+
+/** Midnight at the start of the first of a UK month. */
+export const ukMonthStart = (ym: string): Date => ukDayStart(`${ym}-01`);
+
+/**
+ * The first of the next month, so a month is [start, end).
+ *
+ * Built from the day helpers rather than from Date arithmetic, so a month
+ * containing a clock change is still a whole month: March runs 31 days and
+ * one hour, October 31 days less one, and hours worked in either are counted
+ * once each.
+ */
+export const ukMonthEnd = (ym: string): Date => {
+  const [year, month] = ym.split("-").map(Number);
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  return ukDayStart(`${nextYear}-${String(nextMonth).padStart(2, "0")}-01`);
+};

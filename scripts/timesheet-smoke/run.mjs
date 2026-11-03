@@ -328,7 +328,56 @@ check("and so does a night that waits for a chauffeur",
     entryPoints: [join(here, "..", "..", "supabase", "functions", "_shared", "ukTime.ts")],
     bundle: true, format: "esm", platform: "node", outfile: ukOut,
   });
-  const { ukDayOwedASheet } = await import(pathToFileURL(ukOut).href);
+  const { ukDayOwedASheet, ukMonth, ukMonthStart, ukMonthEnd } = await import(
+    pathToFileURL(ukOut).href
+  );
+
+  /*
+   * A chauffeur's month, which is what he is shown and what the office
+   * allocates against. A month containing a clock change is still a whole
+   * month: March runs an hour short, October an hour long, and an hour
+   * worked in either is counted once.
+   */
+  const same = (label, got, want) =>
+    check(label, got === want, `got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
+
+  same("a moment in March is in March", ukMonth(new Date("2026-03-17T12:00:00Z")), "2026-03");
+  // June is BST, so UK midnight on the 1st of July is 23:00 UTC on the 30th
+  same(
+    "half an hour before UK midnight still belongs to the month before",
+    ukMonth(new Date("2026-06-30T22:30:00Z")),
+    "2026-06"
+  );
+  same(
+    "and half an hour after it belongs to the new one",
+    ukMonth(new Date("2026-06-30T23:30:00Z")),
+    "2026-07"
+  );
+  same(
+    "a month starts at UK midnight, not UTC",
+    ukMonthStart("2026-07").toISOString(),
+    "2026-06-30T23:00:00.000Z"
+  );
+  same(
+    "a month ends where the next one starts",
+    ukMonthEnd("2026-07").toISOString(),
+    ukMonthStart("2026-08").toISOString()
+  );
+  same(
+    "December rolls into January",
+    ukMonthEnd("2026-12").toISOString(),
+    ukMonthStart("2027-01").toISOString()
+  );
+  same(
+    "the month the clocks go forward is an hour short of 31 days",
+    (ukMonthEnd("2026-03") - ukMonthStart("2026-03")) / 3600000,
+    31 * 24 - 1
+  );
+  same(
+    "and the month they go back is an hour long",
+    (ukMonthEnd("2026-10") - ukMonthStart("2026-10")) / 3600000,
+    31 * 24 + 1
+  );
   const owed = (iso) => ukDayOwedASheet(new Date(iso));
 
   // British Summer Time, the night this went wrong
