@@ -222,6 +222,15 @@ const DriveScreen = ({
   onClose,
 }: DriveScreenProps) => {
   const [stage, setStage] = useState<Stage>("finding");
+  /**
+   * How fast the car is going, in metres a second, as the phone reports it.
+   *
+   * The phone has had this on every fix since the screen was written and it
+   * was thrown away. A chauffeur asked for it, and he is right to: he is
+   * being warned about a camera and its limit with no way to tell, without
+   * looking down at the dashboard, whether the warning concerns him.
+   */
+  const [speed, setSpeed] = useState<number | null>(null);
   const [trouble, setTrouble] = useState("");
   /** The detail under the trouble, which is what tells us what to fix. */
   const [reason, setReason] = useState("");
@@ -283,6 +292,9 @@ const DriveScreen = ({
   const askedFrom = useRef<LatLng | null>(null);
 
   const where = what === "pickup" ? "the collection" : "the destination";
+  // Rounded, because a speed that flickers through every digit is unreadable
+  // at a glance and reads as a fault
+  const mph = speed !== null && speed >= 0 ? Math.round(speed * 2.23694) : null;
   /**
    * An address the chauffeur typed because the job's own will not navigate.
    *
@@ -449,6 +461,7 @@ const DriveScreen = ({
     if (!route || !target) return;
     const stop = watchDriving((fix) => {
       latest.current = fix;
+      setSpeed(fix.speed);
       const next = follow(route, fix, lineIndex.current, along.current);
       lineIndex.current = next.lineIndex;
       along.current = next.along;
@@ -614,6 +627,7 @@ const DriveScreen = ({
               course={guidance.course}
               to={target}
               cameras={cameras}
+              toTurn={guidance.toTurn}
               onUnavailable={() => setGoogleOut(true)}
             />
           ) : (
@@ -626,6 +640,7 @@ const DriveScreen = ({
               course={guidance.course}
               to={target}
               cameras={cameras}
+              toTurn={guidance.toTurn}
             />
           )}
         </Suspense>
@@ -659,6 +674,22 @@ const DriveScreen = ({
               </span>
             </div>
           )}
+        </div>
+      )}
+
+      {/*
+        How fast the car is going.
+
+        Bottom right, opposite the camera warning, which is where every sat
+        nav puts it and so where a chauffeur's eye already goes. It shows
+        only while there is a speed to show: standing still the phone often
+        reports nothing at all, and a nought that is really a shrug is worse
+        than an empty corner.
+      */}
+      {stage === "driving" && mph !== null && (
+        <div className="absolute right-4 bottom-4 w-[4.5rem] h-[4.5rem] rounded-full bg-charcoal/95 border border-champagne/30 grid place-items-center shadow-2xl">
+          <span className="text-2xl font-light text-foreground leading-none">{mph}</span>
+          <span className="text-[9px] tracking-[0.2em] uppercase text-smoke mt-0.5">mph</span>
         </div>
       )}
 
