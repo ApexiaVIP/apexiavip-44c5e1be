@@ -58,7 +58,17 @@ undo, but an undo is a rescue and a confirm is a prevention, and the office
 gets told either way once the window passes.
 
 ### D4. "Could not save that. Something went wrong. Please try again."
-**OPEN. High.** Screenshots 06:31 and 06:32.
+**REPORTING FIXED, cause still open.** Screenshots 06:31 and 06:32.
+
+The failure now names itself: the chauffeur is told the address would not
+save and to tell the office, and the reference, the address and the database's
+own complaint go into the log. It was landing in the catch-all, which named
+nothing and left nothing behind to look at.
+
+What actually broke is still unknown. The best guess is the same family as
+D20, a column or a constraint the insert does not satisfy, since both
+failures are the same insert from two directions. The next one to happen will
+say so itself.
 
 Faz searched "City football acad", picked City Football Academy from the
 suggestions, and the save failed. That is the destination box, the one thing an
@@ -94,7 +104,11 @@ The text runs off the right edge of the phone and the car icon is clipped on
 the left. Longest label in the app, and it looks broken on an iPhone.
 
 ### D8. The vehicle registration vanishes mid-job
-**OPEN.** Compare 04:19 with 05:41.
+**FIXED, not released.** Compare 04:19 with 05:41.
+
+The last registration we were given is kept and shown when a live lookup
+comes back empty, which is a truer thing to show than nothing. D12 makes the
+empty answers much rarer in the first place.
 
 At 04:19 the job reads "Range Rover, R26 APX, 2 up". At 05:41 it reads "Range
 Rover, 2 up". The registration comes from the live booking-system lookup, so
@@ -102,7 +116,13 @@ when that lookup fails the reg quietly disappears and nobody is told. Same
 silent-failure pattern as the desk portal losing the chauffeur's name.
 
 ### D9. Waiting recorded as "Medlock Manchester, unparished area, M11 4DW"
-**OPEN. Cosmetic but it goes in the job record.** Screenshot 06:32.
+**FIXED, not released.** Screenshot 06:32.
+
+The lookup was led by the parish, which in a city is literally the words
+"unparished area". For that postcode it returns parish "Manchester,
+unparished area" and ward "Clayton & Openshaw". It now leads on the ward and
+only takes a parish that is a real one, so the same stop reads "Clayton &
+Openshaw, M11 4DW".
 
 The place name we write against a stop is coming back as administrative
 geography rather than anywhere a person would recognise.
@@ -117,7 +137,32 @@ Scrolling puts the passenger name behind the clock and the Dynamic Island.
 his phone rather than the one being worked on.
 
 ### D12. A job allocated to a chauffeur never reached his app
-**OPEN. Highest.** Separate report, 30 Oct.
+**FIXED, not released.** Separate report, 30 Oct.
+
+Three faults, all in the one pass:
+
+- It asked Dispatch about every booking in a sixty hour window, once a
+  minute, for every chauffeur signed on. It now asks about jobs going spare,
+  which is what discovery is for, and this chauffeur's own, which is where
+  the car and the live status on his screen come from.
+- It ignored the thirty second lock and recorded nothing, so one phone on a
+  kerb held a lock on every reference in the diary and the five minute sweep
+  walked into it believing a column this function never wrote. It now honours
+  the lock and records every ask, like the sweep does.
+- There was no limit on the request at all, so it would have failed outright
+  on a busy match week, silently, taking every chauffeur's new jobs with it.
+  It is capped.
+
+A chauffeur Dispatch names with no mobile on him is now written to the log,
+which is the only trace there is until the desk gets a screen for it. That
+wants a table, so it wants a migration, so it is not in this change.
+
+**Still true, and worth knowing.** A member watching their own car checks it
+every fifteen seconds, which is inside the thirty second lock, so heavy
+watching can still hold discovery off a booking. We no longer cause that; we
+can no longer fix it from here either. The real answer is for one sweep to
+own all contact with Dispatch and for every screen to read our own database.
+That is the dispatch replacement, and it removes this whole class of fault.
 
 Faz had an evening job correctly allocated to him in the booking system that
 never appeared in the app, while the next day's job showed fine. A job only
@@ -233,7 +278,18 @@ different code path with a different message, so treat it as D4 until proven
 otherwise.
 
 ### D21. "Could not work out a route just now"
-**OPEN. High.** Screenshot 11:09, 2 Nov.
+**FIXED, likely cause. Not released.** Screenshot 11:09, 2 Nov.
+
+Found in the code rather than in a log, so it is a strong reading and not a
+certainty. Google answers quite happily with an empty list when it cannot
+find a way through: a door inside a pedestrian area, a car park entrance, a
+point sitting just off the road network. We only fell back to the other
+router when Google threw, so an empty answer went to the chauffeur as a route
+in a shape we could not read, and he was stopped.
+
+It now falls back, which is very likely to produce a route, because the open
+router is far less fussy about where it starts. If both fail he is told there
+is no route to the address, rather than being handed the word "shape".
 
 "The google route came back in a shape we could not read." The route came back
 and we could not parse it. Needs the route function log for 11:09 on 2 Nov.
