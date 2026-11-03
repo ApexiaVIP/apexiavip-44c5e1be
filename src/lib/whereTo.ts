@@ -22,8 +22,20 @@ export const canAskChauffeur = (
   status: string | null | undefined
 ): boolean => {
   if ((status ?? "").trim().toLowerCase() === "cancelled") return false;
-  return ON_THE_ROAD.includes((driverStatus ?? "").trim());
+  return hasSetOff(driverStatus);
 };
+
+/**
+ * Whether the chauffeur has set off on this journey.
+ *
+ * Once they have, it belongs to the road rather than to the booking form.
+ * Amending would move the address under a car already driving to the old
+ * one, and Cancel Booking sat a single tap from a passenger sitting in the
+ * back of it. From here a change goes to the chauffeur through the box that
+ * tells them, or to the travel team, who can reach both.
+ */
+export const hasSetOff = (driverStatus: string | null | undefined): boolean =>
+  ON_THE_ROAD.includes((driverStatus ?? "").trim());
 
 /**
  * An address as it goes onto the record.

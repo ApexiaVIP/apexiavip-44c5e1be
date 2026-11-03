@@ -17,7 +17,7 @@ import {
 } from "@/lib/bookingLive";
 import { locationFreshness } from "@/lib/locationAge";
 import { whenDue } from "@/lib/eta";
-import { canAskChauffeur } from "@/lib/whereTo";
+import { canAskChauffeur, hasSetOff } from "@/lib/whereTo";
 import WhereTo from "@/components/WhereTo";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -358,7 +358,14 @@ const Bookings = () => {
           </div>
         )}
 
-        {isUpcoming && isOwn && b.reference && b.status !== "Failed" && (
+        {isUpcoming && isOwn && b.reference && b.status !== "Failed" && hasSetOff(b.driver_status) && (
+          <p className="text-xs text-smoke">
+            Your chauffeur is on this journey. Ask them for somewhere else below, or call
+            your travel team to change it.
+          </p>
+        )}
+
+        {isUpcoming && isOwn && b.reference && b.status !== "Failed" && !hasSetOff(b.driver_status) && (
           <div className="flex items-center gap-3 flex-wrap">
             <Link to={`/book?edit=${encodeURIComponent(b.reference)}`}>
               <Button variant="outline" size="sm" className="tracking-[0.15em] uppercase">

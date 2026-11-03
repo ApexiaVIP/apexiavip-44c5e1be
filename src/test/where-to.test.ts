@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canAskChauffeur, placeLine } from "@/lib/whereTo";
+import { canAskChauffeur, placeLine, hasSetOff } from "@/lib/whereTo";
 
 /**
  * The passenger can only be offered this while there is a chauffeur on the
@@ -69,5 +69,23 @@ describe("the address as it goes on the record", () => {
 
   it("gives nothing back when there is no address at all", () => {
     expect(placeLine({ line1: null, town: null, postcode: null })).toBe("");
+  });
+});
+
+describe("whether the booking form still owns the journey", () => {
+  it("does not, once the chauffeur has set off", () => {
+    expect(hasSetOff("en_route")).toBe(true);
+    expect(hasSetOff("arrived")).toBe(true);
+    expect(hasSetOff("pob")).toBe(true);
+    expect(hasSetOff("waiting")).toBe(true);
+  });
+
+  it("still does before anybody has moved", () => {
+    expect(hasSetOff(null)).toBe(false);
+    expect(hasSetOff("")).toBe(false);
+  });
+
+  it("and again once the job is finished", () => {
+    expect(hasSetOff("clear")).toBe(false);
   });
 });

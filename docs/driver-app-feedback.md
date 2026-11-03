@@ -8,6 +8,9 @@ Target: everything below fixed and tested before the lads are back on 16 Nov 202
 
 Status key: OPEN, IN BUILD, FIXED, WON'T DO.
 
+FIXED means written and tested. Nothing goes to the chauffeurs until the
+whole list is done and we ship one build.
+
 ---
 
 ## Batch 1: Faz Hussain, 31 Oct 2026
@@ -20,7 +23,7 @@ every job Sally gives out. So City work is now the main thing the app is being
 judged on, and City work is the path with the least road time on it.
 
 ### D1. Drive refuses the job: "no postcode, so there is nothing to navigate to"
-**OPEN. Highest.** Screenshot 04:10.
+**FIXED, not released. Highest.** Screenshot 04:10.
 
 Faz pressed Drive at the start of the job and got a dead end. He could not
 navigate to the collection at all, and told the other chauffeurs to ignore the
@@ -37,14 +40,14 @@ ask the chauffeur to type somewhere when there is genuinely nothing to work
 with.
 
 ### D2. Drive still showing after it has been pressed
-**OPEN.** Screenshot 04:19, and Faz at 07:26.
+**FIXED, not released.** Screenshot 04:19, and Faz at 07:26.
 
 Pressing Drive set the job to En route, but the Drive button stayed exactly as
 it was, so it reads as a step still to do. Faz asked for it to either disappear
 once pressed or be relabelled "En route to pick up point".
 
 ### D3. Clear sits directly under Passenger back on board
-**OPEN. High.** Screenshot 06:32, and Faz at 09:30.
+**FIXED, not released. High.** Screenshot 06:32, and Faz at 09:30.
 
 The two are stacked with nothing between them and Clear is the same size, so a
 thumb finds it by accident and the job ends. Faz asked for a confirm step or a
@@ -85,7 +88,7 @@ see what actually happened. The step timeline already exists at the foot of the
 job, so this is a note entry added to it rather than anything new.
 
 ### D7. "Passenger back on board" is cut off
-**OPEN.** Screenshots 05:41 and 06:32.
+**FIXED, not released.** Screenshots 05:41 and 06:32.
 
 The text runs off the right edge of the phone and the car icon is clipped on
 the left. Longest label in the app, and it looks broken on an iPhone.
@@ -194,7 +197,7 @@ This is the single biggest piece of work in the list and it is what the
 chauffeurs judge the app on, because it is the part they use at speed.
 
 ### D20. The passenger's "where would you like to go" box has never worked
-**OPEN. Highest. Cause confirmed.** Iman 2 Nov 13:13, screenshot 10:12.
+**FIXED, not released. Highest. Cause confirmed.** Iman 2 Nov 13:13, screenshot 10:12.
 
 "We could not pass that on. An error occurred processing your request."
 
@@ -247,7 +250,7 @@ Not reported by anyone. Found by going back over the images and the messages
 against the code, after Jimmy asked whether everything had been covered.
 
 ### D25. No way to type an address when the one on the job will not navigate
-**OPEN. High.** Jimmy said this himself on 31 Oct at 07:20, and it never got
+**FIXED, not released. High.** Jimmy said this himself on 31 Oct at 07:20, and it never got
 written down.
 
 When the sat nav cannot work with the address, the chauffeur gets a dead end:
@@ -257,7 +260,7 @@ no way forward inside the app at all. D1 makes this rarer. It does not remove
 it, and the one thing a chauffeur at the kerb needs is a way out.
 
 ### D26. Amend and Cancel are offered while the passenger is in the car
-**OPEN.** Screenshot 11:46, 2 Nov.
+**FIXED, not released.** Screenshot 11:46, 2 Nov.
 
 The job reads "On board" and still shows Amend and Cancel Booking. Cancelling
 a journey you are sitting in is not a thing anybody should be one tap from,
