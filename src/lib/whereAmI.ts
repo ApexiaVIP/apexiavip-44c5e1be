@@ -28,6 +28,27 @@ const fix = (): Promise<GeolocationPosition> =>
     });
   });
 
+/**
+ * Somewhere a person would recognise, out of what the lookup gives back.
+ *
+ * It led on the parish, which in a city is the words "unparished area". A
+ * chauffeur waiting by the Etihad had "Manchester, unparished area" written
+ * against his job, which went to the office looking like a fault and told
+ * nobody where the car was. The ward is the name people use, so a parish is
+ * only taken when it is a real one, and the district catches the rest.
+ */
+export const placeName = (near: {
+  parish?: string | null;
+  admin_ward?: string | null;
+  admin_district?: string | null;
+  postcode?: string | null;
+}): string => {
+  const parish = (near.parish ?? "").trim();
+  const real = parish && !/unparished/i.test(parish) ? parish : "";
+  const area = real || (near.admin_ward ?? "").trim() || (near.admin_district ?? "").trim();
+  return [area, (near.postcode ?? "").trim()].filter(Boolean).join(", ");
+};
+
 /** The nearest street and postcode to a position, or an empty string. */
 const describe = async (lat: number, lng: number): Promise<string> => {
   try {
@@ -38,7 +59,7 @@ const describe = async (lat: number, lng: number): Promise<string> => {
     const body = await res.json();
     const near = body?.result?.[0];
     if (!near) return "";
-    return [near.parish || near.admin_ward, near.postcode].filter(Boolean).join(", ");
+    return placeName(near);
   } catch {
     return "";
   }
