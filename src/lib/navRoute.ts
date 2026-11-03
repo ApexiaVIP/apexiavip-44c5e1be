@@ -386,17 +386,22 @@ interface OsrmRoute {
 /**
  * The road a way there is mostly made of.
  *
- * The open router names no route, so the biggest road on it stands for the
- * whole: the longest stretch with a number or a name, which on a motorway
- * run is the motorway and through town is the main road.
+ * The open router names no route, so the longest stretch on it stands for
+ * the whole. The number is preferred over the name: on the Wilmslow to
+ * Etihad run the longest step is called "Ainslie Way", which is a slip road
+ * nobody has heard of, and its number is the A34, which is the road a
+ * chauffeur is actually choosing between.
  */
-const biggestRoad = (steps: Step[]): string => {
+const biggestRoad = (steps: OsrmStep[]): string => {
   let best = "";
   let furthest = 0;
   for (const step of steps) {
-    if (step.road && step.metres > furthest) {
-      furthest = step.metres;
-      best = step.road;
+    // A step can carry several numbers, "A34;A5103". The first will do.
+    const road = (step.ref || "").split(";")[0].trim() || (step.name || "").trim();
+    const metres = step.distance ?? 0;
+    if (road && metres > furthest) {
+      furthest = metres;
+      best = road;
     }
   }
   return best;
@@ -433,7 +438,7 @@ const oneOsrm = (route: OsrmRoute | undefined, withTraffic: boolean): NavRoute |
     seconds: route?.duration ?? steps.reduce((sum, s) => sum + s.seconds, 0),
     withTraffic,
     at: Date.now(),
-    ...(biggestRoad(steps) ? { via: biggestRoad(steps) } : {}),
+    ...(biggestRoad(raw) ? { via: biggestRoad(raw) } : {}),
   };
 };
 

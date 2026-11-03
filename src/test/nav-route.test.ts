@@ -236,3 +236,38 @@ describe("a route from the open router", () => {
     expect(fromOsrm(body, true)!.withTraffic).toBe(true);
   });
 });
+
+/**
+ * What a way there is called when the chauffeur is choosing between two.
+ * The open router names no route, so the longest stretch stands for it.
+ */
+describe("naming a way there", () => {
+  const leg = (steps: unknown[]) => ({ routes: [{ distance: 1, duration: 1, legs: [{ steps }] }] });
+  const step = (over: Record<string, unknown>) => ({
+    maneuver: { type: "turn", modifier: "left" },
+    distance: 100,
+    duration: 10,
+    geometry: { coordinates: [[-2.24, 53.48], [-2.24, 53.49]] },
+    ...over,
+  });
+
+  it("takes the number over the name of a slip road", () => {
+    const body = leg([
+      step({ name: "Ainslie Way", ref: "A34", distance: 9000 }),
+      step({ name: "Deansgate", distance: 400 }),
+    ]);
+    expect(fromOsrm(body)!.via).toBe("A34");
+  });
+
+  it("takes the first of several numbers on one road", () => {
+    expect(fromOsrm(leg([step({ name: "", ref: "A34;A5103", distance: 9000 })]))!.via).toBe("A34");
+  });
+
+  it("falls back to the name where there is no number", () => {
+    expect(fromOsrm(leg([step({ name: "Donkey Lane", distance: 9000 })]))!.via).toBe("Donkey Lane");
+  });
+
+  it("names nothing when no step has a road on it", () => {
+    expect(fromOsrm(leg([step({ name: "", distance: 9000 })]))!.via).toBeUndefined();
+  });
+});

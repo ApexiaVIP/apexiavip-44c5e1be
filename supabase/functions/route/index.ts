@@ -54,7 +54,8 @@ const askGoogle = async (
   to: Point,
   address: string,
   heading: number | null,
-  key: string
+  key: string,
+  alternatives: boolean
 ): Promise<unknown> => {
   const res = await withTimeout("https://routes.googleapis.com/directions/v2:computeRoutes", {
     method: "POST",
@@ -90,7 +91,12 @@ const askGoogle = async (
       // The fastest way and the sensible way are not the same thing, and
       // there is no setting that says prefer main roads. A car went down
       // country lanes all day because nobody was ever offered the motorway.
-      computeAlternativeRoutes: true,
+      //
+      // Only when somebody is going to be shown them. Alternatives cost
+      // time on top of a traffic-aware route, and this gives up at eight
+      // seconds: asking on every re-route would have traded a chauffeur's
+      // traffic-aware route for the fallback one, halfway down a motorway.
+      computeAlternativeRoutes: alternatives,
       languageCode: "en-GB",
       regionCode: "GB",
       units: "IMPERIAL",
@@ -113,11 +119,16 @@ const askGoogle = async (
  * sends back is marked as such and the screen stops promising an arrival
  * time it cannot stand behind.
  */
-const askOpenRouter = async (from: Point, to: Point): Promise<unknown> => {
+const askOpenRouter = async (
+  from: Point,
+  to: Point,
+  alternatives: boolean
+): Promise<unknown> => {
   const path = `${from.lng},${from.lat};${to.lng},${to.lat}`;
   const res = await withTimeout(
     `https://router.project-osrm.org/route/v1/driving/${path}` +
-      `?overview=false&steps=true&geometries=geojson&annotations=false&alternatives=true`,
+      `?overview=false&steps=true&geometries=geojson&annotations=false` +
+      `&alternatives=${alternatives}`,
     { method: "GET" }
   );
   if (!res.ok) throw new Error(`open router ${res.status}`);
@@ -146,6 +157,8 @@ Deno.serve(async (req) => {
     const from = point(body?.from);
     const to = point(body?.to);
     if (!from || !to) return json(400, { error: "A route needs both ends" });
+    // Asked for only when the chauffeur is about to be shown a choice
+    const alternatives = body?.alternatives === true;
     const address = typeof body?.address === "string" ? body.address.slice(0, 200) : "";
     const heading =
       typeof body?.heading === "number" && Number.isFinite(body.heading)
@@ -173,7 +186,7 @@ Deno.serve(async (req) => {
         return json(200, {
           provider: "google",
           withTraffic: true,
-          route: await askGoogle(from, to, address, heading, key),
+          route: await askGoogle(from, to, address, heading, key, alternatives),
         });
       } catch (err) {
         // Most likely the Routes API is not switched on for this key yet. The
@@ -185,7 +198,7 @@ Deno.serve(async (req) => {
     return json(200, {
       provider: "open",
       withTraffic: false,
-      route: await askOpenRouter(from, to),
+      route: await askOpenRouter(from, to, alternatives),
     });
   } catch (error) {
     console.error("route error:", error);

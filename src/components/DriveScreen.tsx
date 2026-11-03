@@ -352,6 +352,9 @@ const DriveScreen = ({
             address: forAddress,
             heading: from.heading,
             reference,
+            // Only on the first route to this address, which is the only
+            // time the choice is put up
+            alternatives: offeredFor.current !== forAddress,
           },
         });
         if (error || data?.error) return { failed: await reasonFor(error, data) };
