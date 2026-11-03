@@ -352,7 +352,22 @@ different code path with a different message, so treat it as D4 until proven
 otherwise.
 
 ### D21. "Could not work out a route just now"
-**FIXED, likely cause. Not released.** Screenshot 11:09, 2 Nov.
+**CAUSE STILL UNKNOWN. Two real repairs made anyway.** Screenshot 11:09, 2 Nov.
+
+My first reading of this was wrong and I have taken it out. I said Google
+answers with an empty list and we failed to fall back. It does, and we already
+did: the call throws on an empty list and the open router is asked. The check
+I added could never have fired. Dead code with a confident comment on it is
+worse than none, so it is gone.
+
+What is actually left: Google returned something, and our reader made nothing
+of it. That happens when a route comes back with no steps on it. So the
+route's own line is now asked for as well and used when the steps are empty,
+which means such a route is drawn and driven instead of stopping the car. And
+when nothing usable comes back at all, the chauffeur is told there is no route
+to the address rather than being handed the word "shape".
+
+Still wants the route function's log for 11:09 on 2 Nov to be certain.
 
 Found in the code rather than in a log, so it is a strong reading and not a
 certainty. Google answers quite happily with an empty list when it cannot
