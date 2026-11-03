@@ -247,6 +247,23 @@ const Driver = () => {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["driver-day"] }),
   });
 
+  /**
+   * The last registration Dispatch gave us for each job.
+   *
+   * The car came off a running job whenever a live lookup came back empty,
+   * so a chauffeur halfway through a City job watched the registration
+   * disappear off his own screen. Nothing had happened to the booking: we
+   * simply had no answer that minute. The last one we were given is a truer
+   * thing to show than nothing at all.
+   */
+  const seenReg = useRef<Record<string, string>>({});
+  useEffect(() => {
+    for (const job of (data?.jobs ?? []) as Job[]) {
+      if (job.vehicleRegistration) seenReg.current[job.reference] = job.vehicleRegistration;
+    }
+  }, [data]);
+  const regFor = (job: Job) => job.vehicleRegistration || seenReg.current[job.reference] || "";
+
   // One job in hand, the rest waiting, the finished ones out of the way. A job
   // cleared here stays cleared even if a refresh has not caught up.
   const { current, queue, done } = splitJobs((data?.jobs ?? []) as Job[], clearedHere);
@@ -567,7 +584,7 @@ const Driver = () => {
             </p>
             <p className="text-smoke text-xs mt-1">
               {job.vehicle}
-              {job.vehicleRegistration ? ` · ${job.vehicleRegistration}` : ""}
+              {regFor(job) ? ` · ${regFor(job)}` : ""}
               {job.passengers ? ` · ${job.passengers} up` : ""}
             </p>
           </div>
