@@ -128,6 +128,53 @@ is("and not to the members' page", r.texts[0]?.includes("www.apexiavip.com/booki
 r = await run({ status: "Pending", notified_status: null, corporate: null });
 is("a member booking still links to their own bookings", r.texts[0]?.includes("www.apexiavip.com/bookings"), true);
 
+/*
+ * Calling the chauffeurs on.
+ *
+ * The bug this locks down: the two hour nudge was bounded only at the far
+ * end, so a job ten minutes away matched it, and a chauffeur with ten
+ * minutes would have been texted that he had two hours and then texted
+ * again by the one hour nudge on top.
+ *
+ * The sweep is kept quiet throughout by giving the booking the status it
+ * has already been told about, so every text here is a call on.
+ */
+dispatchStatus = "On Route";
+const callOn = (minutes, over = {}) =>
+  run({
+    status: "On Route",
+    notified_status: "On Route",
+    driver_moment: "onroute",
+    collection_at: new Date(Date.now() + minutes * 60e3).toISOString(),
+    driver_id: "drv-1",
+    name: "Abdulla Khouri",
+    pickup: { line1: "Manchester Airport", town: "Terminal 2" },
+    __profiles: [{ id: "drv-1", phone: "+447700900555" }],
+    ...over,
+  });
+
+r = await callOn(90);
+is("a chauffeur ninety minutes out is called on once", r.texts.length, 1);
+is("and told the time of the collection", r.texts[0]?.includes("you are on at"), true);
+is("and where he is going", r.texts[0]?.includes("Manchester Airport"), true);
+is("and who for", r.texts[0]?.includes("Abdulla Khouri"), true);
+
+r = await callOn(10);
+is("a chauffeur ten minutes out is called on once, not twice", r.texts.length, 1);
+is("and is never told he has two hours", r.texts[0]?.toLowerCase().includes("two hours"), false);
+
+r = await callOn(90, { called_on_2h_at: new Date().toISOString() });
+is("a chauffeur already called on at two hours is left alone", r.texts.length, 0);
+
+r = await callOn(30, { chauffeur_ack_at: new Date().toISOString(), chauffeur_ack: "on_the_way" });
+is("a chauffeur who has answered is never chased again", r.texts.length, 0);
+
+r = await callOn(240);
+is("a job four hours out is not called on yet", r.texts.length, 0);
+
+r = await callOn(90, { __profiles: [] });
+is("a chauffeur with no mobile on file costs us nothing but a log line", r.texts.length, 0);
+
 
 // --- Dispatch refuses a recheck inside 30 seconds, and refuses the whole
 // request when it does. One member watching their car must not cost every
