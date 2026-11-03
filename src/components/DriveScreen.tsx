@@ -332,7 +332,9 @@ const DriveScreen = ({
             ? fromGoogle(data.route)
             : fromOsrm(data.route, data.withTraffic === true);
         if (!worked) {
-          return { failed: `The ${data.provider} route came back in a shape we could not read.` };
+          // Engineer's words on a chauffeur's screen, and no use to him. By
+          // the time it says this, both routers have been tried.
+          return { failed: "No route could be found to this address." };
         }
         spoken.current = new Set();
         // Put the car on the new route straight away, from the fix the route

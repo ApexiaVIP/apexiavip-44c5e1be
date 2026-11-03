@@ -339,13 +339,17 @@ describe("the screen a chauffeur drives by", () => {
       expect(await screen.findByText(/a route needs both ends/i)).toBeInTheDocument();
     });
 
-    it("says so when the route arrives in a shape it cannot read", async () => {
+    /**
+     * Both routers have been tried by the time this shows, so the chauffeur
+     * is told there is no route rather than being handed the word "shape".
+     */
+    it("says there is no route when nothing usable comes back", async () => {
       invoke.mockResolvedValue({
         data: { provider: "open", withTraffic: false, route: { routes: [] } },
         error: null,
       });
       driving();
-      expect(await screen.findByText(/shape we could not read/i)).toBeInTheDocument();
+      expect(await screen.findByText(/no route could be found/i)).toBeInTheDocument();
     });
 
     it("keeps no reason from a failure that is not about the route", async () => {

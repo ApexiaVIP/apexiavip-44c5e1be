@@ -161,11 +161,18 @@ Deno.serve(async (req) => {
     const key = Deno.env.get("GOOGLE_MAPS_API_KEY") ?? "";
     if (key) {
       try {
-        return json(200, {
-          provider: "google",
-          withTraffic: true,
-          route: await askGoogle(from, to, address, heading, key),
-        });
+        const route = await askGoogle(from, to, address, heading, key);
+        // Google answers perfectly happily with an empty list when it cannot
+        // find a way through: a door inside a pedestrian area, a car park
+        // entrance, a point sat just off the road network. That came back to
+        // the chauffeur as a route in a shape we could not read, which is
+        // both wrong and no use to him. It is not a fault, it is a reason to
+        // ask the other router, which is far less fussy about where it starts.
+        const found = (route as { routes?: unknown[] } | null)?.routes;
+        if (Array.isArray(found) && found.length > 0) {
+          return json(200, { provider: "google", withTraffic: true, route });
+        }
+        console.error("route: google found no way to", address || `${to.lat},${to.lng}`);
       } catch (err) {
         // Most likely the Routes API is not switched on for this key yet. The
         // chauffeur still gets a route, it just does not know the traffic.
