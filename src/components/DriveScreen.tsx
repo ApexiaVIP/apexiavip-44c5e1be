@@ -283,9 +283,24 @@ const DriveScreen = ({
   const askedFrom = useRef<LatLng | null>(null);
 
   const where = what === "pickup" ? "the collection" : "the destination";
-  const address = useMemo(() => destinationQuery(to), [to]);
+  /**
+   * An address the chauffeur typed because the job's own will not navigate.
+   *
+   * It is used to drive by and nothing else: the job keeps the address the
+   * office gave it. The moment that address becomes usable it wins again,
+   * so a passenger sending somewhere else is never overridden by this.
+   */
+  const [typed, setTyped] = useState<PlaceSuggestion | null>(null);
+  const aiming = useMemo(
+    () =>
+      postcodeFor(to) || !typed
+        ? to
+        : { line1: typed.line1, town: typed.town, postcode: typed.postcode },
+    [to, typed]
+  );
+  const address = useMemo(() => destinationQuery(aiming), [aiming]);
   /** The postcode to aim at, wherever in the address it was written. */
-  const aimAt = useMemo(() => postcodeFor(to), [to]);
+  const aimAt = useMemo(() => postcodeFor(aiming), [aiming]);
 
   /**
    * Ask for a route from wherever the car is now.
@@ -349,11 +364,20 @@ const DriveScreen = ({
    */
   const askingWhere = asDirected && what === "dropoff" && !aimAt && !!onDestination;
 
+  /**
+   * The job has an address and the sat nav cannot work with it.
+   *
+   * This used to be a dead end: a chauffeur at the kerb got the reason and
+   * two buttons, neither of which got him moving. Asking him for one is the
+   * only thing that does, and it beats him leaving the app to do it.
+   */
+  const cannotAim = !askingWhere && !aimAt;
+
   /** Find the door, find the car, and work out the way there. */
   useEffect(() => {
     let dropped = false;
     const begin = async () => {
-      if (askingWhere) {
+      if (askingWhere || cannotAim) {
         setStage("asking");
         return;
       }
@@ -407,7 +431,7 @@ const DriveScreen = ({
     return () => {
       dropped = true;
     };
-  }, [aimAt, plot, askingWhere, attempt, address]);
+  }, [aimAt, plot, askingWhere, cannotAim, attempt, address]);
 
   /** Have another go at finding the way, after a route would not come. */
   const tryAgain = useCallback(() => {
@@ -716,17 +740,20 @@ const DriveScreen = ({
       {stage === "asking" && (
         <div className="absolute inset-0 flex flex-col justify-center gap-4 px-5">
           <p className="text-center text-sm text-foreground">
-            Your passenger is aboard. Where have they asked for?
+            {askingWhere
+              ? "Your passenger is aboard. Where have they asked for?"
+              : `There is no postcode on this job, so the sat nav cannot take you to ${where}.`}
           </p>
           <DestinationBox
             chosen={null}
             changing={false}
             onChange={() => undefined}
-            onPick={(picked) => onDestination?.(picked)}
+            onPick={(picked) => (askingWhere ? onDestination?.(picked) : setTyped(picked))}
           />
           <p className="text-center text-[11px] text-smoke leading-relaxed">
-            Search the place, the address or the postcode. Driving starts as soon as you
-            pick it, and the address goes on the job for the office.
+            {askingWhere
+              ? "Search the place, the address or the postcode. Driving starts as soon as you pick it, and the address goes on the job for the office."
+              : "Search it and driving starts as soon as you pick it. The job keeps the address the office gave it."}
           </p>
           <button
             type="button"

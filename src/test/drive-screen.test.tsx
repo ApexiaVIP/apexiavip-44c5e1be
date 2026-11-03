@@ -276,14 +276,15 @@ describe("the screen a chauffeur drives by", () => {
   });
 
   /**
-   * A route can fail for a tunnel or an underground car park, and the answer
-   * to that is to ask again. Sending the chauffeur out to another app is the
-   * one thing that stops the passenger seeing the car at all.
+   * An address the sat nav cannot use is no longer a dead end. The chauffeur
+   * is asked for one, because that is the only thing that gets him moving,
+   * and he is never sent out to another app to find it: leaving the app is
+   * what stops the passenger seeing the car at all.
    */
-  it("says why it cannot route, and offers another go rather than another app", async () => {
+  it("asks for an address it cannot use, rather than sending the chauffeur out", async () => {
     driving({ to: { line1: "Somewhere", town: "Manchester", postcode: "" } });
-    expect(await screen.findByRole("button", { name: /try again/i })).toBeInTheDocument();
-    expect(screen.getByText(/no postcode/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no postcode on this job/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/address, place or postcode/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /waze/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /maps/i })).not.toBeInTheDocument();
   });
@@ -390,17 +391,24 @@ describe("the screen a chauffeur drives by", () => {
   });
 
   /**
-   * A booked journey with no address is still a fault: the office should have
-   * put one on the job, and there is nobody in the car to ask.
+   * A booked journey with no usable address was a fault and nothing else, on
+   * the grounds that the office should have put one on the job. True, and no
+   * use whatever to a chauffeur stood outside Signature Aviation at five in
+   * the morning. He is asked for one, and it is used to drive by: the job
+   * keeps the address the office gave it, so nothing is quietly rewritten.
    */
-  it("still calls a missing address a fault on a booked journey", async () => {
+  it("asks for an address on a booked journey too, rather than dead-ending", async () => {
+    const onDestination = vi.fn();
     driving({
       what: "dropoff",
       status: "pob",
       to: { line1: "Somewhere", town: "Manchester", postcode: "" },
-      onDestination: vi.fn(),
+      onDestination,
     });
-    expect(await screen.findByRole("button", { name: /try again/i })).toBeInTheDocument();
+    expect(await screen.findByText(/no postcode on this job/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/address, place or postcode/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
+    expect(onDestination).not.toHaveBeenCalled();
   });
 
   it("drives on once the destination has been put in", async () => {
