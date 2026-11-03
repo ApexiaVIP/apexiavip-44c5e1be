@@ -88,25 +88,58 @@ export const currentPlace = async (): Promise<Place> => {
  * continuously either way, so a shorter beat costs battery nothing and only
  * adds a small request. Returns a function that stops it.
  */
+/** Past this with no fix, the car on the passenger's map has stopped moving. */
+const REPORTING_STALE_MS = 90_000;
+
 export const followPosition = (
   onFix: (lat: number, lng: number) => void,
-  everyMs = 6000
+  everyMs = 6000,
+  /**
+   * Called when the phone stops giving positions, and again with null once
+   * it starts.
+   *
+   * This used to be swallowed on the grounds that a chauffeur hears about it
+   * when they press Wait or Clear. That is the end of the job. In between, a
+   * passenger watched a car sat still on Donkey Lane for eighteen minutes
+   * and the chauffeur driving it had no idea anything was wrong.
+   */
+  onTrouble?: (why: string | null) => void
 ): (() => void) => {
   if (typeof navigator === "undefined" || !navigator.geolocation) return () => {};
   let latest: { lat: number; lng: number } | null = null;
+  let lastAt = 0;
+  let troubled = false;
+
+  const trouble = (why: string | null) => {
+    const now = why !== null;
+    if (now === troubled) return;
+    troubled = now;
+    onTrouble?.(why);
+  };
 
   const watch = navigator.geolocation.watchPosition(
     (position) => {
       latest = { lat: position.coords.latitude, lng: position.coords.longitude };
+      lastAt = Date.now();
+      trouble(null);
     },
-    () => {
-      // A refused or unavailable position is not worth shouting about here:
-      // the chauffeur is told once, when they press Wait or Clear
+    (err) => {
+      trouble(
+        err.code === err.PERMISSION_DENIED
+          ? "Location is off for this app, so your passenger cannot see the car."
+          : "Your phone is not giving a position, so your passenger cannot see the car."
+      );
     },
     { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 }
   );
 
   const beat = setInterval(() => {
+    // A watch that simply goes quiet raises no error at all, which is what a
+    // tunnel and a backgrounded app both look like
+    if (!lastAt || Date.now() - lastAt > REPORTING_STALE_MS) {
+      trouble("Your phone has stopped reporting where you are.");
+      return;
+    }
     if (latest) onFix(latest.lat, latest.lng);
   }, everyMs);
 

@@ -207,6 +207,8 @@ const Driver = () => {
   /** A note being written, and a note being changed. */
   const [noteText, setNoteText] = useState("");
   const [editingNote, setEditingNote] = useState<{ id: string; text: string } | null>(null);
+  /** Why the passenger's map has stopped moving, when it has. */
+  const [notReporting, setNotReporting] = useState<string | null>(null);
   // Jobs cleared in this session. A refresh that has not caught up yet must
   // never put a finished job back in the chauffeur's hands.
   const [clearedHere, setClearedHere] = useState<string[]>([]);
@@ -290,22 +292,27 @@ const Driver = () => {
     // the passenger's map then freezes until the job ends. Holding the screen
     // on keeps a mounted phone reporting for the whole journey.
     const releaseScreen = keepScreenAwake();
-    const stopFollowing = followPosition((lat, lng) => {
-      void supabase.functions.invoke("driver", {
-        body: {
-          action: "position",
-          reference: reportingFor,
-          lat,
-          lng,
-          // Whatever the navigation last worked out, so the passenger is
-          // reading the same arrival time the chauffeur is driving to
-          etaSeconds: etaSeconds.current,
-        },
-      });
-    });
+    const stopFollowing = followPosition(
+      (lat, lng) => {
+        void supabase.functions.invoke("driver", {
+          body: {
+            action: "position",
+            reference: reportingFor,
+            lat,
+            lng,
+            // Whatever the navigation last worked out, so the passenger is
+            // reading the same arrival time the chauffeur is driving to
+            etaSeconds: etaSeconds.current,
+          },
+        });
+      },
+      undefined,
+      setNotReporting
+    );
     return () => {
       stopFollowing();
       releaseScreen();
+      setNotReporting(null);
     };
   }, [reportingFor]);
 
@@ -834,7 +841,18 @@ const Driver = () => {
                     </div>
                   )}
                   <div className="border border-border p-5">{jobHead(current)}</div>
-                  {reportingFor === current.reference && (
+                  {/* The passenger's map has stopped moving and only the
+                      chauffeur can do anything about it */}
+                  {notReporting && reportingFor === current.reference && (
+                    <div className="border border-champagne bg-champagne/10 px-4 py-3">
+                      <p className="text-sm text-foreground">{notReporting}</p>
+                      <p className="text-smoke text-xs mt-1">
+                        Keep this screen open and check location is on for Apexia. It fixes
+                        itself as soon as a position comes through.
+                      </p>
+                    </div>
+                  )}
+                  {reportingFor === current.reference && !notReporting && (
                     <p className="text-smoke/70 text-[11px] tracking-[0.1em] flex items-center gap-2">
                       <Navigation className="w-3 h-3 text-champagne" />
                       Leave this screen open so your passenger can follow the car
