@@ -46,6 +46,30 @@ const UNDO_CLEAR_MINUTES = 30;
 const DISCOVER_BEHIND_HOURS = 12;
 const DISCOVER_AHEAD_HOURS = 48;
 
+/**
+ * Dispatch refuses a status check within thirty seconds of the last one for
+ * the same booking, and refuses the whole request when one booking in it is
+ * too soon.
+ *
+ * This asked about every booking in a sixty hour window, once a minute, for
+ * every chauffeur signed on, and recorded nothing. So one phone on a kerb
+ * held a lock on every reference in the diary, the five minute sweep walked
+ * into it believing the column, and the travel desk lost the chauffeur's name
+ * off a City job with a VVIP in the air. Keep these in step with
+ * booking-watch and src/lib/bookingLive.ts.
+ */
+const DISPATCH_RECHECK_MS = 30_000;
+const RECHECK_MARGIN_MS = 5_000;
+
+/**
+ * How many bookings one ask may carry.
+ *
+ * There was no limit at all, so the request grew with the diary and would
+ * have failed outright on a busy match week, silently, taking every
+ * chauffeur's new jobs with it.
+ */
+const MAX_ASKED = 60;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -239,7 +263,16 @@ Deno.serve(async (req) => {
         lat,
         lng,
       });
-      if (error) throw error;
+      if (error) {
+        // This came back to a chauffeur mid-job as "something went wrong",
+        // which named nothing and left nothing to look at afterwards. The
+        // address is the whole of an hourly hire, so a failure here is worth
+        // saying out loud and worth finding in a log.
+        console.error("destination not saved", reference, place, error);
+        return json(500, {
+          error: "That address would not save. Try once more, then tell the office.",
+        });
+      }
       return json(200, { success: true });
     }
 
@@ -389,18 +422,40 @@ Deno.serve(async (req) => {
     if (myKey && DISPATCH_TRANSFER_REFERENCE) {
       const from = new Date(Date.now() - DISCOVER_BEHIND_HOURS * 3600 * 1000).toISOString();
       const to = new Date(Date.now() + DISCOVER_AHEAD_HOURS * 3600 * 1000).toISOString();
+      // Only what this ask is for: jobs going spare, which is the whole point
+      // of discovery, and this chauffeur's own, which is where the car and
+      // the live status on their screen come from. Everybody else's jobs were
+      // being asked about for no reason a minute at a time.
       const { data: candidates } = await admin
         .from("bookings")
-        .select("reference, driver_id")
+        .select("reference, driver_id, status_checked_at")
         .not("reference", "is", null)
         .not("collection_at", "is", null)
         .gte("collection_at", from)
         .lte("collection_at", to)
         .not("status", "in", '("Cancelled","Failed")')
-        .order("collection_at");
+        .or(`driver_id.is.null,driver_id.eq.${user.id}`)
+        .order("collection_at")
+        .limit(MAX_ASKED);
 
-      const refs = (candidates ?? []).map((b) => b.reference as string);
+      // One booking asked about too soon loses the answer for every other
+      // booking in the same request, so the ones still inside their thirty
+      // seconds are left out rather than taking the rest down with them
+      const askedTooRecently = Date.now() - (DISPATCH_RECHECK_MS + RECHECK_MARGIN_MS);
+      const askable = (candidates ?? []).filter((b) => {
+        const last = b.status_checked_at ? Date.parse(b.status_checked_at as string) : NaN;
+        return Number.isNaN(last) || last < askedTooRecently;
+      });
+
+      const refs = askable.map((b) => b.reference as string);
       if (refs.length > 0) {
+        // Dispatch starts its clock on everything it is asked about, whatever
+        // it then answers, so this is written before the answer is read. Not
+        // writing it is what let this function trip the sweep up.
+        await admin
+          .from("bookings")
+          .update({ status_checked_at: new Date().toISOString() })
+          .in("reference", refs);
         const auth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
         try {
           const res = await fetch(
@@ -421,9 +476,20 @@ Deno.serve(async (req) => {
             }
             const newlyMine: string[] = [];
             let driverName = "";
-            for (const candidate of candidates ?? []) {
+            for (const candidate of askable) {
               const live = dispatchStatus.get(candidate.reference as string);
               const driver = live?.Driver as { Mobile?: string; Name?: string } | undefined;
+              // A job allocated to a chauffeur whose mobile we cannot match is
+              // a job that reaches nobody, and it used to happen in silence.
+              // This is the only trace there is until the desk gets a screen
+              // for it, which wants a table and so wants a migration.
+              if (candidate.driver_id === null && driver?.Name && !driver.Mobile) {
+                console.error(
+                  "Dispatch names a chauffeur with no mobile on",
+                  candidate.reference,
+                  driver.Name
+                );
+              }
               if (!driver?.Mobile || phoneKey(driver.Mobile) !== myKey) continue;
               if (candidate.driver_id === user.id) continue;
               newlyMine.push(candidate.reference as string);
