@@ -270,8 +270,21 @@ serve(async (req) => {
         });
       }
 
+      // The log records which chauffeur every entry belongs to and will not
+      // take a row without one. This was left out when the passenger's own
+      // box was built, so every address a passenger ever gave was refused by
+      // the database and came back to them as "we could not pass that on".
+      // It is the chauffeur driving them, the same one the app is telling.
+      if (!booking.driver_id) {
+        return json(409, {
+          error:
+            "Your chauffeur has not started this journey yet. Your travel team can change it for you.",
+        });
+      }
+
       const { error: wayError } = await admin.from("booking_waypoints").insert({
         booking_reference: reference,
+        driver_id: booking.driver_id,
         kind: "destination",
         place,
         note: PASSENGER_ASKED,
