@@ -174,6 +174,17 @@ is("a job four hours out is not called on yet", r.texts.length, 0);
 
 r = await callOn(90, { __profiles: [] });
 is("a chauffeur with no mobile on file costs us nothing but a log line", r.texts.length, 0);
+// The heartbeat has to tell nothing being due from somebody we could not
+// reach, or a quiet zero looks like a quiet success
+is("and the sweep reports him as due", r.payload.calledOn?.due, 1);
+is("and reports that we could not reach him", r.payload.calledOn?.noMobile, 1);
+is("and does not claim to have texted him", r.payload.calledOn?.sent, 0);
+
+r = await callOn(90);
+is("a chauffeur we did reach is reported as texted", r.payload.calledOn?.sent, 1);
+
+r = await callOn(240);
+is("nothing due reports nothing due", r.payload.calledOn?.due, 0);
 
 
 // --- Dispatch refuses a recheck inside 30 seconds, and refuses the whole
