@@ -527,6 +527,41 @@ twice rather than a job logged late.
 
 ---
 
-## Batch 4
+## Batch 4: 3 Nov 2026
 
-Awaiting. Keep numbering from D31.
+### D31. Drivers seeing their hours, and the office seeing them too
+**FIXED, not released. NEEDS A MIGRATION RUN FIRST.** Faz and the team, 3 Nov.
+
+Asked for: a driver seeing what he has worked this month and what is left,
+and the office seeing the same when allocating, so everyone gets their
+contracted hours.
+
+Most of it already existed and nobody knew. Every sign on and sign off has
+been recorded since the shift clock went in, and a timesheet already goes to
+accounts daily and weekly. Three things were missing: showing a chauffeur his
+own figure, showing the office everybody's, and holding what each person is
+contracted to, which we held nowhere.
+
+The definition of an hour on duty has moved into `_shared/hours.ts` and all
+three now read from it. Three screens rounding three ways would be three
+answers to what somebody is owed.
+
+The office list is ordered by who is furthest behind their contract, because
+that is the order the question gets asked in. Anyone with no contract set
+sits at the bottom, since there is nothing to be behind.
+
+**Run `supabase/migrations/20261103180000_contracted_hours.sql` in Lovable.**
+Until it is run a chauffeur still sees his hours and the office still sees
+the list; the contracted figure reads "Not set" and nothing breaks.
+
+**Say this to the drivers when it goes out.** The clock is them signing on
+and signing off. Forget to sign off and it runs, capped at fourteen hours so
+a forgotten sign off cannot invent a weekend, and both screens say out loud
+when a shift was capped or left open rather than folding it quietly into the
+figure. Nobody should be paid off a number nobody checked.
+
+---
+
+## Batch 5
+
+Awaiting. Keep numbering from D32.
