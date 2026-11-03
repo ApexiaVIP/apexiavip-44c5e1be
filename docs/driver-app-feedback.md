@@ -163,7 +163,17 @@ two need separating: a stale position and a wrong position are different
 faults and right now they look identical to whoever is watching.
 
 ### D16. You cannot tell the cars apart on the map
-**NEEDS A DECISION, not a fix.** Faz 2 Nov.
+**NOT THIS APP. Moved to the dispatch build.** Faz 2 Nov, settled 3 Nov.
+
+Faz was describing the way Uber shows several cars on a customer's map, and
+what the call centre will need once our own dispatch is live: one map with
+every chauffeur on it. Neither is this app. It goes on the dispatch platform's
+list, where the live map already is, and the registration or the name on each
+marker is a requirement of that screen rather than a fix here.
+
+Kept in this register only so it is not raised here a third time.
+
+The original note, which stands as the reason it is not buildable here:
 
 Faz wants the registration or the chauffeur's name on the marker so that with
 several cars out you can tell which is which.
