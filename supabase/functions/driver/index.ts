@@ -225,6 +225,82 @@ Deno.serve(async (req) => {
       return json(200, { success: true, reference, driver_status: kind });
     }
 
+    // --- A note on the job, written as it happens ---
+    /**
+     * Anything worth recording that is not a step.
+     *
+     * Faz asked for it: drinks bought and paid for on an Amex, a wait nobody
+     * booked, a change the passenger made in the car. It goes in the same
+     * list as the steps, in the order it happened, and travels with the job
+     * to the office and to accounts.
+     *
+     * Editable until the office has been sent the job, because a note is
+     * written one-handed at a kerb and the first go is rarely the right one.
+     * After that it is a record, and a record that can be rewritten after it
+     * has been acted on is not a record.
+     */
+    if (action === "note" || action === "note_edit") {
+      const text = typeof body.note === "string" ? body.note.trim().slice(0, 500) : "";
+      if (!text) return json(400, { error: "Nothing to record" });
+
+      if (action === "note") {
+        const reference =
+          typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
+        if (!reference) return json(400, { error: "Which job?" });
+        const { data: job } = await admin
+          .from("bookings")
+          .select("reference, driver_id")
+          .eq("reference", reference)
+          .maybeSingle();
+        if (!job || job.driver_id !== user.id) {
+          return json(403, { error: "That job is not assigned to you" });
+        }
+        const { error } = await admin.from("booking_waypoints").insert({
+          booking_reference: reference,
+          driver_id: user.id,
+          kind: "note",
+          place: "",
+          note: text,
+        });
+        if (error) {
+          console.error("note not saved", reference, error);
+          return json(500, { error: "That note would not save. Try once more." });
+        }
+        return json(200, { success: true });
+      }
+
+      const id = typeof body.id === "string" ? body.id : "";
+      if (!id) return json(400, { error: "Which note?" });
+      const { data: entry } = await admin
+        .from("booking_waypoints")
+        .select("id, booking_reference, driver_id, kind")
+        .eq("id", id)
+        .maybeSingle();
+      if (!entry || entry.driver_id !== user.id || entry.kind !== "note") {
+        return json(403, { error: "That note is not yours" });
+      }
+      const { data: job } = await admin
+        .from("bookings")
+        .select("job_report_sent_at")
+        .eq("reference", entry.booking_reference as string)
+        .maybeSingle();
+      if (job?.job_report_sent_at) {
+        return json(400, {
+          error: "The office has already been sent this job. Ring them to change it.",
+        });
+      }
+      const { error } = await admin
+        .from("booking_waypoints")
+        .update({ note: text })
+        .eq("id", id)
+        .eq("driver_id", user.id);
+      if (error) {
+        console.error("note not changed", id, error);
+        return json(500, { error: "That change would not save. Try once more." });
+      }
+      return json(200, { success: true });
+    }
+
     // --- Answering a call on ---
     /**
      * The chauffeur telling the office they are up, or already moving.

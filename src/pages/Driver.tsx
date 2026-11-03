@@ -204,6 +204,9 @@ const Driver = () => {
   const [waitFix, setWaitFix] = useState<{ lat?: number; lng?: number }>({});
   const [locating, setLocating] = useState(false);
   const [showEarlier, setShowEarlier] = useState(false);
+  /** A note being written, and a note being changed. */
+  const [noteText, setNoteText] = useState("");
+  const [editingNote, setEditingNote] = useState<{ id: string; text: string } | null>(null);
   // Jobs cleared in this session. A refresh that has not caught up yet must
   // never put a finished job back in the chauffeur's hands.
   const [clearedHere, setClearedHere] = useState<string[]>([]);
@@ -592,6 +595,20 @@ const Driver = () => {
     });
   };
 
+  const addNote = (job: Job) => {
+    const note = noteText.trim();
+    if (!note) return;
+    setNoteText("");
+    act.mutate({ action: "note", reference: job.reference, note });
+  };
+
+  const saveNote = () => {
+    const edit = editingNote;
+    if (!edit || !edit.text.trim()) return;
+    setEditingNote(null);
+    act.mutate({ action: "note_edit", id: edit.id, note: edit.text.trim() });
+  };
+
   /** Where this hourly hire is heading, as last said by the passenger. */
   const named = (job: Job) => destinationNow(waypoints, job.reference);
 
@@ -825,6 +842,29 @@ const Driver = () => {
                   )}
                   <div>{bigButtons(current)}</div>
 
+                  {/* Anything worth recording that is not a step: drinks on
+                      an Amex, a wait nobody booked, a change made in the car */}
+                  {current.driver_status && current.driver_status !== "clear" && (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={noteText}
+                        onChange={(e) => setNoteText(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && addNote(current)}
+                        placeholder="Add a note, e.g. drinks paid by Amex"
+                        className="h-12 rounded-none text-base"
+                        maxLength={500}
+                      />
+                      <Button
+                        variant="outline"
+                        disabled={act.isPending || !noteText.trim()}
+                        onClick={() => addNote(current)}
+                        className="h-12 px-5 rounded-none text-xs tracking-[0.15em] uppercase flex-none"
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  )}
+
                   {/* What has happened on this job so far */}
                   {(() => {
                     const mine = waypoints.filter((w) => w.booking_reference === current.reference);
@@ -837,9 +877,44 @@ const Driver = () => {
                               {ukTime(w.recorded_at)}
                             </span>
                             <span className="text-champagne flex-none">{stepLabel[w.kind]}</span>
-                            <span className="text-smoke">
-                              {[w.place, w.note].filter(Boolean).join(" · ")}
-                            </span>
+                            {/* A note is written one-handed at a kerb, so the
+                                first go is rarely the right one. Tap it to
+                                put it right, until the office has the job. */}
+                            {w.kind === "note" && !current.job_report_sent_at ? (
+                              editingNote?.id === w.id ? (
+                                <span className="flex-1 flex items-center gap-2">
+                                  <Input
+                                    autoFocus
+                                    value={editingNote.text}
+                                    onChange={(e) =>
+                                      setEditingNote({ id: w.id, text: e.target.value })
+                                    }
+                                    onKeyDown={(e) => e.key === "Enter" && saveNote()}
+                                    className="h-9 rounded-none text-sm"
+                                    maxLength={500}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={saveNote}
+                                    className="text-champagne tracking-[0.15em] uppercase text-[10px] flex-none"
+                                  >
+                                    Save
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingNote({ id: w.id, text: w.note })}
+                                  className="text-smoke text-left underline decoration-dotted underline-offset-4"
+                                >
+                                  {w.note}
+                                </button>
+                              )
+                            ) : (
+                              <span className="text-smoke">
+                                {[w.place, w.note].filter(Boolean).join(" · ")}
+                              </span>
+                            )}
                           </li>
                         ))}
                       </ul>
