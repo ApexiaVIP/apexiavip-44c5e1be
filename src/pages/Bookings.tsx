@@ -4,6 +4,7 @@ import { ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
 import MemberLayout from "@/components/MemberLayout";
 import { GET_APP_URL, isInstalledApp } from "@/lib/appLinks";
 import TrackMap from "@/components/TrackMap";
+import ArrivalTime from "@/components/ArrivalTime";
 import {
   ACTIVE_STATUSES,
   DRIVER_STATUS_AS_DISPATCH,
@@ -16,7 +17,6 @@ import {
   stillRunning,
 } from "@/lib/bookingLive";
 import { locationFreshness } from "@/lib/locationAge";
-import { whenDue } from "@/lib/eta";
 import { canAskChauffeur, hasSetOff } from "@/lib/whereTo";
 import WhereTo from "@/components/WhereTo";
 import { supabase } from "@/integrations/supabase/client";
@@ -460,16 +460,17 @@ const Bookings = () => {
 
         {mapVisible && (
           <div className="space-y-2">
-            {(() => {
-              const due = whenDue(b.driver_eta_at, b.driver_position_at, b.driver_status);
-              if (!due) return null;
-              return (
-                <div className="border border-champagne-muted bg-champagne/5 px-4 py-3">
-                  <p className="text-champagne text-lg font-light tracking-wide">{due.headline}</p>
-                  <p className="text-smoke text-xs tracking-[0.1em] mt-0.5">{due.detail}</p>
-                </div>
-              );
-            })()}
+            <ArrivalTime
+              reference={b.reference ?? ""}
+              pickup={b.pickup}
+              dropoff={b.dropoff}
+              asDirected={b.journey_type === "hourly"}
+              driverStatus={b.driver_status}
+              driverLat={driverLat}
+              driverLng={driverLng}
+              positionAt={b.driver_position_at}
+              etaAt={b.driver_eta_at}
+            />
             <TrackMap
               lat={driverLat}
               lng={driverLng}

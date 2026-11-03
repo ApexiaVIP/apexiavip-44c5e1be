@@ -163,10 +163,21 @@ two need separating: a stale position and a wrong position are different
 faults and right now they look identical to whoever is watching.
 
 ### D16. You cannot tell the cars apart on the map
-**OPEN.** Faz 2 Nov.
+**NEEDS A DECISION, not a fix.** Faz 2 Nov.
 
-Every car is the same black marker. With a few out at once nobody knows which
-is which. Wanted: registration or chauffeur name on the marker.
+Faz wants the registration or the chauffeur's name on the marker so that with
+several cars out you can tell which is which.
+
+There is no map in this app that shows several cars. There are two maps and
+only two: the passenger's, which shows the one car coming for them, and the
+chauffeur's own driving map. Nothing renders a fleet. So either Faz means the
+live map in the separate dispatch platform, which is a different codebase, or
+he is asking for an operations map that does not exist yet and is a build of
+its own rather than a label on a marker.
+
+Worth asking him which he had in front of him. Labelling the passenger's
+marker would take ten minutes and answer nobody's actual problem: that card
+already names the chauffeur and the registration directly above the map.
 
 ### D17. Being on board should start the navigation
 **OPEN.** Faz 2 Nov. Same ground as D5.
@@ -218,7 +229,23 @@ otherwise.
 and we could not parse it. Needs the route function log for 11:09 on 2 Nov.
 
 ### D22. No arrival time once the passenger is aboard
-**OPEN.** Iman 2 Nov 14:46.
+**FIXED, not released.** Iman 2 Nov 14:46.
+
+The cause was not a missing feature. The arrival time has always handled a
+passenger on board, and the 07:33 and 08:28 screenshots show it working, with
+the aboard wording, on a journey to Keele. It only ever existed while the
+chauffeur was navigating in the app, because the number came from their sat
+nav and nowhere else. After D1 stopped City jobs navigating, Faz told the
+chauffeurs to ignore the drive button, and every passenger lost their arrival
+time the same morning. Nobody joined the two up, and the travel team went back
+to being rung and asked how long.
+
+The chauffeur's own number is still preferred, because it is the one they are
+driving to. Where there is none, the car's last position is now routed to
+where it is going, once a minute, and the passenger is told that instead. An
+hourly hire is the exception: where it is heading lives on the chauffeur's job
+and the passenger's phone has never been told, so there is still nothing to
+route to. That is D6 and D17 ground, not this.
 
 There is an arrival time while the car is coming to collect: the 08:28 and
 08:29 screenshots show "Arriving about 08:30, about 2 minutes away" and then
@@ -273,10 +300,13 @@ Both error messages sit over the header and the sign out link. Twice in two
 days, so it is where errors always land rather than bad luck.
 
 ### D28. "At your destination" when the car reaches the collection
-**OPEN. Wording.** Screenshot 08:29, 2 Nov.
+**WITHDRAWN. I was wrong.** Screenshot 08:29, 2 Nov.
 
-The passenger is told "Arriving now, At your destination" as the car pulls up
-to collect them. They are at their collection point, not their destination.
+I read that screenshot as a collection. It was not. "Arriving" and "At your
+destination" are only ever used once the passenger is aboard; a collection
+reads "Collecting you" and "At the collection point". The wording was correct
+and the passenger was on board on the way to Keele. Left in the list rather
+than deleted, so nobody goes looking for it twice.
 
 ### D29. A job worked in the morning read "Not started" that afternoon
 **OPEN. Verify before treating as a fault.** Screenshot 15:50, 31 Oct.

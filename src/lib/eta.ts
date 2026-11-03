@@ -77,3 +77,30 @@ export const whenDue = (
     detail: `about ${minutes} minute${minutes === 1 ? "" : "s"} away`,
   };
 };
+
+/**
+ * An arrival time we worked out ourselves, held at the moment we worked it out.
+ *
+ * The passenger's screen refreshes every four seconds while a car is out.
+ * Working the arrival back out from the clock each time would push it further
+ * away on every refresh, so the car would never appear to get any closer. The
+ * moment of the estimate travels with it and only the minutes count down.
+ *
+ * It is put through the same rules as the chauffeur's own number, so an
+ * estimate off a position that has since gone stale is dropped rather than
+ * quoted.
+ */
+export const dueFromRoute = (
+  worked: { seconds: number; at: number } | null | undefined,
+  positionAt: string | null | undefined,
+  driverStatus: string | null | undefined,
+  now: Date = new Date()
+): Due | null =>
+  worked
+    ? whenDue(
+        new Date(worked.at + worked.seconds * 1000).toISOString(),
+        positionAt,
+        driverStatus,
+        now
+      )
+    : null;

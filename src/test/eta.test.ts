@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { whenDue } from "@/lib/eta";
+import { whenDue, dueFromRoute } from "@/lib/eta";
 
 const now = new Date("2026-10-24T18:30:00Z");
 const inMinutes = (n: number) => new Date(now.getTime() + n * 60000).toISOString();
@@ -75,5 +75,47 @@ describe("when the passenger is told nothing", () => {
   it("says nothing when the dates are rubbish", () => {
     expect(whenDue("not a date", agoMinutes(0), "en_route", now)).toBeNull();
     expect(whenDue(inMinutes(7), "not a date", "en_route", now)).toBeNull();
+  });
+});
+
+/**
+ * The number we work out when the chauffeur is not navigating in the app,
+ * which is the only reason a passenger on board had no arrival time at all.
+ */
+describe("an arrival time we worked out ourselves", () => {
+  const at = Date.parse("2026-11-02T11:00:00Z");
+  const fresh = new Date(at).toISOString();
+
+  it("counts down as the minutes pass, rather than sliding away", () => {
+    const worked = { seconds: 20 * 60, at };
+    const first = dueFromRoute(worked, fresh, "pob", new Date(at));
+    // Four minutes on, not nine: past five the position itself is too old to
+    // quote from and the estimate is dropped, which is tested below
+    const later = dueFromRoute(worked, fresh, "pob", new Date(at + 4 * 60 * 1000));
+    expect(first?.detail).toBe("about 20 minutes away");
+    expect(later?.detail).toBe("about 16 minutes away");
+    // The arrival itself does not move, only the wait shortens
+    expect(later?.headline).toBe(first?.headline);
+  });
+
+  it("says the passenger is arriving once it is down to the last minute", () => {
+    const due = dueFromRoute({ seconds: 30, at }, fresh, "pob", new Date(at));
+    expect(due?.headline).toBe("Arriving now");
+    expect(due?.detail).toBe("At your destination");
+  });
+
+  it("drops an estimate once the position it came from has gone stale", () => {
+    const stale = new Date(at - 6 * 60 * 1000).toISOString();
+    expect(dueFromRoute({ seconds: 600, at }, stale, "pob", new Date(at))).toBeNull();
+  });
+
+  it("has nothing to say when no route came back", () => {
+    expect(dueFromRoute(null, fresh, "pob", new Date(at))).toBeNull();
+    expect(dueFromRoute(undefined, fresh, "pob", new Date(at))).toBeNull();
+  });
+
+  it("speaks as a collection while the car is still coming to get them", () => {
+    const due = dueFromRoute({ seconds: 15 * 60, at }, fresh, "en_route", new Date(at));
+    expect(due?.headline).toMatch(/^Collecting you about/);
   });
 });
