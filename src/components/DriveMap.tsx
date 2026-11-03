@@ -7,11 +7,11 @@ import { pickupElement } from "@/lib/trackMarker";
 import type { LatLng } from "@/lib/navRoute";
 import { openMapStyle, routeColours, type MapTheme } from "@/lib/mapTheme";
 import type { CameraOnRoute } from "@/lib/speedCameras";
+import { zoomFor } from "@/lib/navGuidance";
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
-/** Close enough to see which lane, tilted so the road ahead is visible. */
-const DRIVE_ZOOM = 16.8;
+/** Tilted so the road ahead is visible. How close it sits is zoomFor's. */
 const DRIVE_PITCH = 55;
 
 /**
@@ -37,6 +37,8 @@ interface Props {
   theme: MapTheme;
   /** The cameras on this route, already filtered to the road being driven. */
   cameras: CameraOnRoute[];
+  /** Metres to the next turn, which decides how close the map sits. */
+  toTurn: number | null;
 }
 
 /**
@@ -73,7 +75,7 @@ const asLine = (points: LatLng[]): GeoJSON.Feature<GeoJSON.LineString> => ({
  * at something, at which point it stays where they put it and offers to go
  * back. A map that fights the hand holding it is worse than no map.
  */
-const DriveMap = ({ line, car, lineIndex, course, to, theme, cameras }: Props) => {
+const DriveMap = ({ line, car, lineIndex, course, to, theme, cameras, toTurn }: Props) => {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const carRef = useRef<maplibregl.Marker | null>(null);
@@ -87,7 +89,7 @@ const DriveMap = ({ line, car, lineIndex, course, to, theme, cameras }: Props) =
       container: holder.current,
       style: openMapStyle(theme),
       center: [car.lng, car.lat],
-      zoom: DRIVE_ZOOM,
+      zoom: zoomFor(toTurn),
       pitch: DRIVE_PITCH,
       bearing: course,
       attributionControl: false,
@@ -219,13 +221,13 @@ const DriveMap = ({ line, car, lineIndex, course, to, theme, cameras }: Props) =
       center: [car.lng, car.lat],
       bearing: course,
       pitch: DRIVE_PITCH,
-      zoom: DRIVE_ZOOM,
+      zoom: zoomFor(toTurn),
       // Padding the top pushes the car down the screen, leaving the road ahead
       padding: { top: Math.round(map.getContainer().clientHeight * AHEAD_SHARE), bottom: 0, left: 0, right: 0 },
       duration: 900,
       easing: (t) => t,
     });
-  }, [car, course, following]);
+  }, [car, course, following, toTurn]);
 
   return (
     <div className="apx-drive absolute inset-0">

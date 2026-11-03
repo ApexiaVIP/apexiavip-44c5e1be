@@ -4,9 +4,9 @@ import { loadGoogleMaps, mapId, pointAhead, turnTowards } from "@/lib/googleMaps
 import type { LatLng } from "@/lib/navRoute";
 import { routeColours, type MapTheme } from "@/lib/mapTheme";
 import type { CameraOnRoute } from "@/lib/speedCameras";
+import { zoomFor } from "@/lib/navGuidance";
 
 /** Close enough to see which lane, tilted so the road ahead fills the screen. */
-const DRIVE_ZOOM = 17;
 const DRIVE_TILT = 60;
 
 /**
@@ -69,6 +69,8 @@ interface Props {
   theme: MapTheme;
   /** The cameras on this route, already filtered to the road being driven. */
   cameras: CameraOnRoute[];
+  /** Metres to the next turn, which decides how close the map sits. */
+  toTurn: number | null;
   /** Google would not load, so the screen can fall back to the other map. */
   onUnavailable: () => void;
 }
@@ -84,7 +86,7 @@ interface Props {
  * at something, at which point it stays where they put it and offers to go
  * back. A map that fights the hand holding it is worse than no map.
  */
-const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, cameras, onUnavailable }: Props) => {
+const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, cameras, toTurn, onUnavailable }: Props) => {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const carRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
@@ -128,7 +130,7 @@ const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, cameras, 
         const map = new maps.Map(holder.current, {
           mapId: mapId(),
           center: aim,
-          zoom: DRIVE_ZOOM,
+          zoom: zoomFor(toTurn),
           tilt: DRIVE_TILT,
           heading: course,
           disableDefaultUI: true,
@@ -324,13 +326,13 @@ const DriveMapGoogle = ({ line, car: at, lineIndex, course, to, theme, cameras, 
           center: { lat: at.lat, lng: at.lng },
           heading: ((at.heading % 360) + 360) % 360,
           tilt: DRIVE_TILT,
-          zoom: DRIVE_ZOOM,
+          zoom: zoomFor(toTurn),
         })
       );
       if (part < 1) gliding.current = requestAnimationFrame(walk);
     };
     gliding.current = requestAnimationFrame(walk);
-  }, [ready, at, course, following, guarded]);
+  }, [ready, at, course, following, guarded, toTurn]);
 
   return (
     <div className="absolute inset-0">

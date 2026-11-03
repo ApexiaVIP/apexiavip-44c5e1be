@@ -341,3 +341,29 @@ export const arrivalAt = (secondsLeft: number, now = new Date()): string =>
 /** Minutes left, never rounded down to nothing while the car is still moving. */
 export const minutesLeft = (secondsLeft: number): number =>
   secondsLeft > 0 ? Math.max(1, Math.round(secondsLeft / 60)) : 0;
+
+/**
+ * How close the map sits to the road, given how near the next turn is.
+ *
+ * It sat at one zoom the whole way, which is why the map was called too small
+ * and hard to follow: a junction that needs the lane markings shown is drawn
+ * at the same scale as an empty stretch of motorway. Every sat nav a
+ * chauffeur has used closes in as a turn comes up, so this does too, in two
+ * steps rather than continuously, because a map that creeps while you look
+ * at it is worse than one that moves once and settles.
+ */
+export const COASTING_ZOOM = 16.8;
+export const APPROACHING_ZOOM = 17.6;
+export const AT_THE_TURN_ZOOM = 18.4;
+
+/** Far enough out that the turn is still only something coming up. */
+const APPROACHING_M = 250;
+/** Close enough that the chauffeur needs the junction itself. */
+const AT_THE_TURN_M = 90;
+
+export const zoomFor = (toTurn: number | null | undefined): number => {
+  if (typeof toTurn !== "number" || !Number.isFinite(toTurn) || toTurn < 0) return COASTING_ZOOM;
+  if (toTurn <= AT_THE_TURN_M) return AT_THE_TURN_ZOOM;
+  if (toTurn <= APPROACHING_M) return APPROACHING_ZOOM;
+  return COASTING_ZOOM;
+};

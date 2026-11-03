@@ -11,8 +11,7 @@ import {
   offRoute,
   shownDistance,
   spokenDistance,
-  stepAt,
-} from "@/lib/navGuidance";
+  stepAt, zoomFor, COASTING_ZOOM, APPROACHING_ZOOM, AT_THE_TURN_ZOOM } from "@/lib/navGuidance";
 
 /** A tenth of a thousandth of a degree of latitude is about 111 metres. */
 const STEP_LAT = 0.001;
@@ -348,5 +347,28 @@ describe("when the car is due", () => {
     expect(minutesLeft(20)).toBe(1);
     expect(minutesLeft(0)).toBe(0);
     expect(minutesLeft(610)).toBe(10);
+  });
+});
+
+describe("how close the map sits as a turn comes up", () => {
+  it("stays out while there is nothing to do", () => {
+    expect(zoomFor(2000)).toBe(COASTING_ZOOM);
+    expect(zoomFor(251)).toBe(COASTING_ZOOM);
+  });
+
+  it("closes in as the junction comes up", () => {
+    expect(zoomFor(250)).toBe(APPROACHING_ZOOM);
+    expect(zoomFor(120)).toBe(APPROACHING_ZOOM);
+  });
+
+  it("closes in again at the junction itself", () => {
+    expect(zoomFor(90)).toBe(AT_THE_TURN_ZOOM);
+    expect(zoomFor(10)).toBe(AT_THE_TURN_ZOOM);
+  });
+
+  it("stays out when there is no turn to measure", () => {
+    expect(zoomFor(null)).toBe(COASTING_ZOOM);
+    expect(zoomFor(undefined)).toBe(COASTING_ZOOM);
+    expect(zoomFor(Number.NaN)).toBe(COASTING_ZOOM);
   });
 });
