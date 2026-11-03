@@ -10,6 +10,7 @@ import SignedAvatar from "@/components/SignedAvatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import DriverHours from "@/components/DriverHours";
 import {
   Dialog,
   DialogContent,
@@ -936,6 +937,9 @@ const Admin = () => {
           </p>
         ) : (
           <div className="space-y-12">
+            {/* Who is short of their contract, for whoever is allocating */}
+            <DriverHours />
+
             {/* Customers and chauffeurs are different jobs and different
                 conversations, so the office reads them separately */}
             {([

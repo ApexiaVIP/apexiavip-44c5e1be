@@ -30,6 +30,7 @@ import { splitJobs } from "@/lib/driverQueue";
 import { releaseLine } from "@/lib/release";
 import { canSayWhere, destinationNow, placeFrom } from "@/lib/asDirected";
 import DestinationBox from "@/components/DestinationBox";
+import MonthHours from "@/components/MonthHours";
 import type { PlaceSuggestion } from "@/lib/mfa";
 
 type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
@@ -828,6 +829,8 @@ const Driver = () => {
                   Sign off
                 </button>
               </div>
+
+          {onShift && <MonthHours />}
 
           {isLoading ? (
             <div className="py-16 text-center">
