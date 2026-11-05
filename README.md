@@ -137,3 +137,29 @@ screen is not the number Apple shipped and `release.ts` needs correcting.
 
 A valid build still reaches nobody until a tester is on the TestFlight list
 and the build is assigned to their group.
+
+## Getting a build to everyone
+
+Uploading is not releasing, and this is the step that gets forgotten. A build
+can sit at `VALID` for days while the App Store still serves the previous
+version, because the upload only puts it in TestFlight. Version 2.2 was
+uploaded on 3 November and nothing had been submitted by the 5th.
+
+`scripts/asc.py builds` says whether Apple has the build.
+`scripts/asc.py versions` says what the public can actually install. Read both.
+A build at `VALID` with no matching version row means nobody has it.
+
+Three separate audiences, three separate actions:
+
+- **Android drivers** already have it. The app is the website wrapped, so a
+  Vercel deploy reaches them with no build and no review.
+- **TestFlight.** Internal testers get the build within minutes and need no
+  review, but each one must be a user on the App Store Connect account.
+  External testers need only an email address, but the build goes through Beta
+  App Review first, which is usually under a day and occasionally two.
+- **The App Store.** In App Store Connect, add the iOS version, attach the
+  build, write the release notes, submit. Everything else (description,
+  keywords, screenshots, the reviewer's demo account and notes) is copied from
+  the previous version, so only the release notes need writing. Review is
+  normally 24 to 48 hours, and `releaseType: AFTER_APPROVAL` means it goes
+  live by itself once approved.
