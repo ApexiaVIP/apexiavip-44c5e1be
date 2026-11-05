@@ -34,6 +34,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import SavedAddressChips from "@/components/SavedAddressChips";
+import { pickDate } from "@/lib/pickDate";
 import { listAddresses, type SavedAddress } from "@/lib/addressBook";
 import LocationSearch from "@/components/LocationSearch";
 import type { PlaceSuggestion } from "@/lib/mfa";
@@ -215,6 +216,10 @@ const BookingForm = () => {
     useState<ReturnType<typeof availabilityReason>>(null);
   const [honeypot, setHoneypot] = useState("");
   const [countryCode, setCountryCode] = useState("+44");
+  // The date pickers close themselves. Left open, the only way out was to tap
+  // some innocent part of the screen, which Iman had to discover.
+  const [travelDateOpen, setTravelDateOpen] = useState(false);
+  const [returnDateOpen, setReturnDateOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const form = useForm<BookingFormValues>({
@@ -806,7 +811,7 @@ const BookingForm = () => {
                 <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
                   Date of Travel
                 </FormLabel>
-                <Popover>
+                <Popover open={travelDateOpen} onOpenChange={setTravelDateOpen}>
                   <PopoverTrigger asChild>
                     <FormControl>
                       <Button
@@ -829,7 +834,7 @@ const BookingForm = () => {
                     <Calendar
                       mode="single"
                       selected={field.value}
-                      onSelect={field.onChange}
+                      onSelect={pickDate(field.onChange, setTravelDateOpen)}
                       disabled={(date) => date < startOfToday()}
                       initialFocus
                       className={cn("p-3 pointer-events-auto")}
@@ -1227,7 +1232,7 @@ const BookingForm = () => {
                       <FormLabel className="text-smoke text-xs tracking-[0.2em] uppercase">
                         Return Date
                       </FormLabel>
-                      <Popover>
+                      <Popover open={returnDateOpen} onOpenChange={setReturnDateOpen}>
                         <PopoverTrigger asChild>
                           <FormControl>
                             <Button
@@ -1246,7 +1251,7 @@ const BookingForm = () => {
                           <Calendar
                             mode="single"
                             selected={field.value}
-                            onSelect={field.onChange}
+                            onSelect={pickDate(field.onChange, setReturnDateOpen)}
                             disabled={(date) => date < startOfToday()}
                             initialFocus
                             className={cn("p-3 pointer-events-auto")}
