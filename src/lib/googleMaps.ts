@@ -63,7 +63,7 @@ export const loadGoogleMaps = (): Promise<typeof google.maps> => {
     script.async = true;
     script.src =
       `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}` +
-      `&v=weekly&libraries=marker&language=en-GB&region=GB&loading=async&callback=${CALLBACK}`;
+      `&v=weekly&libraries=marker,geocoding&language=en-GB&region=GB&loading=async&callback=${CALLBACK}`;
     script.onerror = () => {
       window.clearTimeout(giveUp);
       fail(new Error("maps would not load"));

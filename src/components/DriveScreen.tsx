@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { lookUpPostcode, metresBetween } from "@/lib/trackMarker";
+import { metresBetween } from "@/lib/trackMarker";
+import { findDoor } from "@/lib/findDoor";
 import { destinationQuery, postcodeFor } from "@/lib/navigation";
 import DestinationBox from "./DestinationBox";
 import type { PlaceSuggestion } from "@/lib/mfa";
@@ -461,7 +462,9 @@ const DriveScreen = ({
         setStage("stuck");
         return;
       }
-      const door = await lookUpPostcode(postcode);
+      // The whole address, not the postcode alone: the postcode is only the
+      // fallback now, because its centroid is not the door
+      const door = await findDoor(aiming);
       if (dropped) return;
       if (!door) {
         setTrouble(`Could not find ${postcode} on the map.`);
