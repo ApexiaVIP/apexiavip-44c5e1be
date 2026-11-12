@@ -114,3 +114,21 @@ export function wazeLink(at: { lat: number; lng: number } | null, place: Place):
   const query = destinationQuery(place);
   return query ? `https://waze.com/ul?q=${encodeURIComponent(query)}&navigate=yes` : null;
 }
+
+/**
+ * The same destination as a link into the Waze app itself.
+ *
+ * The https link is the documented one and it does open Waze, but on iOS it
+ * arrives through Safari and the universal link handler, and the destination
+ * is dropped on the way: the app opens on the map with no journey set, which
+ * is exactly what a chauffeur reported. The app's own scheme is handed
+ * straight to Waze by the operating system, with nothing in between to lose
+ * the parameters.
+ *
+ * No ul in the path. waze://ul?... is the form that does nothing.
+ */
+export function wazeAppLink(at: { lat: number; lng: number } | null, place: Place): string | null {
+  if (at) return `waze://?ll=${at.lat},${at.lng}&navigate=yes`;
+  const query = destinationQuery(place);
+  return query ? `waze://?q=${encodeURIComponent(query)}&navigate=yes` : null;
+}

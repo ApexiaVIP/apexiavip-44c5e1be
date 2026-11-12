@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { destinationQuery, nextDestination, wazeLink } from "@/lib/navigation";
+import { destinationQuery, nextDestination, wazeAppLink, wazeLink } from "@/lib/navigation";
+import { handOffTo } from "@/lib/handOff";
 import { findDoor } from "@/lib/findDoor";
 import { survivesBackground } from "@/lib/positionSource";
 import { Link, Navigate } from "react-router-dom";
@@ -206,6 +207,10 @@ export function NavigateRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destinationQuery(place)]);
 
+  /** Calls off the web fallback if this screen goes away mid hand off. */
+  const leaving = useRef<(() => void) | null>(null);
+  useEffect(() => () => leaving.current?.(), []);
+
   const query = destinationQuery(place);
   if (!heading || !query) return null;
 
@@ -237,6 +242,16 @@ export function NavigateRow({
             href={waze}
             target="_blank"
             rel="noreferrer"
+            onClick={(event) => {
+              // The https link in href opens Waze but arrives without the
+              // destination, so the app's own scheme is tried first and the
+              // href is only the fallback
+              const app = wazeAppLink(door, place);
+              if (!app) return;
+              event.preventDefault();
+              leaving.current?.();
+              leaving.current = handOffTo(app, waze);
+            }}
             className="flex h-12 w-full items-center justify-center border border-champagne/40
                        text-xs font-light uppercase tracking-[0.12em] text-champagne"
           >

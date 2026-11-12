@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
 const backgrounds = vi.fn(() => true);
 const door = vi.fn(async (_place: unknown) => ({
@@ -27,6 +27,9 @@ vi.mock("@/lib/positionSource", () => ({
 }));
 
 vi.mock("@/lib/findDoor", () => ({ findDoor: (place: unknown) => door(place) }));
+
+const handOff = vi.fn((_app: string, _web: string | null) => () => {});
+vi.mock("@/lib/handOff", () => ({ handOffTo: (app: string, web: string | null) => handOff(app, web) }));
 
 const { NavigateRow } = await import("@/pages/Driver");
 
@@ -56,6 +59,7 @@ const job = {
 const wazeLinkOnScreen = () => screen.queryByRole("link", { name: /waze/i });
 
 beforeEach(() => {
+  handOff.mockReset().mockReturnValue(() => {});
   backgrounds.mockReset().mockReturnValue(true);
   door.mockReset().mockResolvedValue({ lat: 53.32036, lng: -2.23, precision: "address" });
 });
@@ -108,6 +112,19 @@ describe("the Waze button", () => {
     render(<NavigateRow job={{ ...job, driver_status: "pob" }} asDirected={false} onDrive={vi.fn()} />);
     await waitFor(() => expect(door).toHaveBeenCalled());
     expect(door).toHaveBeenCalledWith(expect.objectContaining({ line1: "The Lowry Hotel" }));
+  });
+
+  it("goes to the Waze app itself, which is the only form that navigates", async () => {
+    // Tapped, the https link opened Waze on the map with no journey set. The
+    // app scheme is handed over by the operating system with nothing in
+    // between to drop the destination.
+    render(<NavigateRow job={job} asDirected={false} onDrive={vi.fn()} />);
+    await waitFor(() => expect(wazeLinkOnScreen()).toBeInTheDocument());
+    fireEvent.click(wazeLinkOnScreen()!);
+    expect(handOff).toHaveBeenCalledWith(
+      "waze://?ll=53.32036,-2.23&navigate=yes",
+      "https://waze.com/ul?ll=53.32036%2C-2.23&navigate=yes"
+    );
   });
 
   it("tells the chauffeur the passenger can still see them", async () => {
