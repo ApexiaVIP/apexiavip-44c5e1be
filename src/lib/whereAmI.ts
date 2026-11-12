@@ -84,11 +84,18 @@ export const currentPlace = async (): Promise<Place> => {
 /**
  * Follow the phone's position while a job is running.
  *
- * The callback fires on a steady beat rather than on every movement, so the
- * map keeps a fresh time even when the car is sat at lights, and a motorway
- * run does not send hundreds of updates. The phone is already tracking
- * continuously either way, so a shorter beat costs battery nothing and only
- * adds a small request. Returns a function that stops it.
+ * Sending is tied to the fixes themselves, not to a timer, and that is the
+ * whole thing. A backgrounded app keeps receiving fixes from the operating
+ * system, because the native watcher calls into this code to deliver them,
+ * but its timers are suspended the moment it is not the app on screen. So a
+ * beat that sent the position stopped sending it the second the chauffeur
+ * opened Waze: the fixes arrived and nobody posted them, and the passenger
+ * watched a parked car while the chauffeur drove to them.
+ *
+ * The beat is still here, because a car sat at lights should keep the
+ * arrival time fresh, and because a watch that goes quiet has to be noticed.
+ * Both routes go through the same gate, so the rate is unchanged either way.
+ * Returns a function that stops it.
  */
 /** Past this with no fix, the car on the passenger's map has stopped moving. */
 const REPORTING_STALE_MS = 90_000;
@@ -109,7 +116,17 @@ export const followPosition = (
 ): (() => void) => {
   let latest: { lat: number; lng: number } | null = null;
   let lastAt = 0;
+  let sentAt = 0;
   let troubled = false;
+
+  /** At most one report per beat, wherever the prompt to send came from. */
+  const send = () => {
+    if (!latest) return;
+    const now = Date.now();
+    if (now - sentAt < everyMs) return;
+    sentAt = now;
+    onFix(latest.lat, latest.lng);
+  };
 
   const trouble = (why: string | null) => {
     const now = why !== null;
@@ -123,6 +140,7 @@ export const followPosition = (
       latest = { lat: position.lat, lng: position.lng };
       lastAt = Date.now();
       trouble(null);
+      send();
     },
     (why) =>
       trouble(
@@ -141,7 +159,7 @@ export const followPosition = (
       trouble("Your phone has stopped reporting where you are.");
       return;
     }
-    if (latest) onFix(latest.lat, latest.lng);
+    send();
   }, everyMs);
 
   return () => {
