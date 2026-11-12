@@ -10,6 +10,6 @@
 export const VERSION = "2.3";
 
 /** The build Apple counts, which is what a crash report is filed against. */
-export const BUILD = "19";
+export const BUILD = "20";
 
 export const releaseLine = (): string => `Version ${VERSION} (${BUILD})`;
