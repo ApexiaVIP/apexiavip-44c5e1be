@@ -5,6 +5,8 @@
  * and when a job is cleared. The position is taken from the phone and turned
  * into the nearest street and postcode, which the chauffeur can correct.
  */
+import { watchFixes, type Fix } from "@/lib/positionSource";
+
 export interface Place {
   lat?: number;
   lng?: number;
@@ -105,7 +107,6 @@ export const followPosition = (
    */
   onTrouble?: (why: string | null) => void
 ): (() => void) => {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return () => {};
   let latest: { lat: number; lng: number } | null = null;
   let lastAt = 0;
   let troubled = false;
@@ -117,25 +118,25 @@ export const followPosition = (
     onTrouble?.(why);
   };
 
-  const watch = navigator.geolocation.watchPosition(
+  const stopWatching = watchFixes(
     (position) => {
-      latest = { lat: position.coords.latitude, lng: position.coords.longitude };
+      latest = { lat: position.lat, lng: position.lng };
       lastAt = Date.now();
       trouble(null);
     },
-    (err) => {
+    (why) =>
       trouble(
-        err.code === err.PERMISSION_DENIED
+        why === "denied"
           ? "Location is off for this app, so your passenger cannot see the car."
           : "Your phone is not giving a position, so your passenger cannot see the car."
-      );
-    },
-    { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 }
+      )
   );
 
   const beat = setInterval(() => {
-    // A watch that simply goes quiet raises no error at all, which is what a
-    // tunnel and a backgrounded app both look like
+    // A watch that simply goes quiet raises no error at all. On a phone that
+    // now means a tunnel or an underground car park, because the operating
+    // system keeps the watcher alive in the background. In a browser it still
+    // means the tab is not in front.
     if (!lastAt || Date.now() - lastAt > REPORTING_STALE_MS) {
       trouble("Your phone has stopped reporting where you are.");
       return;
@@ -144,7 +145,7 @@ export const followPosition = (
   }, everyMs);
 
   return () => {
-    navigator.geolocation.clearWatch(watch);
+    stopWatching();
     clearInterval(beat);
   };
 };
@@ -202,14 +203,7 @@ export const keepScreenAwake = (): (() => void) => {
 };
 
 /** A single fix, for working out a route from where the car is standing. */
-export interface Fix {
-  lat: number;
-  lng: number;
-  /** Which way the car is pointing, where the phone can tell. */
-  heading: number | null;
-  /** Metres per second, where the phone can tell. */
-  speed: number | null;
-}
+export type { Fix } from "@/lib/positionSource";
 
 export const currentFix = async (): Promise<Fix | null> => {
   try {
@@ -236,25 +230,7 @@ export const currentFix = async (): Promise<Fix | null> => {
 export const watchDriving = (
   onFix: (fix: Fix) => void,
   onRefused?: () => void
-): (() => void) => {
-  if (typeof navigator === "undefined" || !navigator.geolocation) {
-    onRefused?.();
-    return () => {};
-  }
-  const watch = navigator.geolocation.watchPosition(
-    (position) => {
-      const { latitude, longitude, heading, speed } = position.coords;
-      onFix({
-        lat: latitude,
-        lng: longitude,
-        heading: typeof heading === "number" && !Number.isNaN(heading) ? heading : null,
-        speed: typeof speed === "number" && !Number.isNaN(speed) ? speed : null,
-      });
-    },
-    (err) => {
-      if (err.code === err.PERMISSION_DENIED) onRefused?.();
-    },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
-  );
-  return () => navigator.geolocation.clearWatch(watch);
-};
+): (() => void) =>
+  watchFixes(onFix, (why) => {
+    if (why === "denied") onRefused?.();
+  });
