@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { destinationQuery, nextDestination, wazeAppLink, wazeLink } from "@/lib/navigation";
+import {
+  destinationQuery,
+  nextDestination,
+  wazeAppLink,
+  wazeLink,
+  type Place,
+} from "@/lib/navigation";
+import { makeArrival } from "@/lib/arrival";
 import { handOffTo } from "@/lib/handOff";
 import { findDoor } from "@/lib/findDoor";
 import { survivesBackground } from "@/lib/positionSource";
@@ -280,8 +287,16 @@ const Driver = () => {
   );
   /** Which job's destination box is open, on an hourly hire. */
   const [naming, setNaming] = useState<string | null>(null);
-  /** How long the drive has left, carried to the next position report. */
+  /**
+   * How long the drive has left, as our own navigation sees it.
+   *
+   * Null whenever that navigation is not the thing on screen, which is most
+   * of the time now the drive can be handed to Waze, so it is only the first
+   * answer rather than the only one.
+   */
   const etaSeconds = useRef<number | null>(null);
+  /** The same question asked of the router, for when it is. */
+  const arrival = useRef(makeArrival());
   const [clearFor, setClearFor] = useState<string | null>(null);
   const [clearNotes, setClearNotes] = useState("");
   const [waitPlace, setWaitPlace] = useState("");
@@ -375,6 +390,31 @@ const Driver = () => {
     current && current.driver_status && current.driver_status !== "clear"
       ? current.reference
       : null;
+  /**
+   * Where the car is heading, read when a position goes out rather than when
+   * the reporting started. A chauffeur who collects their passenger is
+   * driving somewhere else from that moment, and so is one told somewhere
+   * new on an hourly hire.
+   */
+  const aimingAt = useRef<Place>(null);
+  const chosenNow = current
+    ? destinationNow((data?.waypoints ?? []) as Waypoint[], current.reference)
+    : null;
+  const headingNow = current
+    ? nextDestination(
+        {
+          pickup: current.pickup,
+          dropoff: current.dropoff,
+          as_directed: current.journey_type === "hourly",
+        },
+        current.driver_status,
+        chosenNow ? placeFrom(chosenNow.place) : undefined
+      )
+    : null;
+  useEffect(() => {
+    aimingAt.current = headingNow?.place ?? null;
+  });
+
   useEffect(() => {
     if (!reportingFor) return;
     // The phone suspends this app the moment it is locked or put away, and
@@ -389,9 +429,11 @@ const Driver = () => {
             reference: reportingFor,
             lat,
             lng,
-            // Whatever the navigation last worked out, so the passenger is
-            // reading the same arrival time the chauffeur is driving to
-            etaSeconds: etaSeconds.current,
+            // What the chauffeur's own navigation is working to, where that
+            // is what they are driving with. Where it is not, the same
+            // question asked of the same router, so the passenger is never
+            // left watching a car move with no arrival time above it
+            etaSeconds: etaSeconds.current ?? arrival.current({ lat, lng }, aimingAt.current),
           },
         });
       },
