@@ -167,8 +167,14 @@ export const phrase = (turn: Turn, road: string, exit?: number): string => {
       return `Take the slip road on the left${onto}`;
     case "slip-right":
       return `Take the slip road${onto}`;
+    // Forward looking, because this is the instruction for a manoeuvre still
+    // ahead: the banner shows it with the distance still to run, and read out
+    // it becomes "in two hundred yards, your destination is on Donkey Lane".
+    // Saying "you have arrived" while the car is still sixty yards short is
+    // how a chauffeur ends up stopping at the wrong gate. Arrival itself is
+    // announced separately, once, when the car is actually there.
     case "arrive":
-      return "You have arrived";
+      return road ? `Your destination is on ${road}` : "Your destination is ahead";
   }
 };
 
