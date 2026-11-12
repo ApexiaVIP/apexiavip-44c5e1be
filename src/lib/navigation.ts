@@ -80,12 +80,37 @@ export function nextDestination(
 }
 
 /*
- * There were link builders here for Waze, Google Maps and Apple Maps, and an
- * opener that pushed them out to the system app.
+ * Handing the drive to Waze.
  *
- * They are gone deliberately. Leaving the app is what suspends it, and a
- * suspended app reports no positions, so the passenger watched a car that
- * never moved for the whole journey. That is the fault the in-app sat nav was
- * built to fix, and a button offering the old way undoes it. If a route will
- * not come, the drive screen asks again rather than sending anybody out.
+ * This was taken out once, and the reason was sound: leaving the app
+ * suspended it, a suspended app reported no positions, and the passenger
+ * watched a car that never moved for the whole journey. The in-app sat nav
+ * existed to stop that happening.
+ *
+ * It is back because that reason no longer holds. The app now takes its
+ * fixes from the operating system rather than the browser, so the car keeps
+ * moving on the passenger's map while Waze is in front and while the phone is
+ * locked. The button is offered only where that is true, which is why it is
+ * gated on survivesBackground() rather than simply drawn. On anything that
+ * still reports from the browser, there is no button, because there the old
+ * fault is still the fault.
  */
+
+/**
+ * The Waze link for a destination.
+ *
+ * Coordinates where we have them, and that matters more than it looks. Handed
+ * a postcode, Waze geocodes it the same way everyone else does and lands on
+ * the centroid of the unit, which is the fifty yards that started all of
+ * this. Handing it the door we worked out ourselves carries the corrected
+ * position across, so the chauffeur arrives where the passenger is standing
+ * rather than where the Post Office draws the postcode.
+ *
+ * A https://waze.com/ul link opens the app when it is installed and the
+ * website when it is not, so there is nothing to detect and no dead end.
+ */
+export function wazeLink(at: { lat: number; lng: number } | null, place: Place): string | null {
+  if (at) return `https://waze.com/ul?ll=${at.lat}%2C${at.lng}&navigate=yes`;
+  const query = destinationQuery(place);
+  return query ? `https://waze.com/ul?q=${encodeURIComponent(query)}&navigate=yes` : null;
+}

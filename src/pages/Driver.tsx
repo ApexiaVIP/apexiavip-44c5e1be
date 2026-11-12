@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { destinationQuery, nextDestination } from "@/lib/navigation";
+import { destinationQuery, nextDestination, wazeLink } from "@/lib/navigation";
+import { findDoor } from "@/lib/findDoor";
+import { survivesBackground } from "@/lib/positionSource";
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
@@ -176,12 +178,39 @@ export function NavigateRow({
     job.driver_status,
     chosen ?? undefined
   );
-  if (!heading) return null;
+  const place = heading?.place ?? null;
+  /** Waze is only offered where the car keeps reporting without us. */
+  const handOff = survivesBackground();
 
-  const query = destinationQuery(heading.place);
-  if (!query) return null;
+  /**
+   * The door, worked out once so the Waze link can carry it.
+   *
+   * Looked up here rather than on the tap, because a chauffeur pressing a
+   * button wants Waze, not a spinner. If it has not come back yet the link
+   * falls back to the address, which is what Waze would have done anyway.
+   */
+  const [door, setDoor] = useState<{ lat: number; lng: number } | null>(null);
+  useEffect(() => {
+    if (!place || !handOff) {
+      setDoor(null);
+      return;
+    }
+    let dropped = false;
+    void findDoor(place).then((found) => {
+      if (!dropped) setDoor(found);
+    });
+    return () => {
+      dropped = true;
+    };
+    // The place is identified by the address it resolves to
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destinationQuery(place)]);
+
+  const query = destinationQuery(place);
+  if (!heading || !query) return null;
 
   const goingToPickup = heading.what === "pickup";
+  const waze = handOff ? wazeLink(door, place) : null;
 
   return (
     <div className="space-y-2">
@@ -201,6 +230,27 @@ export function NavigateRow({
           <Navigation className="w-4 h-4 mr-2 flex-none" />
           {goingToPickup ? "Drive to pick up" : "Drive to destination"}
         </Button>
+      )}
+      {waze && (
+        <>
+          <a
+            href={waze}
+            target="_blank"
+            rel="noreferrer"
+            className="flex h-12 w-full items-center justify-center border border-champagne/40
+                       text-xs font-light uppercase tracking-[0.12em] text-champagne"
+          >
+            <Navigation className="mr-2 h-4 w-4 flex-none" />
+            Open in Waze
+          </a>
+          {/* Said plainly, because the chauffeurs were told for months that
+              leaving the app stopped the passenger seeing them. It did. It
+              does not now, and they have no way of knowing that unless the
+              screen says so. */}
+          <p className="text-[10px] font-light tracking-[0.1em] text-smoke">
+            Your passenger still sees the car while you are in Waze.
+          </p>
+        </>
       )}
     </div>
   );

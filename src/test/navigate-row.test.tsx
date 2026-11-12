@@ -35,12 +35,13 @@ beforeEach(() => {
 
 describe("the navigate row on a job", () => {
   /**
-   * The chauffeur leaving for another app is the whole problem this app was
-   * built to fix: the phone suspends it, positions stop going up, and the
-   * passenger watches a parked car for the length of their journey. So there
-   * is nothing on the job to tap but our own drive.
+   * These render in a browser, where the page stops reporting its position
+   * the moment it is not in front: the passenger would watch a parked car for
+   * the length of their journey. So there is nothing here to tap but our own
+   * drive. The Waze button exists now, but only on a phone that keeps
+   * reporting without us, and waze-handoff.test.tsx covers that side.
    */
-  it("offers nothing but our own drive, so nobody leaves the app", () => {
+  it("offers nothing but our own drive where leaving would freeze the car", () => {
     render(<NavigateRow job={job} asDirected={false} onDrive={vi.fn()} />);
     expect(screen.getByRole("button", { name: /drive/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /waze/i })).not.toBeInTheDocument();
