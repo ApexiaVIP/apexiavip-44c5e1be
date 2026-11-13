@@ -1,10 +1,16 @@
 import { useLocation } from "react-router-dom";
 import { useEffect } from "react";
 
+import { retryStaticPath } from "@/lib/staticRetry";
+
 const NotFound = () => {
   const location = useLocation();
 
   useEffect(() => {
+    // A contact card or the install page reaching the app at all means a stale
+    // service worker answered for a static file. Ask once more; by now it has
+    // updated and the real file is served.
+    if (retryStaticPath(location.pathname)) return;
     console.error("404 Error: User attempted to access non-existent route:", location.pathname);
   }, [location.pathname]);
 
