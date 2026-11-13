@@ -5,6 +5,14 @@
       "destination": "https://mzqpvnxtwshjcyzaipea.supabase.co/functions/v1/health"
     },
     {
+      "source": "/contacts/(.*)",
+      "destination": "/contact-not-found.html"
+    },
+    {
+      "source": "/vcards/(.*)",
+      "destination": "/contact-not-found.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
@@ -16,6 +24,40 @@
         {
           "key": "Content-Type",
           "value": "application/json"
+        }
+      ]
+    },
+    {
+      "source": "/contacts/(.*)",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive, nosnippet"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        }
+      ]
+    },
+    {
+      "source": "/vcards/(.*)",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive, nosnippet"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Content-Type",
+          "value": "text/vcard; charset=utf-8"
         }
       ]
     }

@@ -45,8 +45,12 @@ export default defineConfig(({ mode }) => ({
       workbox: {
         // The app is online-first (bookings, auth); cache the shell only
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/functions\//],
+        // Contact cards are plain static pages served straight from the domain.
+        // They must never be precached: the manifest is public, so precaching
+        // them would publish the full list of unlisted contact URLs in sw.js.
+        navigateFallbackDenylist: [/^\/functions\//, /^\/contacts\//, /^\/vcards\//],
         globPatterns: ["**/*.{js,css,html,png,jpg,svg,ico}"],
+        globIgnores: ["contacts/**", "vcards/**", "contact-not-found.html"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
     }),
