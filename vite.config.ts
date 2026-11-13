@@ -48,9 +48,9 @@ export default defineConfig(({ mode }) => ({
         // Contact cards are plain static pages served straight from the domain.
         // They must never be precached: the manifest is public, so precaching
         // them would publish the full list of unlisted contact URLs in sw.js.
-        navigateFallbackDenylist: [/^\/functions\//, /^\/contacts\//, /^\/vcards\//],
+        navigateFallbackDenylist: [/^\/functions\//, /^\/contacts\//, /^\/vcards\//, /^\/setup\//],
         globPatterns: ["**/*.{js,css,html,png,jpg,svg,ico}"],
-        globIgnores: ["contacts/**", "vcards/**", "contact-not-found.html"],
+        globIgnores: ["contacts/**", "vcards/**", "setup/**", "contact-not-found.html"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
     }),

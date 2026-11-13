@@ -13,6 +13,10 @@
       "destination": "/contact-not-found.html"
     },
     {
+      "source": "/setup/(.*)",
+      "destination": "/contact-not-found.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
@@ -58,6 +62,23 @@
         {
           "key": "Content-Type",
           "value": "text/vcard; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/setup/(.*)",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive, nosnippet"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
         }
       ]
     }
