@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { asHours, against, monthName } from "@/lib/hours";
+import { asHours, against, monthName, onDutySince } from "@/lib/hours";
 
 describe("how hours read", () => {
   it("gives whole hours plainly", () => {
@@ -54,5 +54,34 @@ describe("naming a month", () => {
   it("does not slip into the month before at a boundary", () => {
     expect(monthName("2026-01")).toBe("January 2026");
     expect(monthName("2026-12")).toBe("December 2026");
+  });
+});
+
+describe("telling the office when a shift started", () => {
+  const now = new Date("2026-11-15T20:00:00Z");
+
+  it("gives the time alone for a shift started today", () => {
+    expect(onDutySince("2026-11-15T08:12:00Z", now)).toBe("since 08:12");
+  });
+
+  it("gives the day as well when it started before today", () => {
+    // The one worth questioning: nobody is still on the shift they opened
+    // last Tuesday, so the office can see at a glance that it was never
+    // signed off rather than wondering why the hours look wrong.
+    expect(onDutySince("2026-11-10T08:12:00Z", now)).toBe("since Tue 10 Nov, 08:12");
+  });
+
+  it("says nothing when no shift is running", () => {
+    expect(onDutySince(null, now)).toBe("");
+  });
+
+  it("says nothing rather than Invalid Date when the time is unreadable", () => {
+    expect(onDutySince("not a time", now)).toBe("");
+  });
+
+  it("reads the clock in UK time, not the viewer's", () => {
+    // A shift opened at 23:30 UK on the 14th is not "today" on the 15th,
+    // however the phone looking at it is set.
+    expect(onDutySince("2026-11-14T23:30:00Z", now)).toBe("since Sat 14 Nov, 23:30");
   });
 });

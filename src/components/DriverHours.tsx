@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
-import { asHours, against, monthName } from "@/lib/hours";
+import { asHours, against, monthName, onDutySince } from "@/lib/hours";
 
 interface Row {
   id: string;
@@ -15,6 +15,7 @@ interface Row {
   stillOpen: boolean;
   capped: boolean;
   neverClosed: boolean;
+  openSince: string | null;
 }
 
 const call = async (body: Record<string, unknown>) => {
@@ -54,7 +55,12 @@ const DriverHours = () => {
   const { data, isLoading } = useQuery({
     queryKey: ["driver-hours-all"],
     queryFn: () => call({ action: "driver_hours" }),
+    // Who is on duty is the question this screen is opened to answer, and it
+    // changes without anyone touching the screen. Left to a stale time alone
+    // it sat on a chauffeur who had signed off an hour earlier.
     staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
 
   const setHours = useMutation({
@@ -111,6 +117,10 @@ const DriverHours = () => {
                   {r.stillOpen && (
                     <span className="text-champagne text-[10px] tracking-[0.15em] uppercase ml-3">
                       On duty
+                      <span className="text-smoke normal-case tracking-normal">
+                        {" "}
+                        {onDutySince(r.openSince)}
+                      </span>
                     </span>
                   )}
                 </p>

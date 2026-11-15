@@ -41,3 +41,33 @@ export const against = (
     percent: Math.min(100, Math.round((minutes / target) * 100)),
   };
 };
+
+/**
+ * When a running shift began, as the office needs to read it.
+ *
+ * "On duty" on its own cannot be told apart from a shift somebody left open
+ * on Tuesday and went home, which is exactly the doubt that arises when the
+ * hours look wrong. A shift that started today is given as a time; one that
+ * started earlier is given its day as well, because that is the one worth
+ * questioning.
+ */
+export const onDutySince = (iso: string | null, now: Date = new Date()): string => {
+  if (!iso) return "";
+  const started = new Date(iso);
+  if (Number.isNaN(started.getTime())) return "";
+  const day = (d: Date) =>
+    d.toLocaleDateString("en-GB", { timeZone: "Europe/London" });
+  const time = started.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/London",
+  });
+  if (day(started) === day(now)) return `since ${time}`;
+  const when = started.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Europe/London",
+  });
+  return `since ${when}, ${time}`;
+};

@@ -323,6 +323,7 @@ serve(async (req) => {
           stillOpen: worked.stillOpen,
           capped: worked.capped,
           neverClosed: worked.neverClosed,
+          openSince: worked.openedAt,
         };
       });
       return json(200, { month, drivers: rows });

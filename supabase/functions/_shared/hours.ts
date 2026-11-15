@@ -30,30 +30,50 @@ export interface OnDuty {
   capped: boolean;
   /** A shift opened before this period and never closed, so it earns nothing. */
   neverClosed: boolean;
+  /**
+   * When the running shift began, so the office can see a sign-off that never
+   * happened. "On duty" alone cannot be told apart from one left open on
+   * Tuesday, which is the whole difficulty when the figure looks wrong.
+   */
+  openedAt: string | null;
 }
 
 /**
- * Minutes on duty within a window. An open shift is counted to the end of the
- * window and flagged, rather than guessed at.
+ * Minutes on duty within a window. An open shift is counted to this moment and
+ * flagged, rather than guessed at or run on to the end of the window.
  *
  * An open shift that began before the window is a different thing: nobody
  * works a fortnight without signing off. Counting it to the end of every
  * later day would put fourteen hours against that chauffeur every day for
  * ever, so it earns nothing and is called out instead.
  */
-export const minutesOnDuty = (shifts: Shift[], from: Date, to: Date): OnDuty => {
+export const minutesOnDuty = (
+  shifts: Shift[],
+  from: Date,
+  to: Date,
+  now: Date = new Date(),
+): OnDuty => {
+  // Time not yet worked is not time worked. A shift still running is counted
+  // to this moment, never to the end of the window it falls in: counting it to
+  // the end of the month reported the rest of the month as already earned, and
+  // called every chauffeur on duty capped within a day of signing on.
+  const running = Math.min(to.getTime(), now.getTime());
   let minutes = 0;
   let stillOpen = false;
   let capped = false;
   let neverClosed = false;
+  let openedAt: string | null = null;
   for (const s of shifts) {
     if (!s.ended_at && new Date(s.started_at).getTime() < from.getTime()) {
       neverClosed = true;
       continue;
     }
     const start = Math.max(new Date(s.started_at).getTime(), from.getTime());
-    const rawEnd = s.ended_at ? new Date(s.ended_at).getTime() : to.getTime();
-    if (!s.ended_at) stillOpen = true;
+    const rawEnd = s.ended_at ? new Date(s.ended_at).getTime() : running;
+    if (!s.ended_at) {
+      stillOpen = true;
+      openedAt = s.started_at;
+    }
     const end = Math.min(rawEnd, to.getTime());
     if (end <= start) continue;
     const worked = (end - start) / 60000;
@@ -65,5 +85,5 @@ export const minutesOnDuty = (shifts: Shift[], from: Date, to: Date): OnDuty => 
       minutes += worked;
     }
   }
-  return { minutes, stillOpen, capped, neverClosed };
+  return { minutes, stillOpen, capped, neverClosed, openedAt };
 };
