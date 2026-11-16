@@ -725,10 +725,10 @@ const Driver = () => {
   const needsAnswer = (job: Job) =>
     !job.chauffeur_ack_at && !!(job.called_on_2h_at || job.called_on_1h_at);
 
-  const answerCallOn = (job: Job, answer: "awake" | "on_the_way") => {
-    act.mutate({ action: "acknowledge", reference: job.reference, answer });
+  const answerCallOn = (job: Job) => {
+    act.mutate({ action: "acknowledge", reference: job.reference, answer: "awake" });
     toast({
-      title: answer === "on_the_way" ? "The office knows you are on the way" : "The office knows you are up",
+      title: "The office knows you are up",
       description: "They will stop chasing.",
     });
   };
@@ -954,23 +954,13 @@ const Driver = () => {
                         The office has called you on for this job. Tell them you have it and
                         they will stop chasing.
                       </p>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Button
-                          disabled={act.isPending}
-                          variant="outline"
-                          onClick={() => answerCallOn(current, "awake")}
-                          className="h-14 rounded-none text-xs tracking-[0.15em] uppercase"
-                        >
-                          I am up
-                        </Button>
-                        <Button
-                          disabled={act.isPending}
-                          onClick={() => answerCallOn(current, "on_the_way")}
-                          className="h-14 rounded-none text-xs tracking-[0.15em] uppercase"
-                        >
-                          On my way
-                        </Button>
-                      </div>
+                      <Button
+                        disabled={act.isPending}
+                        onClick={() => answerCallOn(current)}
+                        className="w-full h-14 rounded-none text-xs tracking-[0.15em] uppercase"
+                      >
+                        I am up
+                      </Button>
                     </div>
                   )}
                   <div className="border border-border p-5">{jobHead(current)}</div>

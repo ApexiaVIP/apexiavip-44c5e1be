@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { followLink, recipientsFor, trySendSms, ukWhen } from "../_shared/notify.ts";
 import { transferAuth, statusTransferUrl } from "../_shared/dispatch.ts";
+import { callOnNotice } from "../_shared/callOn.ts";
 import { minutesOnDuty, type Shift } from "../_shared/hours.ts";
 import { ukMonth, ukMonthEnd, ukMonthStart } from "../_shared/ukTime.ts";
 
@@ -19,6 +20,69 @@ const json = (status: number, body: unknown) =>
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+
+/**
+ * Tell the office a chauffeur has answered a call on.
+ *
+ * The booking team used to find this out by messaging every chauffeur one at
+ * a time. The tap already stops the chasing texts; this is the other half,
+ * which is somebody at the desk knowing without having to look.
+ *
+ * Whether they are signed on is read here rather than assumed, because being
+ * awake and having a timesheet running are different things and the desk acts
+ * on them differently.
+ */
+const adminClient = () =>
+  createClient(
+    Deno.env.get("SUPABASE_URL") ?? "",
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+  );
+type Admin = ReturnType<typeof adminClient>;
+
+const tellTheOffice = async (
+  admin: Admin,
+  driverId: string,
+  job: { reference: string; passenger: string; collectionAt: string | null }
+) => {
+  const key = Deno.env.get("RESEND_API_KEY");
+  if (!key) {
+    console.error("RESEND_API_KEY is not configured, so the office was not told");
+    return;
+  }
+  const to = Deno.env.get("CALL_ON_RECIPIENT") ?? "info@apexiavip.com";
+
+  const { data: who } = await admin
+    .from("profiles")
+    .select("full_name")
+    .eq("id", driverId)
+    .maybeSingle();
+  const { data: open } = await admin
+    .from("driver_shifts")
+    .select("started_at")
+    .eq("driver_id", driverId)
+    .is("ended_at", null)
+    .maybeSingle();
+
+  const { subject, lines } = callOnNotice({
+    chauffeur: (who?.full_name as string) ?? "",
+    reference: job.reference,
+    passenger: job.passenger,
+    collectionAt: job.collectionAt,
+    signedOnAt: (open?.started_at as string) ?? null,
+  });
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      from: "Apexia VIP <info@apexiavip.com>",
+      to: [to],
+      subject,
+      html: lines.map((line) => `<p>${line}</p>`).join(""),
+    }),
+  });
+  if (!res.ok) console.error("call on email failed", res.status, await res.text());
+};
 
 /**
  * Two phone numbers are the same chauffeur if their last nine digits match.
@@ -86,10 +150,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const admin = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    );
+    const admin = adminClient();
 
     const token = req.headers.get("Authorization")?.replace("Bearer ", "");
     if (!token) return json(401, { error: "Not authenticated" });
@@ -376,7 +437,7 @@ Deno.serve(async (req) => {
 
       const { data: job } = await admin
         .from("bookings")
-        .select("reference, driver_id")
+        .select("reference, driver_id, name, collection_at")
         .eq("reference", reference)
         .maybeSingle();
       if (!job || job.driver_id !== user.id) {
@@ -393,6 +454,20 @@ Deno.serve(async (req) => {
           error: "That would not save. Ring the office rather than leave them wondering.",
         });
       }
+      // The office asked to hear this as it happens. It is sent after the
+      // answer is saved, and never fails the answer: the chauffeur has done
+      // their part and must not be left pressing the button again because an
+      // email provider was having a bad morning.
+      try {
+        await tellTheOffice(admin, user.id, {
+          reference,
+          passenger: (job.name as string) ?? "",
+          collectionAt: (job.collection_at as string) ?? null,
+        });
+      } catch (err) {
+        console.error("call on answered but the office was not told", reference, err);
+      }
+
       return json(200, { success: true, chauffeur_ack: answer });
     }
 
