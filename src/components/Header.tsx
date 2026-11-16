@@ -3,15 +3,33 @@ import apexiaLogo from "@/assets/apexia-logo.svg";
 import { useAuth } from "@/hooks/useAuth";
 import { isInstalledApp } from "@/lib/appLinks";
 
-const Header = () => {
+interface Props {
+  /**
+   * Get out of the way.
+   *
+   * A chauffeur with a job in hand is looking at one thing, often at arm's
+   * length in a dark car, and the badge and the menu are not it. The header
+   * stays, because signing off has to be reachable, but it gives the screen
+   * back to the job.
+   */
+  compact?: boolean;
+}
+
+const Header = ({ compact = false }: Props) => {
   const { user, isAdmin, profile, signOut } = useAuth();
   const native = isInstalledApp();
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md pt-[env(safe-area-inset-top)]">
-      <div className="container mx-auto px-8 py-6">
+      <div className={`container mx-auto px-8 ${compact ? "py-2" : "py-6"}`}>
         <nav className="flex items-center justify-between">
           <Link to="/" className="flex items-center space-x-3">
-            <img src={apexiaLogo} alt="Apexia VIP" className="h-14 md:h-16 w-auto" width="944" height="550" />
+            <img
+              src={apexiaLogo}
+              alt="Apexia VIP"
+              className={compact ? "h-7 w-auto" : "h-14 md:h-16 w-auto"}
+              width="944"
+              height="550"
+            />
           </Link>
           
           <div className="flex items-center space-x-6 md:space-x-12">

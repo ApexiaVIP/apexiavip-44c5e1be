@@ -1,7 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { followLink, recipientsFor, trySendSms, ukWhen } from "../_shared/notify.ts";
 import { transferAuth, statusTransferUrl } from "../_shared/dispatch.ts";
-import { callOnNotice } from "../_shared/callOn.ts";
+import { upAndRunningNotice } from "../_shared/callOn.ts";
+import { phoneKey, type DispatchAnswer } from "../_shared/chauffeurMatch.ts";
+import { claimForChauffeurs } from "../_shared/claimChauffeur.ts";
 import { minutesOnDuty, type Shift } from "../_shared/hours.ts";
 import { ukMonth, ukMonthEnd, ukMonthStart } from "../_shared/ukTime.ts";
 
@@ -22,15 +24,12 @@ const json = (status: number, body: unknown) =>
   });
 
 /**
- * Tell the office a chauffeur has answered a call on.
+ * Tell the office a chauffeur is up and running.
  *
  * The booking team used to find this out by messaging every chauffeur one at
- * a time. The tap already stops the chasing texts; this is the other half,
- * which is somebody at the desk knowing without having to look.
- *
- * Whether they are signed on is read here rather than assumed, because being
- * awake and having a timesheet running are different things and the desk acts
- * on them differently.
+ * a time before every job. Being up is a thing about the person and their
+ * day, not about any one journey, so it is said once when they say it and
+ * carries their whole screen with it.
  */
 const adminClient = () =>
   createClient(
@@ -42,7 +41,8 @@ type Admin = ReturnType<typeof adminClient>;
 const tellTheOffice = async (
   admin: Admin,
   driverId: string,
-  job: { reference: string; passenger: string; collectionAt: string | null }
+  signedOnAt: string | null,
+  jobsToday: { reference: string; passenger: string; collectionAt: string | null }[]
 ) => {
   const key = Deno.env.get("RESEND_API_KEY");
   if (!key) {
@@ -56,19 +56,11 @@ const tellTheOffice = async (
     .select("full_name")
     .eq("id", driverId)
     .maybeSingle();
-  const { data: open } = await admin
-    .from("driver_shifts")
-    .select("started_at")
-    .eq("driver_id", driverId)
-    .is("ended_at", null)
-    .maybeSingle();
 
-  const { subject, lines } = callOnNotice({
+  const { subject, lines } = upAndRunningNotice({
     chauffeur: (who?.full_name as string) ?? "",
-    reference: job.reference,
-    passenger: job.passenger,
-    collectionAt: job.collectionAt,
-    signedOnAt: (open?.started_at as string) ?? null,
+    signedOnAt,
+    jobsToday,
   });
 
   const res = await fetch("https://api.resend.com/emails", {
@@ -81,17 +73,7 @@ const tellTheOffice = async (
       html: lines.map((line) => `<p>${line}</p>`).join(""),
     }),
   });
-  if (!res.ok) console.error("call on email failed", res.status, await res.text());
-};
-
-/**
- * Two phone numbers are the same chauffeur if their last nine digits match.
- * Dispatch stores them however the office typed them: 07700 900123,
- * +447700900123, 44 7700 900123.
- */
-const phoneKey = (raw: string | null | undefined): string => {
-  const digits = (raw ?? "").replace(/\D/g, "");
-  return digits.length >= 9 ? digits.slice(-9) : "";
+  if (!res.ok) console.error("up and running email failed", res.status, await res.text());
 };
 
 /** The steps a chauffeur works through, in the order they happen. */
@@ -107,6 +89,12 @@ type Progress = (typeof PROGRESS_KINDS)[number];
  * a fortnight of forgotten sign offs.
  */
 const MAX_OPEN_SHIFT_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How far ahead the day's work is listed when a chauffeur says they are up.
+ * Far enough to cover a night shift, short enough not to read as a rota.
+ */
+const UP_COVERS_HOURS = 20;
 
 /** How long a finished job stays on the chauffeur's screen. */
 const KEEP_CLEARED_HOURS = 12;
@@ -173,7 +161,7 @@ Deno.serve(async (req) => {
     if (action === "shift_start" || action === "shift_end") {
       const { data: open } = await admin
         .from("driver_shifts")
-        .select("id, started_at")
+        .select("id, started_at, up_at")
         .eq("driver_id", user.id)
         .is("ended_at", null)
         .maybeSingle();
@@ -183,7 +171,7 @@ Deno.serve(async (req) => {
         const { data: created, error } = await admin
           .from("driver_shifts")
           .insert({ driver_id: user.id })
-          .select("id, started_at")
+          .select("id, started_at, up_at")
           .single();
         if (error) throw error;
         return json(200, { success: true, shift: created });
@@ -423,52 +411,86 @@ Deno.serve(async (req) => {
 
     // --- Answering a call on ---
     /**
-     * The chauffeur telling the office they are up, or already moving.
+     * The chauffeur saying they are up and running.
      *
      * The booking team message every chauffeur before every job to find this
-     * out and then chase the ones who do not reply. One tap here is the
-     * whole of that conversation, and it stops the texts: a job that has
-     * been answered is not called on again.
+     * out and then chase the ones who do not reply. One tap is the whole of
+     * that conversation. It is asked for the moment they sign on, because
+     * being up is about them and their day rather than about any one job,
+     * and it cannot be said before signing on: a chauffeur who is up but has
+     * no timesheet running is the confusion this is meant to end.
      */
-    if (action === "acknowledge") {
-      const reference = typeof body.reference === "string" ? body.reference.trim().slice(0, 80) : "";
-      if (!reference) return json(400, { error: "Which job?" });
-      const answer = body.answer === "on_the_way" ? "on_the_way" : "awake";
-
-      const { data: job } = await admin
-        .from("bookings")
-        .select("reference, driver_id, name, collection_at")
-        .eq("reference", reference)
+    if (action === "shift_up") {
+      const { data: open } = await admin
+        .from("driver_shifts")
+        .select("id, started_at, up_at")
+        .eq("driver_id", user.id)
+        .is("ended_at", null)
         .maybeSingle();
-      if (!job || job.driver_id !== user.id) {
-        return json(403, { error: "That job is not assigned to you" });
-      }
+      if (!open) return json(400, { error: "Sign on first, then say you are up." });
+      // Pressed twice, which on a cold morning with gloves on is ordinary
+      if (open.up_at) return json(200, { success: true, shift: open });
 
-      const { error } = await admin
-        .from("bookings")
-        .update({ chauffeur_ack_at: new Date().toISOString(), chauffeur_ack: answer })
-        .eq("reference", reference);
+      const upAt = new Date().toISOString();
+      const { data: shift, error } = await admin
+        .from("driver_shifts")
+        .update({ up_at: upAt })
+        .eq("id", open.id)
+        .select("id, started_at, up_at")
+        .single();
       if (error) {
-        console.error("call on not answered", reference, answer, error);
+        console.error("could not record that they are up", user.id, error);
         return json(500, {
           error: "That would not save. Ring the office rather than leave them wondering.",
         });
       }
+
+      // What they have in front of them, which goes to the office with the
+      // news so the desk can see the day is covered without opening anything
+      const { data: theirs } = await admin
+        .from("bookings")
+        .select("reference, name, collection_at, chauffeur_ack_at")
+        .eq("driver_id", user.id)
+        .not("status", "in", '("Cancelled","Failed")')
+        .gte("collection_at", new Date(Date.now() - 2 * 3600 * 1000).toISOString())
+        .lte("collection_at", new Date(Date.now() + UP_COVERS_HOURS * 3600 * 1000).toISOString())
+        .order("collection_at");
+      const jobs = theirs ?? [];
+
+      // Saying they are up answers whatever the office called them on for, so
+      // the two hour and one hour nudges stop rather than carry on asking a
+      // question that has been answered.
+      const unanswered = jobs
+        .filter((job) => !job.chauffeur_ack_at)
+        .map((job) => job.reference as string);
+      if (unanswered.length > 0) {
+        const { error: ackError } = await admin
+          .from("bookings")
+          .update({ chauffeur_ack_at: upAt, chauffeur_ack: "awake" })
+          .in("reference", unanswered);
+        if (ackError) console.error("call ons not answered by being up", ackError);
+      }
+
       // The office asked to hear this as it happens. It is sent after the
       // answer is saved, and never fails the answer: the chauffeur has done
       // their part and must not be left pressing the button again because an
       // email provider was having a bad morning.
       try {
-        await tellTheOffice(admin, user.id, {
-          reference,
-          passenger: (job.name as string) ?? "",
-          collectionAt: (job.collection_at as string) ?? null,
-        });
+        await tellTheOffice(
+          admin,
+          user.id,
+          (open.started_at as string) ?? null,
+          jobs.map((job) => ({
+            reference: (job.reference as string) ?? "",
+            passenger: (job.name as string) ?? "",
+            collectionAt: (job.collection_at as string) ?? null,
+          }))
+        );
       } catch (err) {
-        console.error("call on answered but the office was not told", reference, err);
+        console.error("up and running, but the office was not told", user.id, err);
       }
 
-      return json(200, { success: true, chauffeur_ack: answer });
+      return json(200, { success: true, shift });
     }
 
     // --- Where the car is, while a job is running ---
@@ -639,7 +661,7 @@ Deno.serve(async (req) => {
     // --- The chauffeur's day ---
     const open = await admin
       .from("driver_shifts")
-      .select("id, started_at")
+      .select("id, started_at, up_at")
       .eq("driver_id", user.id)
       .is("ended_at", null)
       .maybeSingle();
@@ -718,36 +740,10 @@ Deno.serve(async (req) => {
             for (const b of Array.isArray(result?.Bookings) ? result.Bookings : []) {
               if (b?.Reference) dispatchStatus.set(b.Reference, b);
             }
-            const newlyMine: string[] = [];
-            let driverName = "";
-            for (const candidate of askable) {
-              const live = dispatchStatus.get(candidate.reference as string);
-              const driver = live?.Driver as { Mobile?: string; Name?: string } | undefined;
-              // A job allocated to a chauffeur whose mobile we cannot match is
-              // a job that reaches nobody, and it used to happen in silence.
-              // This is the only trace there is until the desk gets a screen
-              // for it, which wants a table and so wants a migration.
-              if (candidate.driver_id === null && driver?.Name && !driver.Mobile) {
-                console.error(
-                  "Dispatch names a chauffeur with no mobile on",
-                  candidate.reference,
-                  driver.Name
-                );
-              }
-              if (!driver?.Mobile || phoneKey(driver.Mobile) !== myKey) continue;
-              if (candidate.driver_id === user.id) continue;
-              newlyMine.push(candidate.reference as string);
-              driverName = driver.Name?.trim() || driverName;
-            }
-            if (newlyMine.length > 0) {
-              await admin
-                .from("bookings")
-                .update({
-                  driver_id: user.id,
-                  driver_name: driverName || (profile.full_name as string) || null,
-                })
-                .in("reference", newlyMine);
-            }
+            // Everything Dispatch just named a chauffeur on, not only this
+            // one's. The same answer serves every one of them and asking
+            // again would only be refused for thirty seconds.
+            await claimForChauffeurs([...dispatchStatus.values()] as DispatchAnswer[]);
           } else {
             console.error("Dispatch status HTTP", res.status, await res.text());
           }

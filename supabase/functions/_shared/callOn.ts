@@ -1,5 +1,5 @@
 /**
- * What the office is told when a chauffeur answers a call on.
+ * What the office is told when a chauffeur says they are up.
  *
  * The desk asked to hear it as it happens rather than watch a screen for it.
  * Kept apart from the sending so the words can be tested, because this is
@@ -9,15 +9,6 @@
  * a chauffeur can be awake and answering while no timesheet is running, and
  * that is worth saying rather than leaving the office to assume.
  */
-export interface CallOnAnswer {
-  chauffeur: string;
-  reference: string;
-  passenger: string;
-  collectionAt: string | null;
-  /** When their shift began, or null if they are not signed on */
-  signedOnAt: string | null;
-}
-
 const uk = (iso: string | null): string => {
   if (!iso) return "";
   const at = new Date(iso);
@@ -32,18 +23,41 @@ const uk = (iso: string | null): string => {
   });
 };
 
-export const callOnNotice = (answer: CallOnAnswer): { subject: string; lines: string[] } => {
-  const who = answer.chauffeur.trim() || "A chauffeur";
-  const subject = answer.signedOnAt ? `${who} is up and signed on` : `${who} is up, not signed on`;
+/** What the office is told when a chauffeur says they are up for the day. */
+export interface UpAndRunning {
+  chauffeur: string;
+  /** When their shift began. There is no being up without it. */
+  signedOnAt: string | null;
+  /** What they have on today, so the desk can see it is covered. */
+  jobsToday: { reference: string; passenger: string; collectionAt: string | null }[];
+}
 
-  const lines = [`${who} has answered the call on for ${answer.reference}.`];
-  if (answer.passenger.trim()) lines.push(`Passenger: ${answer.passenger.trim()}`);
-  const collection = uk(answer.collectionAt);
-  if (collection) lines.push(`Collection: ${collection}`);
+export const upAndRunningNotice = (
+  answer: UpAndRunning
+): { subject: string; lines: string[] } => {
+  const who = answer.chauffeur.trim() || "A chauffeur";
+  const subject = `${who} is up and signed on`;
+
+  const lines = [`${who} is up and running.`];
   lines.push(
     answer.signedOnAt
       ? `Signed on at ${uk(answer.signedOnAt)}.`
       : "Not signed on, so no timesheet is running for them yet."
   );
+
+  if (answer.jobsToday.length === 0) {
+    lines.push("Nothing on their screen yet.");
+    return { subject, lines };
+  }
+  lines.push(
+    answer.jobsToday.length === 1 ? "One job on their screen:" : `${answer.jobsToday.length} jobs on their screen:`
+  );
+  for (const job of answer.jobsToday) {
+    const at = uk(job.collectionAt);
+    const passenger = job.passenger.trim();
+    lines.push(
+      [job.reference, passenger, at].filter(Boolean).join(" · ")
+    );
+  }
   return { subject, lines };
 };

@@ -24,6 +24,7 @@ import {
   PauseCircle,
   Navigation,
   Flag,
+  Sun,
 } from "lucide-react";
 import Header from "@/components/Header";
 import { useAuth } from "@/hooks/useAuth";
@@ -47,6 +48,14 @@ type Step = "en_route" | "arrived" | "pob" | "waiting" | "clear";
 
 /** Matches the window the server allows; after this the office has the job. */
 const UNDO_CLEAR_MINUTES = 30;
+
+/** The job, start to finish, as the chauffeur's screen walks through it. */
+const RAIL = [
+  { kind: "en_route", label: "En route" },
+  { kind: "arrived", label: "Arrived" },
+  { kind: "pob", label: "On board" },
+  { kind: "clear", label: "Clear" },
+] as const;
 
 interface Job {
   reference: string;
@@ -479,11 +488,21 @@ const Driver = () => {
     return <Navigate to="/" replace />;
   }
 
-  const shift = data?.shift as { id: string; started_at: string } | null | undefined;
+  const shift = data?.shift as
+    | { id: string; started_at: string; up_at: string | null }
+    | null
+    | undefined;
   const allJobs = (data?.jobs ?? []) as Job[];
   const waypoints = (data?.waypoints ?? []) as Waypoint[];
 
   const onShift = !!shift;
+  /**
+   * There is a job on this screen and it is not finished.
+   *
+   * What the screen is for, right now, and the signal for everything else on
+   * it to get out of the way.
+   */
+  const onTheJob = !!current && current.driver_status !== "clear";
   const next = queue[0] ?? null;
 
   const step = (job: Job, kind: Step, place = "", fix: { lat?: number; lng?: number } = {}) =>
@@ -592,6 +611,46 @@ const Driver = () => {
     if (!job.driver_status_at || job.job_report_sent_at) return 0;
     const since = (Date.now() - Date.parse(job.driver_status_at)) / 60000;
     return Math.max(0, Math.ceil(UNDO_CLEAR_MINUTES - since));
+  };
+
+  /**
+   * Where this job has got to, as four marks across the screen.
+   *
+   * The button below it is one button and always has been, which is right:
+   * there is only ever one next thing. What was missing was any sense of
+   * where that next thing sits in the job, so "En route" read the same at
+   * the start of a run as "Clear" did at the end of one. The rail is read
+   * without being looked at, which is the point in a moving car.
+   */
+  const stepRail = (job: Job) => {
+    const status = job.driver_status ?? null;
+    const reached =
+      status === null ? -1 : status === "waiting" ? 2 : RAIL.findIndex((s) => s.kind === status);
+
+    return (
+      <div className="flex items-stretch gap-1.5">
+        {RAIL.map((mark, i) => {
+          const done = i <= reached;
+          const next = i === reached + 1;
+          return (
+            <div key={mark.kind} className="flex-1 space-y-1.5">
+              <div
+                className={`h-[3px] ${
+                  done ? "bg-champagne" : next ? "bg-champagne/40" : "bg-border"
+                }`}
+              />
+              <p
+                className={`text-[9px] tracking-[0.12em] uppercase ${
+                  done ? "text-champagne" : next ? "text-foreground" : "text-smoke/40"
+                }`}
+              >
+                {status === "waiting" && i === 2 ? "Waiting" : mark.label}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   const bigButtons = (job: Job) => {
@@ -736,17 +795,8 @@ const Driver = () => {
     );
   };
 
-  /**
-   * Whether this job is waiting on the chauffeur saying they are up.
-   *
-   * Only once the office has called them on, so an untouched job two days out
-   * does not nag. Once answered it never asks again.
-   */
-  const needsAnswer = (job: Job) =>
-    !job.chauffeur_ack_at && !!(job.called_on_2h_at || job.called_on_1h_at);
-
-  const answerCallOn = (job: Job) => {
-    act.mutate({ action: "acknowledge", reference: job.reference, answer: "awake" });
+  const sayUp = () => {
+    act.mutate({ action: "shift_up" });
     toast({
       title: "The office knows you are up",
       description: "They will stop chasing.",
@@ -879,17 +929,25 @@ const Driver = () => {
           onClose={() => setDriveFor(null)}
         />
       )}
-      <Header />
+      <Header compact={onTheJob} />
       <main
         className={
           isInstalledApp()
-            ? "pt-[calc(env(safe-area-inset-top)+8.5rem)] pb-[calc(env(safe-area-inset-bottom)+6rem)]"
-            : "pt-40 md:pt-44 pb-28"
+            ? `pb-[calc(env(safe-area-inset-bottom)+6rem)] ${
+                onTheJob
+                  ? "pt-[calc(env(safe-area-inset-top)+4rem)]"
+                  : "pt-[calc(env(safe-area-inset-top)+8.5rem)]"
+              }`
+            : onTheJob
+              ? "pt-24 pb-28"
+              : "pt-40 md:pt-44 pb-28"
         }
       >
         <div className="container mx-auto px-6 max-w-2xl space-y-5">
-          {/* Who and when, and a way back for the office, who drive to test */}
-          <div className="flex items-baseline gap-3">
+          {/* Who and when, and a way back for the office, who drive to test.
+              Put away while a job is running: it is the one screen a
+              chauffeur reads at arm's length in a dark car. */}
+          <div className={`flex items-baseline gap-3 ${onTheJob ? "hidden" : ""}`}>
             <p className="text-champagne text-xs tracking-[0.4em] uppercase">Chauffeur</p>
             <p className="text-smoke text-xs tracking-[0.15em]">
               {ukDay(current?.collection_at ?? null)}
@@ -957,7 +1015,37 @@ const Driver = () => {
                 </button>
               </div>
 
-          {onShift && <MonthHours />}
+              {/* Signed on says the timesheet is running. Up says they are
+                  awake, out, and able to work, which is the thing the office
+                  spends its morning ringing round to find out. It is asked
+                  for here, first, rather than waiting on a job to hang it
+                  off, and it goes away for the rest of the shift. */}
+              {!shift!.up_at && (
+                <div className="border border-champagne bg-champagne/10 p-5 space-y-4">
+                  <div>
+                    <p className="text-foreground text-base font-light tracking-wide">
+                      Are you up and running?
+                    </p>
+                    <p className="text-smoke text-xs mt-1 leading-relaxed">
+                      One tap tells the office you are awake and out. They stop ringing round.
+                    </p>
+                  </div>
+                  <Button
+                    disabled={act.isPending}
+                    onClick={sayUp}
+                    className="w-full h-20 rounded-none text-xl tracking-[0.2em] uppercase font-light"
+                  >
+                    {act.isPending ? (
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                    ) : (
+                      <Sun className="w-6 h-6 mr-3" />
+                    )}
+                    I am up
+                  </Button>
+                </div>
+              )}
+
+          {onShift && !onTheJob && <MonthHours />}
 
           {isLoading ? (
             <div className="py-16 text-center">
@@ -968,21 +1056,6 @@ const Driver = () => {
               {current ? (
                 <>
                   {/* The job in hand, then the buttons, which is most of the screen */}
-                  {needsAnswer(current) && (
-                    <div className="border border-champagne bg-champagne/10 p-4 space-y-3">
-                      <p className="text-sm text-foreground">
-                        The office has called you on for this job. Tell them you have it and
-                        they will stop chasing.
-                      </p>
-                      <Button
-                        disabled={act.isPending}
-                        onClick={() => answerCallOn(current)}
-                        className="w-full h-14 rounded-none text-xs tracking-[0.15em] uppercase"
-                      >
-                        I am up
-                      </Button>
-                    </div>
-                  )}
                   <div className="border border-border p-5">{jobHead(current)}</div>
                   {/* The passenger's map has stopped moving and only the
                       chauffeur can do anything about it */}
@@ -1001,7 +1074,10 @@ const Driver = () => {
                       Leave this screen open so your passenger can follow the car
                     </p>
                   )}
-                  <div>{bigButtons(current)}</div>
+                  <div className="space-y-4">
+                    {onTheJob && stepRail(current)}
+                    {bigButtons(current)}
+                  </div>
 
                   {/* Anything worth recording that is not a step: drinks on
                       an Amex, a wait nobody booked, a change made in the car */}
