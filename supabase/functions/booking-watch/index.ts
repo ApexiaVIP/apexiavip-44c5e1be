@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { followLink } from "../_shared/notify.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
-import { transferAuth } from "../_shared/dispatch.ts";
+import { transferAuth, statusTransferUrl } from "../_shared/dispatch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -275,9 +275,7 @@ serve(async (req) => {
     // Ask Dispatch where each of them stands
     const auth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
     const res = await fetch(
-      `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(
-        DISPATCH_TRANSFER_REFERENCE
-      )}&CheckBookingStatus=true`,
+      statusTransferUrl(DISPATCH_TRANSFER_REFERENCE),
       {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },

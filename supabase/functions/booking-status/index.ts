@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { transferAuth } from "../_shared/dispatch.ts";
+import { transferAuth, bookingTransferUrl, statusTransferUrl } from "../_shared/dispatch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -131,8 +131,7 @@ serve(async (req) => {
 
       const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
       const cancelRes = await fetch(
-        `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=` +
-          `${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`,
+        bookingTransferUrl(DISPATCH_TRANSFER_REFERENCE),
         {
           method: "POST",
           headers: {
@@ -334,9 +333,7 @@ serve(async (req) => {
 
     // Ask Dispatch for current status of these bookings
     const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
-    const dispatchUrl =
-      `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=` +
-      `${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&CheckBookingStatus=true`;
+    const dispatchUrl = statusTransferUrl(DISPATCH_TRANSFER_REFERENCE);
 
     const dispatchRes = await fetch(dispatchUrl, {
       method: "POST",

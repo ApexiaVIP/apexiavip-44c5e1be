@@ -22,3 +22,31 @@ export const transferAuth = (apiKey?: string | null, reference?: string | null) 
 
 /** True once the key is in place, for anything that wants to say so */
 export const usingTransferKey = (apiKey?: string | null) => !!(apiKey ?? "").trim();
+
+/**
+ * Where Dispatch is.
+ *
+ * Dever's address was written into seven places across five functions, so
+ * pointing the platform at anything else, a replacement desk or a copy to
+ * test against, meant editing and deploying five functions rather than
+ * changing a setting. DISPATCH_BASE_URL is that setting. Left unset it is
+ * Dever, which is where it has always pointed, so nothing moves until
+ * somebody decides it should.
+ */
+const dispatchBase = () => {
+  // Blank, not just unset. A secret can be created with nothing in it, and an
+  // empty base would quietly build a relative address that reaches nothing.
+  const chosen = (Deno.env.get("DISPATCH_BASE_URL") ?? "").trim();
+  return (chosen || "https://dispatch.deversoftware.com").replace(/\/+$/, "");
+};
+
+const transferUrl = (reference: string, asking: string) =>
+  `${dispatchBase()}/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(reference)}&${asking}`;
+
+/** Sending a booking over, whether it is new or an amendment. */
+export const bookingTransferUrl = (reference: string) =>
+  transferUrl(reference, "BookedBy=Website");
+
+/** Asking what has become of bookings we have already sent. */
+export const statusTransferUrl = (reference: string) =>
+  transferUrl(reference, "CheckBookingStatus=true");

@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { followLink, recipientsFor, trySendSms, ukWhen } from "../_shared/notify.ts";
-import { transferAuth } from "../_shared/dispatch.ts";
+import { transferAuth, statusTransferUrl } from "../_shared/dispatch.ts";
 import { minutesOnDuty, type Shift } from "../_shared/hours.ts";
 import { ukMonth, ukMonthEnd, ukMonthStart } from "../_shared/ukTime.ts";
 
@@ -630,9 +630,7 @@ Deno.serve(async (req) => {
         const auth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
         try {
           const res = await fetch(
-            `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(
-              DISPATCH_TRANSFER_REFERENCE
-            )}&CheckBookingStatus=true`,
+            statusTransferUrl(DISPATCH_TRANSFER_REFERENCE),
             {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },

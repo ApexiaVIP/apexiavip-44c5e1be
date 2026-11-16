@@ -19,7 +19,7 @@ import {
   type Child,
   type ClientCar,
 } from "../_shared/bookingDetails.ts";
-import { transferAuth } from "../_shared/dispatch.ts";
+import { transferAuth, bookingTransferUrl, statusTransferUrl } from "../_shared/dispatch.ts";
 
 const CLIENT_CAR = "Client's own car";
 
@@ -626,7 +626,7 @@ serve(async (req) => {
         try {
           const statusAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
           const statusRes = await fetch(
-            `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&CheckBookingStatus=true`,
+            statusTransferUrl(DISPATCH_TRANSFER_REFERENCE),
             {
               method: "POST",
               headers: {
@@ -1004,7 +1004,7 @@ serve(async (req) => {
     }
 
     const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
-    const dispatchUrl = `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`;
+    const dispatchUrl = bookingTransferUrl(DISPATCH_TRANSFER_REFERENCE);
 
     let transferFailureMessage: string | null = null;
     const failedReferences: string[] = [];

@@ -25,7 +25,7 @@ import {
   describeClientCar,
   detailLines,
 } from "../_shared/bookingDetails.ts";
-import { transferAuth } from "../_shared/dispatch.ts";
+import { transferAuth, bookingTransferUrl } from "../_shared/dispatch.ts";
 
 const CLIENT_CAR_VEHICLE = "Client's own car";
 
@@ -552,7 +552,7 @@ serve(async (req) => {
 
     const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
 
-    const dispatchUrl = `https://dispatch.deversoftware.com/Dispatch/Transfer/?TransferToReference=${encodeURIComponent(DISPATCH_TRANSFER_REFERENCE)}&BookedBy=Website`;
+    const dispatchUrl = bookingTransferUrl(DISPATCH_TRANSFER_REFERENCE);
 
     let dispatchFailureMessage: string | null = null;
     let returnFailureMessage: string | null = null;
