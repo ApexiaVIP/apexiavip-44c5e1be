@@ -2349,8 +2349,11 @@ const McfcPortal = () => {
                               const live = b.reference ? recentLive[b.reference] : undefined;
                               // What the chauffeur has said back, so nobody
                               // has to message them one at a time to find out
+                              // On the way means the chauffeur pressed en
+                              // route, not that they answered a call on in a
+                              // particular way. Answering says they are up.
                               const said =
-                                b.chauffeur_ack === "on_the_way"
+                                b.driver_status === "en_route"
                                   ? "On the way"
                                   : b.chauffeur_ack_at
                                     ? "Up and has the job"

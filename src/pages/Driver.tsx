@@ -234,37 +234,36 @@ export function NavigateRow({
           {goingToPickup ? "Drive to the collection" : "Drive to the destination"}
         </p>
       )}
-      {onDrive && (
-        <Button
-          onClick={() => onDrive(heading.what)}
-          className="w-full h-16 rounded-none text-sm tracking-[0.12em] uppercase font-light"
-        >
-          <Navigation className="w-4 h-4 mr-2 flex-none" />
-          {goingToPickup ? "Drive to pick up" : "Drive to destination"}
-        </Button>
-      )}
-      {waze && (
+      {waze ? (
         <>
-          <a
-            href={waze}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(event) => {
-              // The https link in href opens Waze but arrives without the
-              // destination, so the app's own scheme is tried first and the
-              // href is only the fallback
-              const app = wazeAppLink(door, place);
-              if (!app) return;
-              event.preventDefault();
-              leaving.current?.();
-              leaving.current = handOffTo(app, waze);
-            }}
-            className="flex h-12 w-full items-center justify-center border border-champagne/40
-                       text-xs font-light uppercase tracking-[0.12em] text-champagne"
+          {/* Waze is the way out of this screen now. The app's own navigation
+              held the big button for as long as leaving put the app to sleep
+              and the passenger watched a car that never moved. That is fixed,
+              and chauffeurs drive by Waze: a prominent alternative only keeps
+              them somewhere nobody wants them. */}
+          <Button
+            asChild
+            className="w-full h-16 rounded-none text-sm tracking-[0.12em] uppercase font-light"
           >
-            <Navigation className="mr-2 h-4 w-4 flex-none" />
-            Open in Waze
-          </a>
+            <a
+              href={waze}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => {
+                // The https link in href opens Waze but arrives without the
+                // destination, so the app's own scheme is tried first and the
+                // href is only the fallback
+                const app = wazeAppLink(door, place);
+                if (!app) return;
+                event.preventDefault();
+                leaving.current?.();
+                leaving.current = handOffTo(app, waze);
+              }}
+            >
+              <Navigation className="mr-2 h-4 w-4 flex-none" />
+              {goingToPickup ? "Open Waze to pick up" : "Open Waze to destination"}
+            </a>
+          </Button>
           {/* Said plainly, because the chauffeurs were told for months that
               leaving the app stopped the passenger seeing them. It did. It
               does not now, and they have no way of knowing that unless the
@@ -272,7 +271,28 @@ export function NavigateRow({
           <p className="text-[10px] font-light tracking-[0.1em] text-smoke">
             Your passenger still sees the car while you are in Waze.
           </p>
+          {/* Kept, quietly. Waze is not installed on every phone and a job
+              still has to be drivable when it is missing. */}
+          {onDrive && (
+            <button
+              onClick={() => onDrive(heading.what)}
+              className="w-full pt-1 text-[10px] font-light uppercase tracking-[0.12em]
+                         text-smoke/60 underline underline-offset-4"
+            >
+              Use the app's own navigation
+            </button>
+          )}
         </>
+      ) : (
+        onDrive && (
+          <Button
+            onClick={() => onDrive(heading.what)}
+            className="w-full h-16 rounded-none text-sm tracking-[0.12em] uppercase font-light"
+          >
+            <Navigation className="w-4 h-4 mr-2 flex-none" />
+            {goingToPickup ? "Drive to pick up" : "Drive to destination"}
+          </Button>
+        )
       )}
     </div>
   );
