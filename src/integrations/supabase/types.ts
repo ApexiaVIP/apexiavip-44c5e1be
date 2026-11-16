@@ -368,6 +368,7 @@ export type Database = {
           ended_at: string | null
           id: string
           started_at: string
+          up_at: string | null
         }
         Insert: {
           created_at?: string
@@ -375,6 +376,7 @@ export type Database = {
           ended_at?: string | null
           id?: string
           started_at?: string
+          up_at?: string | null
         }
         Update: {
           created_at?: string
@@ -382,6 +384,7 @@ export type Database = {
           ended_at?: string | null
           id?: string
           started_at?: string
+          up_at?: string | null
         }
         Relationships: []
       }
