@@ -36,3 +36,6 @@ ios/App/build/
 
 # Scratch folder for the Lightroom album import, not part of the site
 .vehicle-import/
+
+# TypeScript incremental build cache, rewritten on every type check
+*.tsbuildinfo
