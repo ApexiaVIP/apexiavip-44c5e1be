@@ -129,6 +129,17 @@ const CALL_ON_STAGES = [
 ] as const;
 
 /**
+ * The client as it is actually built, not as the library defaults it.
+ * ReturnType<typeof createClient> instantiates the default generics, which
+ * type every table as never, so nothing read through it could be used.
+ */
+const adminClient = (url: string, key: string) =>
+  createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+type Admin = ReturnType<typeof adminClient>;
+
+/**
  * Wake the chauffeurs before their jobs, and let them answer.
  *
  * The booking team message every chauffeur on WhatsApp before every job to
@@ -141,7 +152,7 @@ const CALL_ON_STAGES = [
  * chased by the office, who at least stop.
  */
 const callChauffeursOn = async (
-  admin: ReturnType<typeof createClient>,
+  admin: Admin,
   now: number
 ): Promise<{ due: number; sent: number; noMobile: number }> => {
   // Counted apart on purpose. A single number could not tell nothing being
@@ -224,9 +235,7 @@ serve(async (req) => {
     const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "").trim();
     if (token !== serviceKey) return json(401, { success: false, error: "Not permitted" });
 
-    const admin = createClient(supabaseUrl, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const admin = adminClient(supabaseUrl, serviceKey);
 
     const now = Date.now();
 

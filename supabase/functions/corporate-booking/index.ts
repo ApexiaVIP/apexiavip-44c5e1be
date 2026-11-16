@@ -582,6 +582,17 @@ serve(async (req) => {
       const dayEnd = londonMidnightUtc(
         new Date(Date.parse(dTo) + 86400000).toISOString().slice(0, 10)
       );
+      /**
+       * The columns are assembled at run time, so the library cannot read
+       * them and types each row as an error object. This is what the desk
+       * actually reads off a row.
+       */
+      interface ScheduleRow {
+        reference?: string | null;
+        status?: string | null;
+        name?: string | null;
+        [column: string]: unknown;
+      }
       const schedule = (select: string) =>
         supabase
           .from("bookings")
@@ -589,7 +600,8 @@ serve(async (req) => {
           .eq("corporate", corporate)
           .gte("collection_at", dayStart)
           .lt("collection_at", dayEnd)
-          .order("collection_at");
+          .order("collection_at")
+          .returns<ScheduleRow[]>();
       const columns =
         "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car";
       // Whether the chauffeur has said they are up, so the desk can stop

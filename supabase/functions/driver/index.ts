@@ -690,13 +690,25 @@ Deno.serve(async (req) => {
     const clearedSince = new Date(Date.now() - KEEP_CLEARED_HOURS * 3600 * 1000).toISOString();
     // The call on columns arrive with their migration, which lands after the
     // function does. Until then a chauffeur's day must still open.
+    /**
+     * The columns are assembled at run time, so the library cannot read them
+     * and types each row as an error object. This is what a chauffeur's day
+     * is filtered and built from.
+     */
+    interface DayRow {
+      reference?: string | null;
+      driver_status?: string | null;
+      driver_status_at?: string | null;
+      [column: string]: unknown;
+    }
     const day = (select: string) =>
       admin
         .from("bookings")
         .select(select)
         .eq("driver_id", user.id)
         .not("status", "in", '("Cancelled","Failed")')
-        .order("collection_at", { nullsFirst: false });
+        .order("collection_at", { nullsFirst: false })
+        .returns<DayRow[]>();
     let { data: assigned, error: dayError } = await day(
       `${columns}, called_on_2h_at, called_on_1h_at, chauffeur_ack_at, chauffeur_ack`
     );
