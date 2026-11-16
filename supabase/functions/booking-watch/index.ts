@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { followLink } from "../_shared/notify.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { transferAuth, statusTransferUrl } from "../_shared/dispatch.ts";
+import { claimForChauffeurs } from "../_shared/claimChauffeur.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -298,6 +299,10 @@ serve(async (req) => {
     const data = await res.json();
     const result = Array.isArray(data?.Result) ? data.Result[0] : data;
     const live = Array.isArray(result?.Bookings) ? result.Bookings : [];
+
+    // The sweep is the floor under all of this: with nobody's screen open on
+    // either side, this is what still puts a job in a chauffeur's hands.
+    await claimForChauffeurs(live);
 
     let notified = 0;
     let changed = 0;

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { transferAuth, bookingTransferUrl, statusTransferUrl } from "../_shared/dispatch.ts";
+import { claimForChauffeurs } from "../_shared/claimChauffeur.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -362,6 +363,12 @@ serve(async (req) => {
       .from("bookings")
       .update({ status_checked_at: new Date().toISOString() })
       .in("reference", ownRefs);
+
+    // A passenger watching their car is also, without knowing it, the only
+    // thing asking Dispatch who is driving it. That answer is in hand here,
+    // so the chauffeur is given the job from it rather than having to win a
+    // race against this very screen to ask the same question themselves.
+    await claimForChauffeurs(dispatchBookings);
 
     const statuses = [];
     for (const b of dispatchBookings) {
