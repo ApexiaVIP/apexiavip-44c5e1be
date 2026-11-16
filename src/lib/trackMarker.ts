@@ -100,6 +100,103 @@ export const bearing = (aLat: number, aLng: number, bLat: number, bLng: number):
 
 export const shouldTurn = (metres: number) => metres > HEADING_THRESHOLD_M;
 
+/** A point on the road, as the route gives it. */
+export interface RoutePoint {
+  lat: number;
+  lng: number;
+}
+
+/**
+ * How far ahead along the road to look when deciding which way the car faces.
+ *
+ * A route is made of points a few metres apart, so one of its segments on its
+ * own is too short to read a direction from and jitters on every bend. Thirty
+ * metres is about a car's length of road either side of a junction: long
+ * enough to be steady, short enough that a turn still looks like a turn.
+ */
+const LOOK_AHEAD_M = 30;
+
+/**
+ * Beyond this the car is not on the route we have, so the route cannot say
+ * which way it is pointing. A diversion, a closed road, or a stale route.
+ */
+const OFF_ROUTE_M = 60;
+
+/**
+ * The closest the car gets to one stretch of road, and the point on that
+ * stretch where it happens. Flat earth is plenty over a few dozen metres.
+ */
+const ontoSegment = (
+  lat: number,
+  lng: number,
+  a: RoutePoint,
+  b: RoutePoint
+): { metres: number; at: RoutePoint } => {
+  const scale = Math.cos((lat * Math.PI) / 180);
+  const mx = (d: number) => d * 111_320 * scale;
+  const my = (d: number) => d * 110_540;
+  const px = mx(lng - a.lng);
+  const py = my(lat - a.lat);
+  const bx = mx(b.lng - a.lng);
+  const by = my(b.lat - a.lat);
+  const length = bx * bx + by * by;
+  // A route can repeat a point; that is a point, not a stretch
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, (px * bx + py * by) / length));
+  return {
+    metres: Math.hypot(px - bx * t, py - by * t),
+    at: { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t },
+  };
+};
+
+/**
+ * Which way the road runs where the car is, in degrees clockwise from north.
+ *
+ * The car's reports arrive the better part of a minute apart, so the line
+ * between two of them is the straight hop across whatever the road did in
+ * between: around a bend it points through the houses on the corner, and on
+ * a dual carriageway slip road it points at the roundabout rather than along
+ * the lane. We already know the route the car is driving, so the road itself
+ * can say which way the car is facing.
+ *
+ * Null when there is no route, or the car is nowhere near it, and the caller
+ * keeps whatever it had rather than swinging the car to a guess.
+ */
+export const headingAlongRoute = (
+  line: RoutePoint[] | null | undefined,
+  lat: number,
+  lng: number
+): number | null => {
+  if (!line || line.length < 2) return null;
+
+  let nearest = -1;
+  let nearestM = Infinity;
+  let on: RoutePoint = { lat, lng };
+  for (let i = 0; i < line.length - 1; i++) {
+    const got = ontoSegment(lat, lng, line[i], line[i + 1]);
+    if (got.metres < nearestM) {
+      nearestM = got.metres;
+      nearest = i;
+      on = got.at;
+    }
+  }
+  if (nearest < 0 || nearestM > OFF_ROUTE_M) return null;
+
+  // Taken from where the car sits on the road rather than from the fix
+  // itself. A fix lands a lane or two off the drawn line often enough, and
+  // measuring from there tips the car towards the kerb it is nearest.
+  let i = nearest + 1;
+  let ahead = line[i];
+  let gone = metresBetween(on.lat, on.lng, ahead.lat, ahead.lng);
+  while (gone < LOOK_AHEAD_M && i < line.length - 1) {
+    i += 1;
+    gone += metresBetween(line[i - 1].lat, line[i - 1].lng, line[i].lat, line[i].lng);
+    ahead = line[i];
+  }
+  // At the very end of the route there is no road left to point along
+  if (gone < 1) return null;
+  return bearing(on.lat, on.lng, ahead.lat, ahead.lng);
+};
+
 export const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
 export const prefersReducedMotion = () =>
@@ -122,4 +219,24 @@ export const lookUpPostcode = async (
   } catch {
     return null;
   }
+};
+
+/**
+ * Which way to point the car now.
+ *
+ * The road wins where we know it. Failing that, the line between the last two
+ * positions, and failing that, whatever the car was already doing: a car that
+ * has not really moved must not spin on the spot because a fix wobbled.
+ */
+export const turnTo = (
+  route: RoutePoint[] | null | undefined,
+  lat: number,
+  lng: number,
+  from: RoutePoint,
+  moved: number,
+  before: number
+): number => {
+  const road = headingAlongRoute(route, lat, lng);
+  if (road !== null) return road;
+  return shouldTurn(moved) ? bearing(from.lat, from.lng, lat, lng) : before;
 };

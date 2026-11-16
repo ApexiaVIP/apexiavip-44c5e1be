@@ -9,20 +9,22 @@ import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 import {
   glideFor,
-  bearing,
   carElement,
   easeInOut,
   lookUpPostcode,
   metresBetween,
   pickupElement,
   prefersReducedMotion,
-  shouldTurn,
+  type RoutePoint,
+  turnTo,
 } from "@/lib/trackMarker";
 
 interface Props {
   lat: number;
   lng: number;
   pickupPostcode?: string;
+  /** The road the car is driving, so it can be pointed along it. */
+  route?: RoutePoint[] | null;
 }
 
 /**
@@ -39,7 +41,7 @@ const STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
 /** Close enough to see which street the car is on. */
 const FOLLOW_ZOOM = 16;
 
-const TrackMapVector = ({ lat, lng, pickupPostcode }: Props) => {
+const TrackMapVector = ({ lat, lng, pickupPostcode, route }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const carRef = useRef<maplibregl.Marker | null>(null);
@@ -91,7 +93,7 @@ const TrackMapVector = ({ lat, lng, pickupPostcode }: Props) => {
     const glide = glideFor(lastAtRef.current ? arrived - lastAtRef.current : 0);
     lastAtRef.current = arrived;
     const moved = metresBetween(from.lat, from.lng, lat, lng);
-    if (shouldTurn(moved)) headingRef.current = bearing(from.lat, from.lng, lat, lng);
+    headingRef.current = turnTo(route, lat, lng, from, moved, headingRef.current);
     const inner = car.getElement().querySelector<HTMLElement>(".apx-car");
     if (inner) inner.style.transform = `rotate(${headingRef.current}deg)`;
 
@@ -119,7 +121,7 @@ const TrackMapVector = ({ lat, lng, pickupPostcode }: Props) => {
     if (moved > 25 || !comfortable) {
       map.easeTo({ center: [lng, lat], duration: 800 });
     }
-  }, [lat, lng]);
+  }, [lat, lng, route]);
 
   // Mark the pickup, which never decides the zoom
   useEffect(() => {

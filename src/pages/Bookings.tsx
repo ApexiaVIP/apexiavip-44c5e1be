@@ -1,10 +1,10 @@
 import { Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Loader2, MapPin, Phone } from "lucide-react";
+import { ArrowRight, Loader2, MapPin } from "lucide-react";
 import MemberLayout from "@/components/MemberLayout";
 import { GET_APP_URL, isInstalledApp } from "@/lib/appLinks";
-import TrackMap from "@/components/TrackMap";
-import ArrivalTime from "@/components/ArrivalTime";
+import LiveCar from "@/components/LiveCar";
+import ReachChauffeur from "@/components/ReachChauffeur";
 import {
   ACTIVE_STATUSES,
   DRIVER_STATUS_AS_DISPATCH,
@@ -425,17 +425,7 @@ const Bookings = () => {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              {live?.driver?.mobile && (
-                <a
-                  href={`tel:${live.driver.mobile}`}
-                  className="inline-flex items-center gap-1.5 text-smoke hover:text-foreground transition-colors text-xs tracking-[0.15em] uppercase"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  Call
-                </a>
-              )}
-            </div>
+            {live?.driver?.mobile && <ReachChauffeur mobile={live.driver.mobile} />}
           </div>
         )}
 
@@ -460,7 +450,7 @@ const Bookings = () => {
 
         {mapVisible && (
           <div className="space-y-2">
-            <ArrivalTime
+            <LiveCar
               reference={b.reference ?? ""}
               pickup={b.pickup}
               dropoff={b.dropoff}
@@ -470,10 +460,6 @@ const Bookings = () => {
               driverLng={driverLng}
               positionAt={b.driver_position_at}
               etaAt={b.driver_eta_at}
-            />
-            <TrackMap
-              lat={driverLat}
-              lng={driverLng}
               pickupPostcode={b.pickup?.postcode}
             />
             {(() => {

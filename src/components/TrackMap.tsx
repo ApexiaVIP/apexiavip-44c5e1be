@@ -2,6 +2,7 @@ import { Suspense, lazy, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import TrackMapRaster from "./TrackMapRaster";
 import { googleMapsConfigured } from "@/lib/googleMaps";
+import type { RoutePoint } from "@/lib/trackMarker";
 
 export interface TrackMapProps {
   /** Driver position */
@@ -9,6 +10,8 @@ export interface TrackMapProps {
   lng: number;
   /** Pickup postcode, used to place a destination marker */
   pickupPostcode?: string;
+  /** The road the car is driving, so it can be pointed along it */
+  route?: RoutePoint[] | null;
 }
 
 // Only fetched when a member actually opens a live map, so the booking

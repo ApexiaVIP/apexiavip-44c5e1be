@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef } from "react";
 import { loadGoogleMaps, mapId } from "@/lib/googleMaps";
 import {
   glideFor,
-  bearing,
   carElement,
   easeInOut,
   lookUpPostcode,
   metresBetween,
   pickupElement,
   prefersReducedMotion,
-  shouldTurn,
+  type RoutePoint,
+  turnTo,
 } from "@/lib/trackMarker";
 
 /** Close enough to see which street the car is on. */
@@ -23,6 +23,8 @@ export interface Props {
   lng: number;
   /** Where the car is going, as a pin that never decides the zoom. */
   pickupPostcode?: string;
+  /** The road the car is driving, so it can be pointed along it. */
+  route?: RoutePoint[] | null;
   /** Google would not load, so the screen can fall back to the open map. */
   onUnavailable: () => void;
 }
@@ -39,7 +41,7 @@ export interface Props {
  * watching a car rather than driving it, and a tilted map that swings with
  * every turn is harder to follow from the back seat.
  */
-const TrackMapGoogle = ({ lat, lng, pickupPostcode, onUnavailable }: Props) => {
+const TrackMapGoogle = ({ lat, lng, pickupPostcode, route, onUnavailable }: Props) => {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const carRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
@@ -134,7 +136,7 @@ const TrackMapGoogle = ({ lat, lng, pickupPostcode, onUnavailable }: Props) => {
     const glide = glideFor(lastAtRef.current ? arrived - lastAtRef.current : 0);
     lastAtRef.current = arrived;
     const moved = metresBetween(from.lat, from.lng, lat, lng);
-    if (shouldTurn(moved)) headingRef.current = bearing(from.lat, from.lng, lat, lng);
+    headingRef.current = turnTo(route, lat, lng, from, moved, headingRef.current);
     const inner = (marker.content as HTMLElement)?.querySelector<HTMLElement>(".apx-car");
     if (inner) inner.style.transform = `rotate(${headingRef.current}deg)`;
 
@@ -179,7 +181,7 @@ const TrackMapGoogle = ({ lat, lng, pickupPostcode, onUnavailable }: Props) => {
       if (moved > NUDGE_M || !comfortable) map.panTo({ lat, lng });
     });
 
-  }, [lat, lng, guarded]);
+  }, [lat, lng, route, guarded]);
 
   /** Mark where the car is headed, once we know where that is. */
   useEffect(() => {

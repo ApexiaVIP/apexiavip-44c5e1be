@@ -1,8 +1,9 @@
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { dueFromRoute, whenDue, STALE_AFTER_MS } from "@/lib/eta";
 import { destinationQuery, nextDestination, postcodeFor, type Place } from "@/lib/navigation";
-import { lookUpPostcode } from "@/lib/trackMarker";
+import { lookUpPostcode, type RoutePoint } from "@/lib/trackMarker";
 import { fromGoogle, fromOsrm } from "@/lib/navRoute";
 
 /**
@@ -22,6 +23,15 @@ interface Props {
   driverLng: number | null;
   positionAt: string | null;
   etaAt: string | null;
+  /**
+   * The road this car is driving, handed over as it is worked out.
+   *
+   * The arrival time is the only thing on the passenger's screen that knows
+   * the route, and it used to read the minutes off it and throw the road
+   * away. The map wants the same road to point the car along, and asking for
+   * it twice would be paying twice for one answer.
+   */
+  onRoute?: (line: RoutePoint[] | null) => void;
 }
 
 /**
@@ -48,6 +58,7 @@ const ArrivalTime = ({
   driverLng,
   positionAt,
   etaAt,
+  onRoute,
 }: Props) => {
   /** What the chauffeur's sat nav is working to, where they are using it. */
   const told = whenDue(etaAt, positionAt, driverStatus);
@@ -93,9 +104,13 @@ const ArrivalTime = ({
       // Held against the moment it was worked out, so the time stays put and
       // the minutes count down, rather than the arrival sliding away as the
       // screen refreshes
-      return route ? { seconds: route.seconds, at: Date.now() } : null;
+      return route ? { seconds: route.seconds, at: Date.now(), line: route.line } : null;
     },
   });
+
+  useEffect(() => {
+    onRoute?.(worked?.line ?? null);
+  }, [worked, onRoute]);
 
   const due = told ?? dueFromRoute(worked, positionAt, driverStatus);
   if (!due) return null;

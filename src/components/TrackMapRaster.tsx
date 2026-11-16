@@ -3,20 +3,22 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   glideFor,
-  bearing,
   carElement,
   easeInOut,
   lookUpPostcode,
   metresBetween,
   pickupElement,
   prefersReducedMotion,
-  shouldTurn,
+  type RoutePoint,
+  turnTo,
 } from "@/lib/trackMarker";
 
 interface Props {
   lat: number;
   lng: number;
   pickupPostcode?: string;
+  /** The road the car is driving, so it can be pointed along it. */
+  route?: RoutePoint[] | null;
 }
 
 /**
@@ -37,7 +39,7 @@ const FOLLOW_ZOOM = 16;
 const carIcon = L.divIcon({ className: "", html: carElement().innerHTML, iconSize: [30, 30], iconAnchor: [15, 15] });
 const pickupIcon = L.divIcon({ className: "", html: pickupElement().innerHTML, iconSize: [14, 14], iconAnchor: [7, 7] });
 
-const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
+const TrackMapRaster = ({ lat, lng, pickupPostcode, route }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const carRef = useRef<L.Marker | null>(null);
@@ -81,7 +83,7 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
     const glide = glideFor(lastAtRef.current ? arrived - lastAtRef.current : 0);
     lastAtRef.current = arrived;
     const moved = metresBetween(from.lat, from.lng, lat, lng);
-    if (shouldTurn(moved)) headingRef.current = bearing(from.lat, from.lng, lat, lng);
+    headingRef.current = turnTo(route, lat, lng, from, moved, headingRef.current);
     const inner = car.getElement()?.querySelector<HTMLElement>(".apx-car");
     if (inner) inner.style.transform = `rotate(${headingRef.current}deg)`;
 
@@ -105,7 +107,7 @@ const TrackMapRaster = ({ lat, lng, pickupPostcode }: Props) => {
     if (moved > 25 || !map.getBounds().pad(-0.25).contains(position)) {
       map.panTo(position, { animate: true, duration: 0.8 });
     }
-  }, [lat, lng]);
+  }, [lat, lng, route]);
 
   useEffect(() => {
     if (!pickupPostcode || pickupRef.current) return;
