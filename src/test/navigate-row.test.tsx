@@ -18,6 +18,7 @@ const job: Job = {
   notes: null,
   children: null,
   passengers: null,
+  bags: null,
   corporate: null,
   driver_status: null,
   driver_status_at: null,
