@@ -85,6 +85,8 @@ interface CarRequest {
   /** Car stays at the passenger's disposal rather than ending somewhere */
   asDirected: boolean;
   asDirectedHours: number;
+  /** Hold luggage, so the chauffeur knows the boot before they set off */
+  bags: number;
   /** Ages of any children aboard; decides the seats we fit */
   children: number[];
   /** When the vehicle is the client's own: what it is and whether they ride */
@@ -295,6 +297,7 @@ interface RecentBooking {
   booked_by?: string;
   mine?: boolean;
   notes?: string | null;
+  bags?: number | null;
   children?: { age: number }[] | null;
   client_car?: { make_model?: string; registration?: string; client_travelling?: boolean } | null;
 }
@@ -313,6 +316,7 @@ const emptyCar = (): CarRequest => ({
   notes: "",
   asDirected: false,
   asDirectedHours: 4,
+  bags: 0,
   children: [],
   clientCar: emptyClientCar(),
 });
@@ -1160,6 +1164,7 @@ const McfcPortal = () => {
         notes: (b as { notes?: string | null }).notes ?? "",
         asDirected: b.journey_type === "hourly",
         asDirectedHours: b.as_directed_hours ?? 4,
+        bags: b.bags ?? 0,
         children: Array.isArray((b as { children?: { age: number }[] | null }).children)
           ? ((b as { children?: { age: number }[] }).children ?? []).map((c) => Number(c.age) || 0)
           : [],
@@ -1240,6 +1245,7 @@ const McfcPortal = () => {
               notes: c.notes.trim(),
               asDirected: c.asDirected,
               asDirectedHours: c.asDirectedHours,
+              bags: c.bags,
               children: c.children.map((age) => ({ age })),
               ...(c.vehicle === CLIENT_CAR
                 ? {
@@ -2218,10 +2224,29 @@ const McfcPortal = () => {
 
               <div className="mt-4">
                 <label className={lightLabel} style={{ color: `${NAVY}99` }}>
+                  Luggage
+                </label>
+                <select
+                  value={car.bags}
+                  onChange={(e) => updateCar(i, { bags: Number(e.target.value) })}
+                  className={lightInput}
+                  style={lightInputStyle}
+                >
+                  <option value={0}>Not known</option>
+                  {Array.from({ length: 12 }, (_, n) => n + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n} {n === 1 ? "case" : "cases"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-4">
+                <label className={lightLabel} style={{ color: `${NAVY}99` }}>
                   Notes for the chauffeur (optional)
                 </label>
                 <input
-                  placeholder="Meeting point, luggage, discretion notes"
+                  placeholder="Meeting point, discretion notes"
                   value={car.notes}
                   onChange={(e) => updateCar(i, { notes: e.target.value })}
                   className={lightInput}

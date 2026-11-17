@@ -96,6 +96,8 @@ const sanitize = (str: string) =>
 
 /** Dispatch carries the first and last address plus up to 10 stops en route. */
 const MAX_STOPS = 12;
+/** The member booking form's own ceiling, kept the same so the two agree. */
+const MAX_BAGS = 30;
 
 interface Stop {
   type: "pickup" | "dropoff";
@@ -118,6 +120,8 @@ interface CarRequest {
   /** Car stays at the passenger's disposal; the journey has no fixed end */
   asDirected?: boolean;
   asDirectedHours?: number;
+  /** Hold luggage, so the chauffeur knows the boot before they set off */
+  bags?: number;
   children?: unknown;
   clientCar?: unknown;
   // Legacy single-leg shape, still accepted
@@ -542,7 +546,7 @@ serve(async (req) => {
       const { data: rows, error: recentError } = await supabase
         .from("bookings")
         .select(
-          "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops, journey_type, as_directed_hours, notes, children, client_car, user_id, created_at, driver_status"
+          "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops, journey_type, as_directed_hours, bags, notes, children, client_car, user_id, created_at, driver_status"
         )
         .eq("corporate", corporate)
         .order("created_at", { ascending: false })
@@ -732,6 +736,7 @@ serve(async (req) => {
       sizes: Map<string, number>;
       asDirected: boolean;
       asDirectedHours: number;
+      bags: number;
       children: Child[];
       clientCar: ClientCar | null;
     }[] = [];
@@ -763,6 +768,10 @@ serve(async (req) => {
       if (asDirected && (!Number.isFinite(asDirectedHours) || asDirectedHours < 1 || asDirectedHours > 24)) {
         return json(400, { success: false, error: `${label}: choose how many hours the car is needed for` });
       }
+
+      // Nothing entered is zero, which is also what "no cases" looks like.
+      // Neither is worth refusing a booking over, so it is bounded, not judged.
+      const bags = Math.min(Math.max(Math.trunc(Number(car.bags) || 0), 0), MAX_BAGS);
 
       const rawStops: unknown[] = Array.isArray(car.stops) && car.stops.length > 0
         ? car.stops
@@ -847,6 +856,7 @@ serve(async (req) => {
         sizes: walked.sizes,
         asDirected,
         asDirectedHours,
+        bags,
         children,
         clientCar,
       });
@@ -897,7 +907,7 @@ serve(async (req) => {
 
     const dispatchBookings = cars.map((car, i) => {
       const journey = journeys[i];
-      const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journey;
+      const { stops, manifest, peak, sizes, asDirected, asDirectedHours, bags } = journey;
       const labelled = manifest.map((n) => withCount(n, sizes));
       const reference = amendReference ?? `APEXIA-${deskName}-${requestId}-C${i + 1}`;
       const last = stops[stops.length - 1];
@@ -915,7 +925,7 @@ serve(async (req) => {
         PassengerMobileNumber: bookerPhone,
         PassengerEmailAddress: bookerEmail || "info@apexiavip.com",
         BookingClass: vehicleToBookingClass[car.vehicle] || "Executive",
-        NumSuitcases: 0,
+        NumSuitcases: bags,
         // "Website" is the source the booking system recognises; desk bookings
         // sent an unrecognised source and landed as quotations
         BookedBy: "Website",
@@ -951,7 +961,7 @@ serve(async (req) => {
     // Store each car against the booker so it shows in the portal history
     const carRowValues = cars.map((car, i) => {
       const journey = journeys[i];
-      const { stops, manifest, peak, sizes, asDirected, asDirectedHours } = journey;
+      const { stops, manifest, peak, sizes, asDirected, asDirectedHours, bags } = journey;
       const last = stops[stops.length - 1];
       const endsWithDropoff = last?.type === "dropoff";
       const viaStops = asDirected && !endsWithDropoff ? stops.slice(1) : stops.slice(1, -1);
@@ -962,7 +972,7 @@ serve(async (req) => {
         travel_date: `${day}-${monthName}-${year} ${car.time}`,
         vehicle: car.vehicle,
         passengers: peak,
-        bags: 0,
+        bags,
         // A time typed at the desk means the time here. Without a zone the
         // server read it as UTC, putting every car an hour late all summer.
         collection_at: ukWallClockUtc(travelDate, car.time).toISOString(),
