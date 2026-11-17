@@ -681,7 +681,7 @@ Deno.serve(async (req) => {
 
     const myKey = phoneKey(profile.phone as string);
     const columns =
-      "reference, name, vehicle, collection_at, travel_date, pickup, dropoff, via, stops, journey_type, as_directed_hours, notes, children, client_car, passengers, status, corporate, driver_id, driver_status, driver_status_at, job_report_sent_at";
+      "reference, name, vehicle, collection_at, travel_date, pickup, dropoff, via, stops, journey_type, as_directed_hours, notes, children, client_car, passengers, bags, status, corporate, driver_id, driver_status, driver_status_at, job_report_sent_at";
 
     // 1. Pick up anything Dispatch has newly put in this chauffeur's name.
     //    Once seen it is written down, so the job survives a bad answer from

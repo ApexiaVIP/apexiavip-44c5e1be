@@ -70,6 +70,9 @@ interface Job {
   notes: string | null;
   children: { age: number }[] | null;
   passengers: number | null;
+  /** Hold luggage. Only member bookings carry a real count: the desk form
+      does not ask, so a corporate journey always stores zero. */
+  bags: number | null;
   corporate: string | null;
   driver_status: Step | null;
   driver_status_at: string | null;
@@ -834,6 +837,7 @@ const Driver = () => {
               {job.vehicle}
               {regFor(job) ? ` · ${regFor(job)}` : ""}
               {job.passengers ? ` · ${job.passengers} up` : ""}
+              {job.bags ? ` · ${job.bags} bag${job.bags === 1 ? "" : "s"}` : ""}
             </p>
           </div>
           <span className="text-[10px] tracking-[0.15em] uppercase border border-champagne-muted text-champagne px-2 py-1">
