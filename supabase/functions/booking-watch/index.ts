@@ -4,6 +4,7 @@ import { followLink } from "../_shared/notify.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { transferAuth, statusTransferUrl } from "../_shared/dispatch.ts";
 import { claimForChauffeurs } from "../_shared/claimChauffeur.ts";
+import { classify, shouldAnnounce } from "../_shared/journeyStage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,46 +58,6 @@ const trySendSms = async (to: string, message: string) => {
     console.error("Status SMS failed:", err);
     return false;
   }
-};
-
-/**
- * Dispatch wording varies, so statuses are matched loosely and only the moments
- * a passenger benefits from hearing about are texted. Anything unrecognised is
- * recorded but never texted, so a new status can never send nonsense.
- */
-type Moment = "assigned" | "onroute" | "arrived" | "cancelled" | null;
-
-const classify = (status: string): Moment => {
-  const s = status.toLowerCase().replace(/[^a-z]/g, "");
-  if (!s) return null;
-  if (s.includes("cancel")) return "cancelled";
-  if (
-    s.includes("onroute") ||
-    s.includes("enroute") ||
-    s.includes("onway") ||
-    s.includes("ontheway") ||
-    s.includes("travelling")
-  ) {
-    return "onroute";
-  }
-  if (
-    s.includes("arrived") ||
-    s.includes("atpickup") ||
-    s.includes("waiting") ||
-    s.includes("onsite")
-  ) {
-    return "arrived";
-  }
-  if (
-    s.includes("dispatch") ||
-    s.includes("allocated") ||
-    s.includes("assigned") ||
-    s.includes("accepted")
-  ) {
-    return "assigned";
-  }
-  // Passenger on board, completed, no show: nothing useful to say to them
-  return null;
 };
 
 const ukWhen = (iso: string | null) =>
@@ -365,11 +326,17 @@ serve(async (req) => {
         details.push({ reference: b.reference, status, outcome: "already texted" });
         continue;
       }
-      // The chauffeur's own app texts the passenger the moment they set off
-      // and the moment they arrive. Dispatch reaching the same point later
-      // must not say it again.
-      if (moment && moment === b.driver_moment) {
-        details.push({ reference: b.reference, status, outcome: "chauffeur already texted" });
+      // The chauffeur's own app texts the moment a button is pressed, and this
+      // sweep only reads Dispatch every few minutes, so it regularly arrives
+      // holding older news than the passenger already has. A journey runs one
+      // way: never announce a stage we have already passed.
+      if (
+        !shouldAnnounce(moment, {
+          driverMoment: b.driver_moment as string | null,
+          notifiedStatus: b.notified_status as string | null,
+        })
+      ) {
+        details.push({ reference: b.reference, status, outcome: "already past that stage" });
         continue;
       }
 
