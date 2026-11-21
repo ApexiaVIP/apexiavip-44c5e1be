@@ -111,6 +111,14 @@ const DISCOVER_BEHIND_HOURS = 12;
 const DISCOVER_AHEAD_HOURS = 48;
 
 /**
+ * How far ahead a chauffeur can see their own diary while off duty. A week,
+ * because the request that prompted it was about preparing for a named
+ * passenger the day before, and because a chauffeur with Saturday 6am on
+ * Monday arranges their week around it.
+ */
+const DIARY_AHEAD_DAYS = 7;
+
+/**
  * Dispatch refuses a status check within thirty seconds of the last one for
  * the same booking, and refuses the whole request when one booking in it is
  * too soon.
@@ -666,14 +674,32 @@ Deno.serve(async (req) => {
       .is("ended_at", null)
       .maybeSingle();
 
-    // Off duty, there is no day to show. The screen asks them to sign on
-    // rather than offering jobs they are not yet working.
+    // Off duty there is no day to work, but there is a week to prepare for.
+    // The diary is deliberately a separate key from jobs: splitJobs would make
+    // the first entry the current job and isWorkable would then let a chauffeur
+    // press En route on Saturday's airport run on a Monday. Keeping it apart
+    // means the workable-job logic cannot see it at all, so the rule that the
+    // shift clock is the timesheet survives untouched.
     if (!open.data) {
+      const until = new Date(Date.now() + DIARY_AHEAD_DAYS * 86400 * 1000).toISOString();
+      const { data: ahead } = await admin
+        .from("bookings")
+        .select(
+          "reference, name, vehicle, collection_at, pickup, dropoff, via, journey_type, as_directed_hours, notes, children, client_car, passengers, bags, corporate"
+        )
+        .eq("driver_id", user.id)
+        .not("status", "in", '("Cancelled","Failed")')
+        .not("collection_at", "is", null)
+        .gte("collection_at", new Date().toISOString())
+        .lte("collection_at", until)
+        .order("collection_at");
+
       return json(200, {
         success: true,
         driver: { name: profile.full_name, phone: profile.phone },
         shift: null,
         jobs: [],
+        diary: ahead ?? [],
         waypoints: [],
         offDuty: true,
       });

@@ -153,6 +153,72 @@ const ukDay = (iso: string | null) =>
 
 const addressLine = (a: Job["pickup"]) => [a?.line1, a?.town].filter(Boolean).join(", ") || "";
 
+/**
+ * What is coming, for a chauffeur who is not working yet. Deliberately not a
+ * Job: it has no status and no reference to press, so nothing on this screen
+ * can turn reading the week ahead into working it off the clock.
+ */
+interface DiaryEntry {
+  reference: string;
+  name: string | null;
+  vehicle: string | null;
+  collection_at: string | null;
+  pickup: Job["pickup"];
+  dropoff: Job["dropoff"];
+  journey_type: string | null;
+  as_directed_hours: number | null;
+  notes: string | null;
+  passengers: number | null;
+  bags: number | null;
+}
+
+/**
+ * The week ahead, for a chauffeur who has not signed on yet.
+ *
+ * The rule this exists to keep: there is nothing here to press. A chauffeur
+ * reading Saturday's airport run on a Monday must not be able to start it,
+ * because the shift clock is the timesheet and a job worked off it is hours
+ * nobody is paid for. Exported so that rule can be asserted rather than
+ * trusted.
+ */
+export const WeekAhead = ({ diary }: { diary: DiaryEntry[] }) => {
+  if (diary.length === 0) return null;
+  return (
+    <div className="text-left border-t border-border pt-6 space-y-4">
+      <p className="text-[10px] tracking-[0.2em] uppercase text-smoke">Your week ahead</p>
+      {diary.map((d) => (
+        <div key={d.reference} className="border-l border-champagne-muted pl-3 space-y-0.5">
+          <p className="text-champagne text-sm font-mono">
+            {ukDay(d.collection_at)} · {ukTime(d.collection_at)}
+          </p>
+          <p className="text-foreground text-sm font-light">
+            {d.name || "Passenger"}
+            <span className="text-smoke">
+              {d.vehicle ? ` · ${d.vehicle}` : ""}
+              {d.passengers ? ` · ${d.passengers} up` : ""}
+              {d.bags ? ` · ${d.bags} bag${d.bags === 1 ? "" : "s"}` : ""}
+            </span>
+          </p>
+          <p className="text-smoke text-xs leading-relaxed">
+            {addressLine(d.pickup)}
+            {d.journey_type === "hourly"
+              ? ` · as directed, ${d.as_directed_hours ?? 0} hours`
+              : addressLine(d.dropoff)
+                ? ` to ${addressLine(d.dropoff)}`
+                : ""}
+          </p>
+          {d.notes && (
+            <p className="text-note text-xs leading-relaxed whitespace-pre-wrap">{d.notes}</p>
+          )}
+        </div>
+      ))}
+      <p className="text-smoke text-[11px] leading-relaxed">
+        Sign on when you start, and the job you are working appears here.
+      </p>
+    </div>
+  );
+};
+
 const stepLabel: Record<string, string> = {
   en_route: "En route",
   arrived: "Arrived",
@@ -499,6 +565,7 @@ const Driver = () => {
   const waypoints = (data?.waypoints ?? []) as Waypoint[];
 
   const onShift = !!shift;
+  const diary = (data?.diary ?? []) as DiaryEntry[];
   /**
    * There is a job on this screen and it is not finished.
    *
@@ -1000,6 +1067,8 @@ const Driver = () => {
                 )}
                 Sign on
               </Button>
+
+              <WeekAhead diary={diary} />
             </div>
           ) : (
             <>
