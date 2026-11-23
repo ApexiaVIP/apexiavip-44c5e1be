@@ -358,14 +358,17 @@ serve(async (req) => {
     const result = Array.isArray(dispatchData?.Result) ? dispatchData.Result[0] : dispatchData;
     const dispatchBookings = Array.isArray(result?.Bookings) ? result.Bookings : [];
 
-    const transferStatus = result?.TransferStatus ?? null;
-    const transferMessage = result?.Message ?? null;
+    const checkStatus = result?.CheckStatus ?? result?.TransferStatus ?? null;
+    const checkMessage = result?.Message ?? null;
+    if (checkStatus === "Failed") {
+      console.error("Dispatch refused the status check:", checkMessage, JSON.stringify(ownRefs));
+    }
     console.log(
       "Dispatch status reply",
       JSON.stringify({
         asked: ownRefs,
-        transferStatus,
-        transferMessage,
+        checkStatus,
+        checkMessage,
         returned: dispatchBookings.map((b: Record<string, unknown>) => ({
           reference: b?.Reference ?? null,
           status: b?.Status ?? null,
@@ -442,7 +445,7 @@ serve(async (req) => {
     return json(200, {
       statuses,
       asked: ownRefs,
-      dispatch: { transferStatus, message: transferMessage },
+      dispatch: { checkStatus, message: checkMessage },
     });
   } catch (error) {
     console.error("booking-status error:", error);
