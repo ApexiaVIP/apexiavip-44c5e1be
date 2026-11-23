@@ -398,7 +398,20 @@ serve(async (req) => {
     });
     if (!dispatchRes.ok) {
       console.error("Dispatch status HTTP", dispatchRes.status, await dispatchRes.text());
-      return json(502, { error: "We could not reach the booking system. Please try again." });
+      // Being told to wait, or Dispatch falling over, is not knowing, and
+      // neither is a reason to wipe the screen: answer from what we saved, as
+      // for a held or refused booking. Nothing is stamped, because nothing was
+      // answered and a stamp would hold the next real attempt back. The code
+      // is in the message so a wait can be told apart from an outage.
+      const message = dispatchRes.status === 429
+        ? `Dispatch asked us to wait (${dispatchRes.status})`
+        : `Dispatch could not be reached (${dispatchRes.status})`;
+      return json(200, {
+        statuses: [...ownRefs.map(fromSavedRow), ...savedStatuses],
+        asked: ownRefs,
+        held: heldRefs,
+        dispatch: { checkStatus: "Failed", message },
+      });
     }
     const dispatchData = await dispatchRes.json();
     const result = Array.isArray(dispatchData?.Result) ? dispatchData.Result[0] : dispatchData;

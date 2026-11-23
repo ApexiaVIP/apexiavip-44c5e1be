@@ -668,11 +668,22 @@ serve(async (req) => {
               body: JSON.stringify({ Bookings: refs.map((reference) => ({ Reference: reference })) }),
             }
           );
-          // Record the asking, so the sweep and the chauffeur's app stand aside
-          await supabase
-            .from("bookings")
-            .update({ status_checked_at: new Date().toISOString() })
-            .in("reference", refs);
+          if (!statusRes.ok) {
+            // Told to wait, or Dispatch falling over: no answer, so the desk
+            // shows what we saved rather than TBC, and nothing is stamped, as
+            // a stamp would hold the next real attempt back for no reason
+            console.error("Dispatch day view status HTTP", statusRes.status, await statusRes.text());
+            for (const r of active) {
+              const reference = r.reference as string;
+              if (reference && refs.includes(reference)) live[reference] = fromSavedRow(r);
+            }
+          } else {
+            // Record the asking, so the sweep and the chauffeur's app stand aside
+            await supabase
+              .from("bookings")
+              .update({ status_checked_at: new Date().toISOString() })
+              .in("reference", refs);
+          }
           if (statusRes.ok) {
             const statusData = await statusRes.json();
             const statusResult = Array.isArray(statusData?.Result) ? statusData.Result[0] : statusData;

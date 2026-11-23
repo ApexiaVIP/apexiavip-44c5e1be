@@ -126,7 +126,7 @@ is("in a single write rather than one per booking", r.stamps.length, 1);
 // the sweep step around a booking nobody actually asked about
 dispatchHttp = 429;
 r = await ask(["APEXIA-1"]);
-is("a refused request answers 502", r.status, 502);
+is("a request Dispatch told to wait still answers 200", r.status, 200);
 is("and records no check", r.stamps.length, 0);
 dispatchHttp = 200;
 
@@ -296,6 +296,53 @@ is("and Dispatch is never asked about it", asked.length, 0);
   is("and the held booking still carries its saved chauffeur", by("APEXIA-HELD-NAMED")[0]?.driver?.name, "Saved Chauffeur");
 
   answerFor = [];
+}
+
+// Being told to wait, or Dispatch falling over, is not knowing, and neither
+// is a reason to wipe the screen. Every booking asked about comes back from
+// what we saved, nothing is stamped (we got no answer, and a stamp would hold
+// the next real attempt back), and the HTTP status reaches the logs and the
+// reply so a wait can be told apart from an outage.
+for (const code of [429, 500]) {
+  const errors = [];
+  const realError = console.error;
+  console.error = (...args) => { errors.push(args.map(String).join(" ")); realError(...args); };
+  asked = [];
+  globalThis.__writes.length = 0;
+  globalThis.__tables = {
+    mfa_sessions: [{ id: "s1", session_id: "sess-1" }],
+    profiles: [{ id: "member-1", status: "active", corporate: null, corporate_groups: null }],
+    rate_limits: [],
+    bookings: [
+      { reference: "APEXIA-WAIT-1", user_id: "member-1", corporate: null, name: "A Member", status_checked_at: null, status: "Dispatched", driver_id: null, driver_name: "Saved Chauffeur" },
+      { reference: "APEXIA-WAIT-2", user_id: "member-1", corporate: null, name: "A Member", status_checked_at: null, status: "Confirmed", driver_id: null, driver_name: null },
+    ],
+  };
+  dispatchHttp = code;
+  const res = await handler(new Request("https://x/booking-status", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ references: ["APEXIA-WAIT-1", "APEXIA-WAIT-2"] }),
+  }));
+  const body = await res.json();
+  dispatchHttp = 200;
+  console.error = realError;
+  const one = (ref) => (body.statuses ?? []).find((x) => x.reference === ref);
+  const stamps = globalThis.__writes.filter((w) => w.table === "bookings" && w.payload?.status_checked_at);
+
+  is(`HTTP ${code}: both bookings were asked about`, asked.join(","), "APEXIA-WAIT-1,APEXIA-WAIT-2");
+  is(`HTTP ${code}: answers 200, not 502`, res.status, 200);
+  is(`HTTP ${code}: an entry for every booking asked about`, (body.statuses ?? []).length, 2);
+  is(`HTTP ${code}: carrying the saved chauffeur's name`, one("APEXIA-WAIT-1")?.driver?.name, "Saved Chauffeur");
+  is(`HTTP ${code}: marked as a saved answer`, one("APEXIA-WAIT-1")?.fromSaved, true);
+  is(`HTTP ${code}: with the saved status`, one("APEXIA-WAIT-1")?.status, "Dispatched");
+  is(`HTTP ${code}: no saved chauffeur comes back as driver null`, one("APEXIA-WAIT-2")?.driver, null);
+  is(`HTTP ${code}: and is still marked as saved`, one("APEXIA-WAIT-2")?.fromSaved, true);
+  is(`HTTP ${code}: the reply says Failed`, body.dispatch?.checkStatus, "Failed");
+  is(`HTTP ${code}: the reply's message carries the code`, String(body.dispatch?.message ?? "").includes(`(${code})`), true);
+  is(`HTTP ${code}: nothing is stamped`, stamps.length, 0);
+  is(`HTTP ${code}: the status reaches the logs`,
+    errors.some((e) => e.startsWith(`Dispatch status HTTP ${code}`)), true);
 }
 
 // A hard refusal is the one case where we most certainly have no answer, so
