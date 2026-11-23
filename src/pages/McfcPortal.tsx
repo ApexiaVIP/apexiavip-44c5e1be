@@ -8,6 +8,7 @@ import {
   Copy,
   Loader2,
   MapPin,
+  Navigation,
   Plus,
   Printer,
   RefreshCw,
@@ -17,7 +18,8 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
-import { refsToCheck } from "@/lib/bookingLive";
+import { ACTIVE_STATUSES, LIVE_POLL_MS, refsToCheck } from "@/lib/bookingLive";
+import FleetMap, { type FleetCar, type FleetWaiting } from "@/components/FleetMap";
 import { appendStop, lastSetDown } from "@/lib/journey";
 import { useAuth } from "@/hooks/useAuth";
 import apexiaLogo from "@/assets/apexia-logo.svg";
@@ -379,7 +381,7 @@ const lightInputStyle = {
 const McfcPortal = () => {
   const { user, profile, loading, mfaVerified, mfaResolved, signOut, isAdmin } = useAuth();
 
-  const [view, setView] = useState<"desk" | "fixtures" | "people" | "addresses" | "schedule">(
+  const [view, setView] = useState<"desk" | "fixtures" | "map" | "people" | "addresses" | "schedule">(
     "desk"
   );
   const [passengerGroups, setPassengerGroups] = useState<{ group: string; names: string[] }[]>([]);
@@ -636,6 +638,101 @@ const McfcPortal = () => {
   useEffect(() => {
     loadRecent();
   }, [loadRecent]);
+
+  /**
+   * The live map is the one screen here that needs a beat rather than a
+   * refresh. Asking faster is not faster: Dispatch refuse a whole request
+   * when any booking in it was asked about in the last thirty seconds, so a
+   * quick poll loses the position of every car at once, not just the one.
+   */
+  useEffect(() => {
+    if (view !== "map" || !mfaVerified || !hasDeskAccess) return;
+    let stopped = false;
+    const beat = async () => {
+      const refs = refsToCheck(recent);
+      if (refs.length === 0) return;
+      try {
+        const live = await checkBookingStatuses(refs);
+        if (stopped) return;
+        setRecentLive((prev) => ({
+          ...prev,
+          ...Object.fromEntries(live.map((l) => [l.reference, l])),
+        }));
+      } catch {
+        // Keep the last positions we had. An empty map would say the cars
+        // have gone, and we do not know that.
+      }
+    };
+    beat();
+    const timer = setInterval(beat, LIVE_POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [view, mfaVerified, hasDeskAccess, recent]);
+
+  /** The jobs worth watching: on the road first, then by how soon they go. */
+  const mapRefs = useMemo(() => refsToCheck(recent), [recent]);
+
+  const fleetCars = useMemo<FleetCar[]>(() => {
+    const out: FleetCar[] = [];
+    for (const reference of mapRefs) {
+      const live = recentLive[reference];
+      const row = recent.find((r) => r.reference === reference);
+      const lat = Number(live?.latitude);
+      const lng = Number(live?.longitude);
+      // Null Island is what a missing fix looks like once it has been
+      // through a number, and it would put a car in the Atlantic
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      if (lat === 0 && lng === 0) continue;
+      out.push({
+        reference,
+        lat,
+        lng,
+        at: live?.locationDateTime ?? null,
+        chauffeur: live?.driver?.name || null,
+        registration: live?.vehicle?.registration || null,
+        passenger: row?.name ?? null,
+        bookingStatus: live?.bookingStatus ?? null,
+      });
+    }
+    return out;
+  }, [mapRefs, recentLive, recent]);
+
+  /**
+   * Why a job is not on the map yet, said in the words that are actually
+   * true of it. "No position" covers four different situations and leaves
+   * the desk unable to tell a car that has not set off from one we have
+   * lost, which is the mistake this whole screen exists to stop making.
+   */
+  const fleetWaiting = useMemo<FleetWaiting[]>(() => {
+    const placed = new Set(fleetCars.map((c) => c.reference));
+    const out: FleetWaiting[] = [];
+    for (const reference of mapRefs) {
+      if (placed.has(reference)) continue;
+      const row = recent.find((r) => r.reference === reference);
+      const live = recentLive[reference];
+      const due = row?.collection_at ? new Date(row.collection_at).getTime() : NaN;
+      const minutesOff = Number.isFinite(due) ? (due - Date.now()) / 60000 : NaN;
+      const named = live?.driver?.name;
+      let why: string;
+      if (!live) why = "no answer from the booking system yet";
+      else if (!named) why = "no chauffeur named yet";
+      else if (Number.isFinite(minutesOff) && minutesOff > 15)
+        why = "tracking opens 15 minutes before collection";
+      else if (live.bookingStatus && ACTIVE_STATUSES.includes(live.bookingStatus))
+        why = "on the job, no position reported";
+      else why = "chauffeur has not set off yet";
+      out.push({
+        reference,
+        passenger: row?.name ?? null,
+        chauffeur: named || null,
+        collectionAt: row?.collection_at ?? null,
+        why,
+      });
+    }
+    return out;
+  }, [mapRefs, fleetCars, recent, recentLive]);
 
   const totalPassengers = useMemo(
     () => cars.reduce((n, c) => n + manifestOf(c).length, 0),
@@ -1401,19 +1498,26 @@ const McfcPortal = () => {
   return (
     <div className="min-h-screen" style={{ backgroundColor: SKY }}>
       <header style={{ backgroundColor: SKY }}>
-        <div className="container mx-auto px-8 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-5">
-            <img src={mcfcBadge} alt="Manchester City FC" className="h-16 w-auto" />
-            <div>
-              <span className="font-display text-3xl tracking-[0.2em] leading-none text-white">
+        <div className="container mx-auto px-4 sm:px-8 py-4 sm:py-5 flex items-center justify-between flex-wrap gap-y-3">
+          <div className="flex items-center gap-3 sm:gap-5 min-w-0">
+            <img
+              src={mcfcBadge}
+              alt="Manchester City FC"
+              className="h-10 sm:h-16 w-auto shrink-0"
+            />
+            <div className="min-w-0">
+              {/* The wordmark is the widest thing on the page. At text-3xl with
+                  this much letter spacing it alone overruns a phone, so it
+                  steps down and gives the tracking back as the screen allows. */}
+              <span className="font-display text-lg sm:text-2xl md:text-3xl tracking-[0.1em] sm:tracking-[0.16em] md:tracking-[0.2em] leading-none text-white block">
                 MANCHESTER CITY
               </span>
-              <p className="text-[10px] tracking-[0.35em] uppercase mt-1.5 text-white/80">
+              <p className="text-[9px] sm:text-[10px] tracking-[0.2em] sm:tracking-[0.35em] uppercase mt-1 sm:mt-1.5 text-white/80 truncate">
                 {deskLabel}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-4 sm:gap-8 shrink-0">
             {isAdmin && (
               <div className="flex items-center border" style={{ borderColor: "rgba(255,255,255,0.45)" }}>
                 {CITY_DESKS.map((d) => (
@@ -1448,11 +1552,15 @@ const McfcPortal = () => {
         </div>
       </header>
 
-      <nav className="container mx-auto px-8 pt-2 pb-0 flex items-center gap-2 no-print">
+      {/* Six tabs, two of them long enough to overrun a phone on their own.
+          They wrap rather than scroll: a strip that scrolls sideways hides
+          tabs behind an edge the desk has no reason to suspect is there. */}
+      <nav className="container mx-auto px-4 sm:px-8 pt-2 pb-0 flex items-center flex-wrap gap-1.5 sm:gap-2 no-print">
         {(
           [
             { key: "desk", label: "Travel Desk", icon: Car },
             { key: "fixtures", label: "Fixtures", icon: CalendarDays },
+            { key: "map", label: "Live Map", icon: Navigation },
             { key: "people", label: peopleLabel, icon: UserCog },
             { key: "addresses", label: "Address Book", icon: MapPin },
             { key: "schedule", label: "Match Day Schedule", icon: Printer },
@@ -1462,7 +1570,7 @@ const McfcPortal = () => {
             key={t.key}
             type="button"
             onClick={() => setView(t.key)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 text-xs tracking-[0.18em] uppercase transition-colors"
+            className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-3 sm:py-2.5 text-[10px] sm:text-xs tracking-[0.1em] sm:tracking-[0.18em] uppercase transition-colors"
             style={
               view === t.key
                 ? { backgroundColor: NAVY, color: "#ffffff" }
@@ -1475,7 +1583,7 @@ const McfcPortal = () => {
         ))}
       </nav>
 
-      <main className="container mx-auto px-8 py-10 max-w-6xl">
+      <main className="container mx-auto px-4 sm:px-8 py-6 sm:py-10 max-w-6xl">
         {view === "desk" && (
           <>
         <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
@@ -1487,7 +1595,7 @@ const McfcPortal = () => {
               {amendRef ? "Amend Booking" : "New Request"}
             </p>
             <h1
-              className="font-display text-4xl font-light tracking-wider"
+              className="font-display text-2xl sm:text-3xl md:text-4xl font-light tracking-wider"
               style={{ color: "#ffffff" }}
             >
               Arrange Travel
@@ -2603,7 +2711,7 @@ const McfcPortal = () => {
                 <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
                   Season Calendar
                 </p>
-                <h1 className="font-display text-4xl font-light tracking-wider text-white">
+                <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-light tracking-wider text-white">
                   Fixtures
                 </h1>
               </div>
@@ -2762,13 +2870,38 @@ const McfcPortal = () => {
           </>
         )}
 
+        {view === "map" && (
+          <>
+            <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
+              <div>
+                <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
+                  Where the cars are
+                </p>
+                <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-light tracking-wider text-white">
+                  Live Map
+                </h1>
+              </div>
+              <p className="text-xs tracking-[0.12em] uppercase text-white/70 max-w-sm text-right">
+                {fleetCars.length === 0
+                  ? "No car is reporting a position yet"
+                  : fleetCars.length === 1
+                    ? "One car on the road"
+                    : `${fleetCars.length} cars on the road`}
+              </p>
+            </div>
+            <div className="bg-white/90 p-6 sm:p-8">
+              <FleetMap cars={fleetCars} waiting={fleetWaiting} />
+            </div>
+          </>
+        )}
+
         {view === "people" && (
           <>
             <div className="mb-8">
               <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
                 Directory
               </p>
-              <h1 className="font-display text-4xl font-light tracking-wider text-white">
+              <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-light tracking-wider text-white">
                 {peopleLabel}
               </h1>
             </div>
@@ -3096,7 +3229,7 @@ const McfcPortal = () => {
               <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
                 Address Book
               </p>
-              <h1 className="font-display text-4xl font-light tracking-wider text-white">
+              <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-light tracking-wider text-white">
                 Saved Addresses
               </h1>
             </div>
@@ -3265,7 +3398,7 @@ const McfcPortal = () => {
               <p className="text-xs tracking-[0.4em] uppercase mb-2" style={{ color: NAVY }}>
                 Match Day
               </p>
-              <h1 className="font-display text-4xl font-light tracking-wider text-white">
+              <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-light tracking-wider text-white">
                 Travel Schedule
               </h1>
             </div>
