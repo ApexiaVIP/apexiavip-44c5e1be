@@ -97,6 +97,7 @@ export type Database = {
           travel_date: string
           user_id: string | null
           vehicle: string
+          vehicle_registration: string | null
           via: Json | null
         }
         Insert: {
@@ -145,6 +146,7 @@ export type Database = {
           travel_date: string
           user_id?: string | null
           vehicle: string
+          vehicle_registration?: string | null
           via?: Json | null
         }
         Update: {
@@ -193,6 +195,7 @@ export type Database = {
           travel_date?: string
           user_id?: string | null
           vehicle?: string
+          vehicle_registration?: string | null
           via?: Json | null
         }
         Relationships: []

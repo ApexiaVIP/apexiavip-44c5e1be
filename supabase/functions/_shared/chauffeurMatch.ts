@@ -27,6 +27,7 @@ export const phoneKey = (raw: string | null | undefined): string => {
 export interface DispatchAnswer {
   Reference?: string | null;
   Driver?: { Mobile?: string | null; Name?: string | null } | null;
+  Vehicle?: { Registration?: string | null; Description?: string | null } | null;
 }
 
 /** One of our chauffeur accounts. */

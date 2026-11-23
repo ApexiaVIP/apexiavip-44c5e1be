@@ -16,6 +16,7 @@ const adminClient = () =>
 interface HeldRow {
   reference: string;
   driver_id: string | null;
+  vehicle_registration: string | null;
 }
 
 interface ChauffeurRow {
@@ -23,6 +24,37 @@ interface ChauffeurRow {
   full_name: string | null;
   phone: string | null;
 }
+
+/**
+ * Keep the registration of the car Dispatch has put on each job, so a screen
+ * held back from Dispatch, refused, or met with silence can still show it
+ * rather than TBC. One write per registration. Only vehicle_registration is
+ * written: a car is not a chauffeur and must never hand a job to anybody.
+ */
+const recordRegistrations = async (
+  admin: ReturnType<typeof adminClient>,
+  withCar: DispatchAnswer[],
+  held: HeldRow[]
+) => {
+  const saved = new Map(held.map((row) => [row.reference, row.vehicle_registration]));
+  const byRegistration = new Map<string, string[]>();
+  for (const answer of withCar) {
+    const reference = (answer.Reference ?? "").trim();
+    const registration = (answer.Vehicle?.Registration ?? "").trim();
+    if (!reference || !registration || !saved.has(reference)) continue;
+    if (saved.get(reference) === registration) continue;
+    const references = byRegistration.get(registration) ?? [];
+    if (!references.includes(reference)) references.push(reference);
+    byRegistration.set(registration, references);
+  }
+  for (const [registration, references] of byRegistration) {
+    const { error } = await admin
+      .from("bookings")
+      .update({ vehicle_registration: registration })
+      .in("reference", references);
+    if (error) console.error("could not record vehicle registration", references.join(", "), error.message);
+  }
+};
 
 /**
  * Put every job Dispatch has named a chauffeur on into that chauffeur's hands.
@@ -39,17 +71,27 @@ export const claimForChauffeurs = async (answers: DispatchAnswer[]): Promise<num
   const named = (answers ?? []).filter(
     (a) => a?.Reference && (a.Driver?.Mobile || a.Driver?.Name)
   );
-  if (named.length === 0) return 0;
+  // Dispatch can name a car with nobody on it yet, or with a chauffeur who is
+  // none of ours, so the registration is its own question, not the driver's
+  const withCar = (answers ?? []).filter(
+    (a) => a?.Reference && (a.Vehicle?.Registration ?? "").trim()
+  );
+  if (named.length === 0 && withCar.length === 0) return 0;
 
   try {
     const admin = adminClient();
-    const references = named.map((a) => a.Reference as string);
+    const references = [
+      ...new Set([...named, ...withCar].map((a) => (a.Reference as string).trim())),
+    ];
 
     const { data: held } = await admin
       .from("bookings")
-      .select("reference, driver_id")
+      .select("reference, driver_id, vehicle_registration")
       .in("reference", references)
       .returns<HeldRow[]>();
+
+    await recordRegistrations(admin, withCar, held ?? []);
+    if (named.length === 0) return 0;
 
     const { data: chauffeurs } = await admin
       .from("profiles")

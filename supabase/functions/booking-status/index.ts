@@ -326,7 +326,7 @@ serve(async (req) => {
     // The caller's own bookings, plus (view-only) their family members' bookings
     const { data: matchedBookings, error: ownError } = await admin
       .from("bookings")
-      .select("reference, user_id, corporate, name, status_checked_at, status, driver_id, driver_name")
+      .select("reference, user_id, corporate, name, status_checked_at, status, driver_id, driver_name, vehicle_registration")
       .in("reference", references);
     if (ownError) throw ownError;
 
@@ -341,6 +341,7 @@ serve(async (req) => {
       checkedAt: string | null;
       status: string | null;
       driverName: string | null;
+      vehicleRegistration: string | null;
     }[] = [];
     for (const b of matchedBookings ?? []) {
       const own = b.user_id === user.id || (b.user_id && familyIds.has(b.user_id as string));
@@ -350,6 +351,7 @@ serve(async (req) => {
           checkedAt: (b.status_checked_at as string | null) ?? null,
           status: (b.status as string | null) ?? null,
           driverName: (b.driver_name as string | null) ?? null,
+          vehicleRegistration: (b.vehicle_registration as string | null) ?? null,
         });
       }
     }
@@ -377,7 +379,9 @@ serve(async (req) => {
         reference,
         status: saved?.status ?? null,
         driver: saved?.driverName ? { name: saved.driverName, mobile: "", photoUrl: "" } : null,
-        vehicle: null,
+        vehicle: saved?.vehicleRegistration
+          ? { description: "", registration: saved.vehicleRegistration, photoUrl: "" }
+          : null,
         fromSaved: true,
       };
     };

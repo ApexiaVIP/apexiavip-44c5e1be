@@ -611,7 +611,7 @@ serve(async (req) => {
           .order("collection_at")
           .returns<ScheduleRow[]>();
       const columns =
-        "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car, driver_status, status_checked_at, driver_id, driver_name";
+        "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car, driver_status, status_checked_at, driver_id, driver_name, vehicle_registration";
       // Whether the chauffeur has said they are up, so the desk can stop
       // messaging them one at a time. The columns arrive with their
       // migration, which lands after this does, and a desk that cannot see
@@ -646,7 +646,7 @@ serve(async (req) => {
         driverName: (r.driver_name as string | null) ?? "",
         driverMobile: "",
         vehicleDescription: "",
-        vehicleRegistration: "",
+        vehicleRegistration: (r.vehicle_registration as string | null) ?? "",
         fromSaved: true,
       });
       for (const r of active) {

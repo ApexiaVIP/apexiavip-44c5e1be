@@ -1,0 +1,2 @@
+ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS vehicle_registration text DEFAULT NULL;
+COMMENT ON COLUMN public.bookings.vehicle_registration IS 'Registration of the car on the job, as last named by Dispatch (or set by hand when Dispatch cannot answer). Shown when Dispatch is held back, refuses, or is silent.';

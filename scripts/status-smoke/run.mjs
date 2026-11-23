@@ -414,6 +414,110 @@ for (const code of [429, 500]) {
   answerFor = [];
 }
 
+// The car's registration is the other half of what a screen shows, and it
+// was never kept, so the moment Dispatch was silent, held back or could not
+// find the booking, the desk read TBC. It is now saved whenever Dispatch
+// names a vehicle, whoever is or is not driving it, and it never hands the
+// job to anybody: driver_id is not part of that write.
+{
+  const run = async (rows, answers, extraProfiles = []) => {
+    asked = [];
+    answerFor = answers;
+    globalThis.__writes.length = 0;
+    globalThis.__tables = {
+      mfa_sessions: [{ id: "s1", session_id: "sess-1" }],
+      profiles: [{ id: "member-1", status: "active", corporate: null, corporate_groups: null }, ...extraProfiles],
+      rate_limits: [],
+      bookings: rows.map((row) => ({ user_id: "member-1", corporate: null, name: "A Member", driver_id: null, status_checked_at: null, ...row })),
+    };
+    const res = await handler(new Request("https://x/booking-status", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ references: rows.map((row) => row.reference) }),
+    }));
+    const body = await res.json();
+    answerFor = [];
+    const regWrites = globalThis.__writes.filter(
+      (w) => w.table === "bookings" && w.op === "update" && w.payload && "vehicle_registration" in w.payload
+    );
+    const regFor = (reg) =>
+      regWrites
+        .filter((w) => w.payload.vehicle_registration === reg)
+        .flatMap((w) => (w.filters ?? []).flatMap((f) => (Array.isArray(f.value) ? f.value : [f.value])))
+        .sort()
+        .join(",");
+    return { body, regWrites, regFor, writes: [...globalThis.__writes] };
+  };
+  const ago = (ms) => new Date(Date.now() - ms).toISOString();
+
+  // Dispatch names a car with nobody on it yet
+  let v = await run(
+    [{ reference: "APEXIA-CAR-ONLY" }],
+    [{ Reference: "APEXIA-CAR-ONLY", BookingStatus: "Confirmed", Vehicle: { Registration: "S40 APX", Description: "S-Class" } }]
+  );
+  is("a registration is saved when Dispatch names a vehicle with no driver", v.regFor("S40 APX"), "APEXIA-CAR-ONLY");
+  is("and nothing at all writes driver_id when there is no driver",
+    v.writes.some((w) => w.table === "bookings" && w.payload && "driver_id" in w.payload), false);
+
+  // Dispatch's own chauffeur, whose number is on no profile of ours
+  v = await run(
+    [{ reference: "APEXIA-CAR-EXT" }],
+    [{ Reference: "APEXIA-CAR-EXT", BookingStatus: "Dispatched", Driver: { Name: "Outside Chauffeur", Mobile: "07700 900888" }, Vehicle: { Registration: "V27 APX" } }]
+  );
+  is("a registration is saved when the chauffeur matches no profile", v.regFor("V27 APX"), "APEXIA-CAR-EXT");
+
+  // A chauffeur who is one of ours: the hand-over writes driver_id, the
+  // registration write must not carry it
+  v = await run(
+    [{ reference: "APEXIA-CAR-OURS" }],
+    [{ Reference: "APEXIA-CAR-OURS", BookingStatus: "Dispatched", Driver: { Name: "Our Chauffeur", Mobile: "07700 900123" }, Vehicle: { Registration: "R1 APX" } }],
+    [{ id: "driver-9", is_driver: true, full_name: "Our Chauffeur", phone: "+447700900123" }]
+  );
+  is("a registration is saved for one of our own chauffeurs too", v.regFor("R1 APX"), "APEXIA-CAR-OURS");
+  is("driver_id is never set by the registration write", v.regWrites.some((w) => "driver_id" in w.payload), false);
+  is("nor driver_name", v.regWrites.some((w) => "driver_name" in w.payload), false);
+
+  // Nothing new to say: the registration already saved is not written again
+  v = await run(
+    [{ reference: "APEXIA-CAR-SAME", vehicle_registration: "S40 APX" }],
+    [{ Reference: "APEXIA-CAR-SAME", BookingStatus: "Dispatched", Vehicle: { Registration: "S40 APX" } }]
+  );
+  is("an unchanged registration is not written again", v.regWrites.length, 0);
+
+  // A booking we do not hold is left alone
+  v = await run(
+    [{ reference: "APEXIA-CAR-MINE" }],
+    [{ Reference: "APEXIA-NOT-OURS", Vehicle: { Registration: "X1 APX" } }]
+  );
+  is("a registration for a booking we do not hold is not written", v.regWrites.length, 0);
+
+  // Held back: answers from the saved registration
+  v = await run(
+    [{ reference: "APEXIA-CAR-HELD", status_checked_at: ago(5_000), status: "Dispatched", driver_name: "Irfan Siddiqui", vehicle_registration: "S40 APX" }],
+    []
+  );
+  const held = (v.body.statuses ?? []).find((x) => x.reference === "APEXIA-CAR-HELD");
+  is("a held booking returns the saved registration", held?.vehicle?.registration, "S40 APX");
+  is("still marked as a saved answer", held?.fromSaved, true);
+
+  // Asked, and Dispatch describes the car: the live answer wins
+  v = await run(
+    [{ reference: "APEXIA-CAR-LIVE", status: "Dispatched", driver_name: "Saved", vehicle_registration: "OLD APX" }],
+    [{ Reference: "APEXIA-CAR-LIVE", BookingStatus: "Dispatched", Driver: { Name: "Live" }, Vehicle: { Registration: "NEW APX", Description: "S-Class" } }]
+  );
+  const live = (v.body.statuses ?? []).filter((x) => x.reference === "APEXIA-CAR-LIVE");
+  is("the asked booking comes back once", live.length, 1);
+  is("a live answer beats the saved registration", live[0]?.vehicle?.registration, "NEW APX");
+  is("and is not marked as saved", live[0]?.fromSaved, undefined);
+
+  // Dispatch refuses: the asked booking answers from the saved registration
+  refuseWith = "Too many requests.";
+  v = await run([{ reference: "APEXIA-CAR-REFUSED", status: "Pending", vehicle_registration: "S40 APX" }], []);
+  refuseWith = null;
+  is("a refused booking returns the saved registration",
+    (v.body.statuses ?? []).find((x) => x.reference === "APEXIA-CAR-REFUSED")?.vehicle?.registration, "S40 APX");
+}
+
 /*
  * How we prove who we are to Dispatch.
  *

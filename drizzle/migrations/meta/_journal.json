@@ -78,6 +78,13 @@
       "when": 1793724203197,
       "tag": "0010_call_on_acknowledgement_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795472656418,
+      "tag": "0011_bookings_vehicle_registration",
+      "breakpoints": true
     }
   ]
 }
