@@ -185,6 +185,61 @@ is("and Dispatch is never asked about it", asked.length, 0);
   answerFor = [];
 }
 
+// Dispatch refuses the WHOLE request when any one booking in it was asked
+// about inside thirty seconds, and says so as HTTP 200 with CheckStatus
+// Failed. A screen refreshed just after the sweep used to lose every
+// chauffeur name at once, and then kept them blank by stamping again. So a
+// booking asked about moments ago is held back, and not re-stamped.
+{
+  const checkWith = async (checked) => {
+    asked = [];
+    globalThis.__writes.length = 0;
+    globalThis.__tables = {
+      mfa_sessions: [{ id: "s1", session_id: "sess-1" }],
+      profiles: [{ id: "member-1", status: "active", corporate: null, corporate_groups: null }],
+      rate_limits: [],
+      bookings: Object.entries(checked).map(([reference, status_checked_at]) => ({
+        reference, user_id: "member-1", corporate: null, name: "A Member", status_checked_at,
+      })),
+    };
+    const res = await handler(new Request("https://x/booking-status", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ references: Object.keys(checked) }),
+    }));
+    const stamps = (globalThis.__writes ?? []).filter(
+      (w) => w.table === "bookings" && w.payload?.status_checked_at
+    );
+    const stamped = new Set(
+      stamps.flatMap((w) =>
+        (w.filters ?? []).flatMap((f) => (Array.isArray(f.value) ? f.value : [f.value]))
+      )
+    );
+    return { status: res.status, body: await res.json(), stamped };
+  };
+  const ago = (ms) => new Date(Date.now() - ms).toISOString();
+  answerFor = [
+    { Reference: "APEXIA-JUST-ASKED", BookingStatus: "Dispatched", Driver: { Name: "First Chauffeur" } },
+    { Reference: "APEXIA-NOT-ASKED", BookingStatus: "Dispatched", Driver: { Name: "Second Chauffeur" } },
+  ];
+
+  let h = await checkWith({ "APEXIA-JUST-ASKED": ago(5_000), "APEXIA-NOT-ASKED": null });
+  is("a booking asked about 5 seconds ago is held back from Dispatch", asked.join(","), "APEXIA-NOT-ASKED");
+  is("and comes back in the held list", (h.body.held ?? []).join(","), "APEXIA-JUST-ASKED");
+  is("while the other still carries its chauffeur",
+    h.body.statuses?.find((x) => x.reference === "APEXIA-NOT-ASKED")?.driver?.name, "Second Chauffeur");
+  is("and the held booking is not re-stamped", h.stamped.has("APEXIA-JUST-ASKED"), false);
+
+  h = await checkWith({ "APEXIA-JUST-ASKED": null, "APEXIA-NOT-ASKED": null });
+  is("both are asked about when neither has ever been checked", asked.join(","), "APEXIA-JUST-ASKED,APEXIA-NOT-ASKED");
+
+  h = await checkWith({ "APEXIA-JUST-ASKED": ago(35_000), "APEXIA-NOT-ASKED": null });
+  is("a booking last asked 35 seconds ago is never held back", asked.join(","), "APEXIA-JUST-ASKED,APEXIA-NOT-ASKED");
+  is("so nothing is held", (h.body.held ?? []).length, 0);
+
+  answerFor = [];
+}
+
 /*
  * How we prove who we are to Dispatch.
  *

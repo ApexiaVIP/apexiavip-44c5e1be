@@ -9,6 +9,10 @@ const corsHeaders = {
 };
 
 const MAX_REQUESTS_PER_HOUR = 20;
+// Dispatch refuses a whole status request when any booking in it was asked
+// about in the last thirty seconds, so the day view holds back anything asked
+// about more recently than this, as booking-status, booking-watch and driver do.
+const HOLD_IF_ASKED_WITHIN_MS = 32_000;
 const MAX_CARS = 10;
 
 import {
@@ -607,7 +611,7 @@ serve(async (req) => {
           .order("collection_at")
           .returns<ScheduleRow[]>();
       const columns =
-        "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car, driver_status";
+        "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car, driver_status, status_checked_at";
       // Whether the chauffeur has said they are up, so the desk can stop
       // messaging them one at a time. The columns arrive with their
       // migration, which lands after this does, and a desk that cannot see
@@ -625,7 +629,14 @@ serve(async (req) => {
       active = active.filter(rowVisible);
 
       const live: Record<string, unknown> = {};
-      const refs = active.map((r) => r.reference as string).filter(Boolean);
+      const askedTooRecently = Date.now() - HOLD_IF_ASKED_WITHIN_MS;
+      const refs = active
+        .filter((r) => {
+          const t = r.status_checked_at ? Date.parse(String(r.status_checked_at)) : NaN;
+          return Number.isNaN(t) || t < askedTooRecently;
+        })
+        .map((r) => r.reference as string)
+        .filter(Boolean);
       if (refs.length > 0) {
         try {
           const statusAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
@@ -640,6 +651,11 @@ serve(async (req) => {
               body: JSON.stringify({ Bookings: refs.map((reference) => ({ Reference: reference })) }),
             }
           );
+          // Record the asking, so the sweep and the chauffeur's app stand aside
+          await supabase
+            .from("bookings")
+            .update({ status_checked_at: new Date().toISOString() })
+            .in("reference", refs);
           if (statusRes.ok) {
             const statusData = await statusRes.json();
             const statusResult = Array.isArray(statusData?.Result) ? statusData.Result[0] : statusData;

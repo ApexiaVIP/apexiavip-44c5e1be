@@ -20,6 +20,11 @@ const MAX_REFERENCES = 15;
 // that, for coming back to the app, and for a second device on the same
 // account, while still stopping a client stuck in a loop.
 const MAX_CHECKS_PER_HOUR = 900;
+// Dispatch refuses a whole status request when any booking in it was asked
+// about in the last thirty seconds. Hold back anything asked about more
+// recently than this: above Dispatch's thirty seconds, below LIVE_POLL_MS
+// (35s, src/lib/bookingLive.ts) so our own polling is never held.
+const HOLD_IF_ASKED_WITHIN_MS = 32_000;
 
 /**
  * The job states where there is a chauffeur to tell.
@@ -321,7 +326,7 @@ serve(async (req) => {
     // The caller's own bookings, plus (view-only) their family members' bookings
     const { data: matchedBookings, error: ownError } = await admin
       .from("bookings")
-      .select("reference, user_id, corporate, name")
+      .select("reference, user_id, corporate, name, status_checked_at")
       .in("reference", references);
     if (ownError) throw ownError;
 
@@ -331,12 +336,31 @@ serve(async (req) => {
       .eq("primary_member_id", user.id);
     const familyIds = new Set((familyProfiles ?? []).map((p) => p.id as string));
 
-    const ownRefs: string[] = [];
+    const visible: { reference: string; checkedAt: string | null }[] = [];
     for (const b of matchedBookings ?? []) {
       const own = b.user_id === user.id || (b.user_id && familyIds.has(b.user_id as string));
-      if (own || isAdmin || (await deskColleagueMayAct(b))) ownRefs.push(b.reference as string);
+      if (own || isAdmin || (await deskColleagueMayAct(b))) {
+        visible.push({
+          reference: b.reference as string,
+          checkedAt: (b.status_checked_at as string | null) ?? null,
+        });
+      }
     }
-    if (ownRefs.length === 0) return json(200, { statuses: [] });
+    if (visible.length === 0) return json(200, { statuses: [] });
+
+    // Anything asked about inside Dispatch's thirty seconds, by the sweep, the
+    // chauffeur's app, the desk or another screen, would have Dispatch refuse
+    // the whole request and blank every booking in it. Hold those back. They
+    // are not re-stamped below, so continuous polling cannot hold them forever.
+    const askedTooRecently = Date.now() - HOLD_IF_ASKED_WITHIN_MS;
+    const ownRefs: string[] = [];
+    const heldRefs: string[] = [];
+    for (const v of visible) {
+      const t = v.checkedAt ? Date.parse(v.checkedAt) : NaN;
+      if (Number.isNaN(t) || t < askedTooRecently) ownRefs.push(v.reference);
+      else heldRefs.push(v.reference);
+    }
+    if (ownRefs.length === 0) return json(200, { statuses: [], asked: [], held: heldRefs });
 
     // Ask Dispatch for current status of these bookings
     const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
@@ -445,6 +469,7 @@ serve(async (req) => {
     return json(200, {
       statuses,
       asked: ownRefs,
+      held: heldRefs,
       dispatch: { checkStatus, message: checkMessage },
     });
   } catch (error) {
