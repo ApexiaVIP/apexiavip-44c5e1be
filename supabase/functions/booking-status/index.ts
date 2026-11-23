@@ -89,6 +89,12 @@ serve(async (req) => {
       return json(403, { error: "Membership not active" });
     }
 
+    const { data: adminRole } = await admin.rpc("has_role", {
+      _user_id: user.id,
+      _role: "admin",
+    });
+    const isAdmin = adminRole === true;
+
     // A desk booking belongs to the desk, not to whichever assistant keyed it:
     // any colleague on the same desk may act on it, provided every passenger
     // is someone they are allowed to see
@@ -328,7 +334,7 @@ serve(async (req) => {
     const ownRefs: string[] = [];
     for (const b of matchedBookings ?? []) {
       const own = b.user_id === user.id || (b.user_id && familyIds.has(b.user_id as string));
-      if (own || (await deskColleagueMayAct(b))) ownRefs.push(b.reference as string);
+      if (own || isAdmin || (await deskColleagueMayAct(b))) ownRefs.push(b.reference as string);
     }
     if (ownRefs.length === 0) return json(200, { statuses: [] });
 
@@ -351,6 +357,28 @@ serve(async (req) => {
     const dispatchData = await dispatchRes.json();
     const result = Array.isArray(dispatchData?.Result) ? dispatchData.Result[0] : dispatchData;
     const dispatchBookings = Array.isArray(result?.Bookings) ? result.Bookings : [];
+
+    const transferStatus = result?.TransferStatus ?? null;
+    const transferMessage = result?.Message ?? null;
+    console.log(
+      "Dispatch status reply",
+      JSON.stringify({
+        asked: ownRefs,
+        transferStatus,
+        transferMessage,
+        returned: dispatchBookings.map((b: Record<string, unknown>) => ({
+          reference: b?.Reference ?? null,
+          status: b?.Status ?? null,
+          bookingStatus: b?.BookingStatus ?? null,
+          driver: (b?.Driver as { Name?: string } | null)?.Name ?? null,
+          vehicle: (b?.Vehicle as { Registration?: string } | null)?.Registration ?? null,
+          message: b?.Message ?? null,
+        })),
+        silent: ownRefs.filter(
+          (r) => !dispatchBookings.some((b: Record<string, unknown>) => b?.Reference === r)
+        ),
+      })
+    );
 
     // Dispatch starts its thirty second clock on every booking we ask about,
     // whatever it then answers. The five minute sweep steps aside on the
@@ -411,7 +439,11 @@ serve(async (req) => {
       }
     }
 
-    return json(200, { statuses });
+    return json(200, {
+      statuses,
+      asked: ownRefs,
+      dispatch: { transferStatus, message: transferMessage },
+    });
   } catch (error) {
     console.error("booking-status error:", error);
     return json(500, { error: "An error occurred processing your request." });
