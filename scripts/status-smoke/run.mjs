@@ -72,6 +72,7 @@ const is = (what, got, want) => {
 };
 
 globalThis.__user = { id: "member-1" };
+globalThis.__admins = [];
 
 const ask = async (references) => {
   asked = [];
@@ -145,6 +146,44 @@ const stranger = async () => {
 const other = await stranger();
 is("another member's booking returns nothing", other.body.statuses.length, 0);
 is("and Dispatch is never asked about it", asked.length, 0);
+
+// An admin switching to a client desk must still be told where that desk's
+// cars are. Before the admin rule, a booking on the mcfc desk owned by a desk
+// colleague came back as a bare { statuses: [] } to an admin tagged to no
+// desk, and the desk screen showed allocated jobs as "Not yet assigned".
+{
+  const deskCheck = async () => {
+    asked = [];
+    globalThis.__writes.length = 0;
+    globalThis.__tables = {
+      mfa_sessions: [{ id: "s1", session_id: "sess-1" }],
+      profiles: [{ id: "member-1", status: "active", corporate: null, corporate_groups: null }],
+      rate_limits: [],
+      bookings: [{ reference: "APEXIA-MCFC-1", user_id: "desk-user", corporate: "mcfc", name: "A Desk Passenger" }],
+    };
+    const res = await handler(new Request("https://x/booking-status", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ references: ["APEXIA-MCFC-1"] }),
+    }));
+    return { status: res.status, body: await res.json() };
+  };
+  answerFor = [{ Reference: "APEXIA-MCFC-1", BookingStatus: "Dispatched", Driver: { Name: "A Chauffeur" } }];
+
+  globalThis.__admins = [];
+  let d = await deskCheck();
+  is("a non-admin on no desk is not asked about another desk's booking", asked.length, 0);
+  is("and is told nothing about it", d.body.statuses?.length, 0);
+
+  globalThis.__admins = ["member-1"];
+  d = await deskCheck();
+  is("an admin is asked about a client desk's booking", asked.join(","), "APEXIA-MCFC-1");
+  is("and is told who the chauffeur is", d.body.statuses?.[0]?.driver?.name, "A Chauffeur");
+  is("and the reply says which bookings were asked about", (d.body.asked ?? []).includes("APEXIA-MCFC-1"), true);
+
+  globalThis.__admins = [];
+  answerFor = [];
+}
 
 /*
  * How we prove who we are to Dispatch.

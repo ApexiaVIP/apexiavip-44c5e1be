@@ -74,6 +74,16 @@ const builder = (
 
 export const createClient = () => ({
   from: (table: string) => builder(table),
+  rpc: (fn: string, args: Record<string, unknown>) => {
+    if (fn === "has_role") {
+      const admins = ((globalThis as Record<string, unknown>).__admins ?? []) as string[];
+      return Promise.resolve({
+        data: args._role === "admin" && admins.includes(args._user_id as string),
+        error: null,
+      });
+    }
+    return Promise.resolve({ data: null, error: null });
+  },
   auth: {
     getUser: (_token: string) =>
       Promise.resolve({
