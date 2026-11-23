@@ -260,6 +260,10 @@ serve(async (req) => {
     const data = await res.json();
     const result = Array.isArray(data?.Result) ? data.Result[0] : data;
     const live = Array.isArray(result?.Bookings) ? result.Bookings : [];
+    const checkStatus = result?.CheckStatus ?? result?.TransferStatus ?? null;
+    if (checkStatus === "Failed") {
+      console.error("Dispatch refused the sweep status check:", result?.Message ?? null, JSON.stringify(bookings.map((b) => b.reference)));
+    }
 
     // The sweep is the floor under all of this: with nobody's screen open on
     // either side, this is what still puts a job in a chauffeur's hands.

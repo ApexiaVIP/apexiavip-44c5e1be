@@ -643,6 +643,10 @@ serve(async (req) => {
           if (statusRes.ok) {
             const statusData = await statusRes.json();
             const statusResult = Array.isArray(statusData?.Result) ? statusData.Result[0] : statusData;
+            const dayCheckStatus = statusResult?.CheckStatus ?? statusResult?.TransferStatus ?? null;
+            if (dayCheckStatus === "Failed") {
+              console.error("Dispatch refused the day view status check:", statusResult?.Message ?? null, JSON.stringify(refs));
+            }
             for (const b of Array.isArray(statusResult?.Bookings) ? statusResult.Bookings : []) {
               if (!b?.Reference) continue;
               live[b.Reference] = {

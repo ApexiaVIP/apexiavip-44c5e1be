@@ -763,6 +763,10 @@ Deno.serve(async (req) => {
           if (res.ok) {
             const data = await res.json();
             const result = Array.isArray(data?.Result) ? data.Result[0] : data;
+            const checkStatus = result?.CheckStatus ?? result?.TransferStatus ?? null;
+            if (checkStatus === "Failed") {
+              console.error("Dispatch refused the chauffeur status check:", result?.Message ?? null, JSON.stringify(refs));
+            }
             for (const b of Array.isArray(result?.Bookings) ? result.Bookings : []) {
               if (b?.Reference) dispatchStatus.set(b.Reference, b);
             }
