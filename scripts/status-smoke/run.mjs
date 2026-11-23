@@ -240,6 +240,85 @@ is("and Dispatch is never asked about it", asked.length, 0);
   answerFor = [];
 }
 
+// A booking held back from Dispatch used to come back with nothing at all, so
+// every screen blanked its chauffeur until the next refresh. It now comes back
+// from what we saved on the row, marked fromSaved so nobody mistakes it for a
+// live answer, and a live answer always wins for a booking that was asked.
+{
+  const checkRows = async (rows) => {
+    asked = [];
+    globalThis.__writes.length = 0;
+    globalThis.__tables = {
+      mfa_sessions: [{ id: "s1", session_id: "sess-1" }],
+      profiles: [{ id: "member-1", status: "active", corporate: null, corporate_groups: null }],
+      rate_limits: [],
+      bookings: rows.map((row) => ({ user_id: "member-1", corporate: null, name: "A Member", driver_id: null, ...row })),
+    };
+    const res = await handler(new Request("https://x/booking-status", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ references: rows.map((row) => row.reference) }),
+    }));
+    return { status: res.status, body: await res.json() };
+  };
+  const ago = (ms) => new Date(Date.now() - ms).toISOString();
+  answerFor = [{ Reference: "APEXIA-ASKED", BookingStatus: "Dispatched", Driver: { Name: "Live Chauffeur" } }];
+
+  let s = await checkRows([
+    { reference: "APEXIA-HELD-NAMED", status_checked_at: ago(5_000), status: "Dispatched", driver_name: "Saved Chauffeur" },
+    { reference: "APEXIA-HELD-BLANK", status_checked_at: ago(5_000), status: "Confirmed", driver_name: null },
+    { reference: "APEXIA-ASKED", status_checked_at: null, status: "Dispatched", driver_name: "Old Saved Name" },
+  ]);
+  const by = (ref) => (s.body.statuses ?? []).filter((x) => x.reference === ref);
+  is("only the booking not held back is asked about", asked.join(","), "APEXIA-ASKED");
+  is("a held booking with a saved chauffeur comes back in statuses", by("APEXIA-HELD-NAMED").length, 1);
+  is("carrying the saved chauffeur's name", by("APEXIA-HELD-NAMED")[0]?.driver?.name, "Saved Chauffeur");
+  is("marked as a saved answer", by("APEXIA-HELD-NAMED")[0]?.fromSaved, true);
+  is("with the status saved on the booking", by("APEXIA-HELD-NAMED")[0]?.status, "Dispatched");
+  is("and no vehicle", by("APEXIA-HELD-NAMED")[0]?.vehicle, null);
+  is("a held booking with no saved chauffeur is not dropped", by("APEXIA-HELD-BLANK").length, 1);
+  is("it comes back with driver null", by("APEXIA-HELD-BLANK")[0]?.driver, null);
+  is("the booking that was asked comes back once", by("APEXIA-ASKED").length, 1);
+  is("carrying the live chauffeur, not the saved one", by("APEXIA-ASKED")[0]?.driver?.name, "Live Chauffeur");
+  is("and is not marked as saved", by("APEXIA-ASKED")[0]?.fromSaved, undefined);
+
+  // Everything held: Dispatch is not asked, and the saved answer still comes back
+  s = await checkRows([
+    { reference: "APEXIA-HELD-NAMED", status_checked_at: ago(5_000), status: "Dispatched", driver_name: "Saved Chauffeur" },
+  ]);
+  is("when every booking is held, Dispatch is not asked", asked.length, 0);
+  is("and the held booking still carries its saved chauffeur", by("APEXIA-HELD-NAMED")[0]?.driver?.name, "Saved Chauffeur");
+
+  answerFor = [];
+}
+
+// Dispatch's own chauffeurs are not profiles of ours, so they can never be
+// handed a job here. Their name is still worth keeping, because it is the only
+// thing a held booking can show. The name only: setting driver_id for a
+// chauffeur we could not match would hand the job to the wrong person.
+{
+  answerFor = [
+    { Reference: "APEXIA-T1", BookingStatus: "Dispatched", Driver: { Name: "Dispatch Own Chauffeur", Mobile: "07700 900999" } },
+    { Reference: "APEXIA-T2", BookingStatus: "Dispatched", Driver: { Name: "Dispatch Own Chauffeur", Mobile: "07700 900999" } },
+    { Reference: "APEXIA-T3", BookingStatus: "Dispatched", Driver: { Name: "No Mobile Chauffeur" } },
+  ];
+  await ask(["APEXIA-T1", "APEXIA-T2", "APEXIA-T3"]);
+  const named = globalThis.__writes.filter(
+    (w) => w.table === "bookings" && w.op === "update" && w.payload && "driver_name" in w.payload
+  );
+  const refsFor = (name) =>
+    named
+      .filter((w) => w.payload.driver_name === name)
+      .flatMap((w) => (w.filters ?? []).flatMap((f) => (Array.isArray(f.value) ? f.value : [f.value])))
+      .sort()
+      .join(",");
+  is("a chauffeur whose number is on no profile has their name recorded", refsFor("Dispatch Own Chauffeur"), "APEXIA-T1,APEXIA-T2");
+  is("in one write for both of their jobs", named.filter((w) => w.payload.driver_name === "Dispatch Own Chauffeur").length, 1);
+  is("a chauffeur with no mobile has their name recorded too", refsFor("No Mobile Chauffeur"), "APEXIA-T3");
+  is("and driver_id is never set for a chauffeur we could not match", named.some((w) => "driver_id" in w.payload), false);
+  answerFor = [];
+}
+
 /*
  * How we prove who we are to Dispatch.
  *

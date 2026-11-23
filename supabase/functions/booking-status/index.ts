@@ -326,7 +326,7 @@ serve(async (req) => {
     // The caller's own bookings, plus (view-only) their family members' bookings
     const { data: matchedBookings, error: ownError } = await admin
       .from("bookings")
-      .select("reference, user_id, corporate, name, status_checked_at")
+      .select("reference, user_id, corporate, name, status_checked_at, status, driver_id, driver_name")
       .in("reference", references);
     if (ownError) throw ownError;
 
@@ -336,13 +336,20 @@ serve(async (req) => {
       .eq("primary_member_id", user.id);
     const familyIds = new Set((familyProfiles ?? []).map((p) => p.id as string));
 
-    const visible: { reference: string; checkedAt: string | null }[] = [];
+    const visible: {
+      reference: string;
+      checkedAt: string | null;
+      status: string | null;
+      driverName: string | null;
+    }[] = [];
     for (const b of matchedBookings ?? []) {
       const own = b.user_id === user.id || (b.user_id && familyIds.has(b.user_id as string));
       if (own || isAdmin || (await deskColleagueMayAct(b))) {
         visible.push({
           reference: b.reference as string,
           checkedAt: (b.status_checked_at as string | null) ?? null,
+          status: (b.status as string | null) ?? null,
+          driverName: (b.driver_name as string | null) ?? null,
         });
       }
     }
@@ -360,7 +367,21 @@ serve(async (req) => {
       if (Number.isNaN(t) || t < askedTooRecently) ownRefs.push(v.reference);
       else heldRefs.push(v.reference);
     }
-    if (ownRefs.length === 0) return json(200, { statuses: [], asked: [], held: heldRefs });
+
+    // A held booking answers from what we saved rather than not at all, or
+    // every screen blanks its chauffeur until the next refresh. fromSaved says
+    // so, so a saved answer is never mistaken for a live one.
+    const savedStatuses = heldRefs.map((reference) => {
+      const saved = visible.find((v) => v.reference === reference);
+      return {
+        reference,
+        status: saved?.status ?? null,
+        driver: saved?.driverName ? { name: saved.driverName, mobile: "", photoUrl: "" } : null,
+        vehicle: null,
+        fromSaved: true,
+      };
+    });
+    if (ownRefs.length === 0) return json(200, { statuses: savedStatuses, asked: [], held: heldRefs });
 
     // Ask Dispatch for current status of these bookings
     const dispatchAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);
@@ -425,7 +446,7 @@ serve(async (req) => {
     // race against this very screen to ask the same question themselves.
     await claimForChauffeurs(dispatchBookings);
 
-    const statuses = [];
+    const statuses: Record<string, unknown>[] = [];
     for (const b of dispatchBookings) {
       const reference = b?.Reference;
       if (!reference || !ownRefs.includes(reference)) continue;
@@ -465,6 +486,8 @@ serve(async (req) => {
           .eq("reference", reference);
       }
     }
+
+    statuses.push(...savedStatuses);
 
     return json(200, {
       statuses,

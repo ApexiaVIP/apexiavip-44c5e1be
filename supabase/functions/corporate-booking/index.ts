@@ -611,7 +611,7 @@ serve(async (req) => {
           .order("collection_at")
           .returns<ScheduleRow[]>();
       const columns =
-        "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car, driver_status, status_checked_at";
+        "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car, driver_status, status_checked_at, driver_id, driver_name";
       // Whether the chauffeur has said they are up, so the desk can stop
       // messaging them one at a time. The columns arrive with their
       // migration, which lands after this does, and a desk that cannot see
@@ -637,6 +637,22 @@ serve(async (req) => {
         })
         .map((r) => r.reference as string)
         .filter(Boolean);
+
+      // A booking held back answers from the chauffeur saved on it, so the
+      // desk does not see TBC for a car that has a chauffeur on it. fromSaved
+      // marks it as not a live answer; a live answer, below, replaces it.
+      for (const r of active) {
+        const reference = r.reference as string;
+        if (!reference || refs.includes(reference)) continue;
+        live[reference] = {
+          bookingStatus: r.status ?? null,
+          driverName: (r.driver_name as string | null) ?? "",
+          driverMobile: "",
+          vehicleDescription: "",
+          vehicleRegistration: "",
+          fromSaved: true,
+        };
+      }
       if (refs.length > 0) {
         try {
           const statusAuth = transferAuth(DISPATCH_TRANSFER_API_KEY, DISPATCH_TRANSFER_REFERENCE);

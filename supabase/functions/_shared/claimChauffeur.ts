@@ -68,7 +68,6 @@ export const claimForChauffeurs = async (answers: DispatchAnswer[]): Promise<num
         `Dispatch allocated ${job.reference} to ${job.name || "a chauffeur"} but ${job.why}, so it reaches nobody`
       );
     }
-    if (claims.length === 0) return 0;
 
     // One write per chauffeur rather than one per job: a chauffeur picking up
     // a day's work is the ordinary case, not the exception.
@@ -84,6 +83,26 @@ export const claimForChauffeurs = async (answers: DispatchAnswer[]): Promise<num
         .update({ driver_id: driverId, driver_name: group.name })
         .in("reference", group.references);
       if (error) console.error("could not hand over", group.references.join(", "), error.message);
+    }
+
+    // A chauffeur we cannot reach is still a chauffeur on the job, and for
+    // the desk's work, driven by Dispatch's own drivers, it is the ordinary
+    // case. Keep the name, because it is the only thing a screen held back
+    // from Dispatch can show. The name only, never driver_id: a chauffeur we
+    // could not match must not have the job handed to anybody.
+    const namedOnly = new Map<string, string[]>();
+    for (const job of unreachable) {
+      if (!job.name) continue;
+      const references = namedOnly.get(job.name) ?? [];
+      references.push(job.reference);
+      namedOnly.set(job.name, references);
+    }
+    for (const [name, references] of namedOnly) {
+      const { error } = await admin
+        .from("bookings")
+        .update({ driver_name: name })
+        .in("reference", references);
+      if (error) console.error("could not record chauffeur name", references.join(", "), error.message);
     }
     return claims.length;
   } catch (e) {
