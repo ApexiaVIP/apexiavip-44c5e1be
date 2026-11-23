@@ -371,7 +371,7 @@ serve(async (req) => {
     // A held booking answers from what we saved rather than not at all, or
     // every screen blanks its chauffeur until the next refresh. fromSaved says
     // so, so a saved answer is never mistaken for a live one.
-    const savedStatuses = heldRefs.map((reference) => {
+    const fromSavedRow = (reference: string) => {
       const saved = visible.find((v) => v.reference === reference);
       return {
         reference,
@@ -380,7 +380,8 @@ serve(async (req) => {
         vehicle: null,
         fromSaved: true,
       };
-    });
+    };
+    const savedStatuses = heldRefs.map(fromSavedRow);
     if (ownRefs.length === 0) return json(200, { statuses: savedStatuses, asked: [], held: heldRefs });
 
     // Ask Dispatch for current status of these bookings
@@ -487,6 +488,14 @@ serve(async (req) => {
       }
     }
 
+    // A refusal is the one case where we certainly have no answer, so the
+    // bookings asked about are answered from what we saved, exactly as a held
+    // one is, rather than shown as blank. Anything Dispatch did describe wins.
+    if (checkStatus === "Failed") {
+      for (const reference of ownRefs) {
+        if (!statuses.some((s) => s.reference === reference)) statuses.push(fromSavedRow(reference));
+      }
+    }
     statuses.push(...savedStatuses);
 
     return json(200, {

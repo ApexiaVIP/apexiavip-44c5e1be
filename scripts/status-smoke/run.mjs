@@ -44,6 +44,9 @@ let sentAuth = "";
 let lastUrl = "";
 let dispatchHttp = 200;
 let answerFor = [];
+// Set to a message to have Dispatch refuse the whole request, the way it does:
+// HTTP 200, CheckStatus Failed, no bookings
+let refuseWith = null;
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.includes("deversoftware")) {
@@ -52,6 +55,9 @@ globalThis.fetch = async (url, init) => {
     sentAuth = init.headers.Authorization;
     if (dispatchHttp !== 200) {
       return new Response("Too many requests. Please wait 30 seconds.", { status: dispatchHttp });
+    }
+    if (refuseWith) {
+      return Response.json({ Result: [{ CheckStatus: "Failed", Message: refuseWith, Bookings: [] }] });
     }
     return Response.json({ Result: [{ Bookings: answerFor }] });
   }
@@ -290,6 +296,48 @@ is("and Dispatch is never asked about it", asked.length, 0);
   is("and the held booking still carries its saved chauffeur", by("APEXIA-HELD-NAMED")[0]?.driver?.name, "Saved Chauffeur");
 
   answerFor = [];
+}
+
+// A hard refusal is the one case where we most certainly have no answer, so
+// it must not be shown as one. Every booking asked about comes back from what
+// we saved, marked fromSaved, and the refusal is still said out loud.
+{
+  const errors = [];
+  const realError = console.error;
+  console.error = (...args) => { errors.push(args.map(String).join(" ")); realError(...args); };
+  asked = [];
+  globalThis.__writes.length = 0;
+  globalThis.__tables = {
+    mfa_sessions: [{ id: "s1", session_id: "sess-1" }],
+    profiles: [{ id: "member-1", status: "active", corporate: null, corporate_groups: null }],
+    rate_limits: [],
+    bookings: [
+      { reference: "APEXIA-REFUSED-1", user_id: "member-1", corporate: null, name: "A Member", status_checked_at: null, status: "Dispatched", driver_id: null, driver_name: "Saved Chauffeur" },
+      { reference: "APEXIA-REFUSED-2", user_id: "member-1", corporate: null, name: "A Member", status_checked_at: null, status: "Confirmed", driver_id: null, driver_name: null },
+    ],
+  };
+  refuseWith = "Too many requests. Please wait 30 seconds since the last status check for this booking.";
+  const res = await handler(new Request("https://x/booking-status", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ references: ["APEXIA-REFUSED-1", "APEXIA-REFUSED-2"] }),
+  }));
+  const body = await res.json();
+  refuseWith = null;
+  console.error = realError;
+  const one = (ref) => (body.statuses ?? []).find((x) => x.reference === ref);
+
+  is("both bookings were asked about", asked.join(","), "APEXIA-REFUSED-1,APEXIA-REFUSED-2");
+  is("a refused request still answers 200", res.status, 200);
+  is("a refused request returns an entry for every booking asked about", (body.statuses ?? []).length, 2);
+  is("carrying the saved chauffeur's name", one("APEXIA-REFUSED-1")?.driver?.name, "Saved Chauffeur");
+  is("marked as a saved answer", one("APEXIA-REFUSED-1")?.fromSaved, true);
+  is("with the status saved on the booking", one("APEXIA-REFUSED-1")?.status, "Dispatched");
+  is("a refused booking with no saved chauffeur comes back with driver null", one("APEXIA-REFUSED-2")?.driver, null);
+  is("and is still marked as saved", one("APEXIA-REFUSED-2")?.fromSaved, true);
+  is("the reply still says Dispatch refused", body.dispatch?.checkStatus, "Failed");
+  is("the refusal is still recorded in the logs",
+    errors.some((e) => e.startsWith("Dispatch refused the status check:") && e.includes("APEXIA-REFUSED-1")), true);
 }
 
 // Dispatch's own chauffeurs are not profiles of ours, so they can never be

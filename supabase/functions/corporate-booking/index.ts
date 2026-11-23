@@ -641,17 +641,18 @@ serve(async (req) => {
       // A booking held back answers from the chauffeur saved on it, so the
       // desk does not see TBC for a car that has a chauffeur on it. fromSaved
       // marks it as not a live answer; a live answer, below, replaces it.
+      const fromSavedRow = (r: ScheduleRow) => ({
+        bookingStatus: r.status ?? null,
+        driverName: (r.driver_name as string | null) ?? "",
+        driverMobile: "",
+        vehicleDescription: "",
+        vehicleRegistration: "",
+        fromSaved: true,
+      });
       for (const r of active) {
         const reference = r.reference as string;
         if (!reference || refs.includes(reference)) continue;
-        live[reference] = {
-          bookingStatus: r.status ?? null,
-          driverName: (r.driver_name as string | null) ?? "",
-          driverMobile: "",
-          vehicleDescription: "",
-          vehicleRegistration: "",
-          fromSaved: true,
-        };
+        live[reference] = fromSavedRow(r);
       }
       if (refs.length > 0) {
         try {
@@ -678,6 +679,13 @@ serve(async (req) => {
             const dayCheckStatus = statusResult?.CheckStatus ?? statusResult?.TransferStatus ?? null;
             if (dayCheckStatus === "Failed") {
               console.error("Dispatch refused the day view status check:", statusResult?.Message ?? null, JSON.stringify(refs));
+              // A refusal is no answer, so the bookings asked about show what
+              // we saved, as a held one does, rather than TBC. A live answer
+              // below still replaces it.
+              for (const r of active) {
+                const reference = r.reference as string;
+                if (reference && refs.includes(reference)) live[reference] = fromSavedRow(r);
+              }
             }
             for (const b of Array.isArray(statusResult?.Bookings) ? statusResult.Bookings : []) {
               if (!b?.Reference) continue;
