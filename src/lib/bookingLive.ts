@@ -39,6 +39,42 @@ export const DRIVER_STATUS_AS_DISPATCH: Record<string, string> = {
   clear: "Clear/Completed",
 };
 
+/**
+ * Statuses Dispatch holds a booking at before the job is sent to a chauffeur.
+ *
+ * Dever have confirmed the Driver and Vehicle details come back empty in this
+ * state even when a chauffeur has already been allocated, so an empty name
+ * here does not mean nobody is on the job.
+ */
+export const PRE_DISPATCH_STATUSES = ["Pending", "Quotation"];
+
+/**
+ * One status compared against another the way Dispatch writes them, which is
+ * not reliably the way we do.
+ *
+ * Dever's documentation gives "At pickup" where this file has "At Pickup",
+ * and on a case-sensitive match that one letter takes a car at the kerb off
+ * the map, out of its badge and to the wrong end of the sort. Which casing
+ * Dispatch actually sends is not ours to depend on, so depend on neither.
+ */
+const sameStatus = (a: string | null | undefined, b: string): boolean =>
+  typeof a === "string" && a.trim().toLowerCase() === b.toLowerCase();
+
+/** Is a chauffeur actively working this job, in Dispatch's words? */
+export const isActiveStatus = (status: string | null | undefined): boolean =>
+  ACTIVE_STATUSES.some((s) => sameStatus(status, s));
+
+/** Is the journey over, in Dispatch's words? */
+export const isFinalStatus = (status: string | null | undefined): boolean =>
+  FINAL_STATUSES.some((s) => sameStatus(status, s));
+
+/** Has the job yet to be sent to a chauffeur, in Dispatch's words? */
+export const isPreDispatchStatus = (status: string | null | undefined): boolean =>
+  PRE_DISPATCH_STATUSES.some((s) => sameStatus(status, s));
+
+/** Does this status mean this exact thing, whatever casing it arrives in? */
+export const statusIs = sameStatus;
+
 export interface LiveBooking {
   status: string;
   driver_status?: string | null;
@@ -62,7 +98,7 @@ export const expectedRunHours = (b: LiveBooking): number =>
   (b.journey_type === "hourly" && b.as_directed_hours ? b.as_directed_hours : 0) + GRACE_HOURS;
 
 export const stillRunning = (b: LiveBooking, now: number = Date.now()): boolean => {
-  if (FINAL_STATUSES.includes(effectiveStatus(b))) return false;
+  if (isFinalStatus(effectiveStatus(b))) return false;
 
   const pickup = b.collection_at ? new Date(b.collection_at).getTime() : null;
   if (pickup !== null && Number.isNaN(pickup)) return true;
@@ -80,7 +116,7 @@ export const stillRunning = (b: LiveBooking, now: number = Date.now()): boolean 
   if (b.driver_status && b.driver_status !== "clear") return true;
 
   // Or Dispatch says someone is on it, for a chauffeur working their app
-  if (ACTIVE_STATUSES.includes(effectiveStatus(b))) return true;
+  if (isActiveStatus(effectiveStatus(b))) return true;
 
   if (pickup === null) return true;
   return pickup > now - expectedRunHours(b) * 3600 * 1000;
@@ -105,6 +141,26 @@ export interface Fix {
 }
 
 /**
+ * Whether a pair of coordinates is somewhere a car can actually be.
+ *
+ * Dever have confirmed Dispatch answers 0 for both coordinates on every
+ * booking more than fifteen minutes from its collection time, so this is the
+ * ordinary answer for most of a booking's life rather than an edge case.
+ * Taken literally it is a point in the Gulf of Guinea, and drawing a car
+ * there is worse than drawing no car at all.
+ */
+const placeable = (lat: number, lng: number): boolean =>
+  Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+
+/**
+ * Dispatch sends a coordinate as a number in Dever's own sample and as a
+ * string elsewhere in their documentation. Read either rather than betting on
+ * one.
+ */
+const coord = (v: string | number | null | undefined): number =>
+  typeof v === "number" ? v : typeof v === "string" ? parseFloat(v) : Number.NaN;
+
+/**
  * Where to draw the car.
  *
  * Our own app reports every twenty seconds while a job is running, where
@@ -114,21 +170,23 @@ export interface Fix {
  */
 export const chauffeurPosition = (
   booking: Positioned,
-  dispatch?: { latitude?: string | null; longitude?: string | null } | null,
+  dispatch?: { latitude?: string | number | null; longitude?: string | number | null } | null,
   now: number = Date.now()
 ): Fix | null => {
   const reportedAt = booking.driver_position_at ? Date.parse(booking.driver_position_at) : NaN;
   const age = Number.isNaN(reportedAt) ? Number.POSITIVE_INFINITY : now - reportedAt;
   const ours =
-    typeof booking.driver_lat === "number" && typeof booking.driver_lng === "number"
+    typeof booking.driver_lat === "number" &&
+    typeof booking.driver_lng === "number" &&
+    placeable(booking.driver_lat, booking.driver_lng)
       ? { lat: booking.driver_lat, lng: booking.driver_lng, fromOurApp: true, ageMs: age }
       : null;
 
   if (ours && age >= 0 && age < OUR_POSITION_FRESH_MS) return ours;
 
-  const lat = dispatch?.latitude ? parseFloat(dispatch.latitude) : Number.NaN;
-  const lng = dispatch?.longitude ? parseFloat(dispatch.longitude) : Number.NaN;
-  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+  const lat = coord(dispatch?.latitude);
+  const lng = coord(dispatch?.longitude);
+  if (placeable(lat, lng)) {
     return { lat, lng, fromOurApp: false, ageMs: Number.NaN };
   }
   return ours;
@@ -158,7 +216,7 @@ export const refsToCheck = <T extends Referenced>(
   cap: number = MAX_LIVE_CHECKS,
   now: number = Date.now()
 ): string[] => {
-  const working = (b: T) => (ACTIVE_STATUSES.includes(effectiveStatus(b)) ? 0 : 1);
+  const working = (b: T) => (isActiveStatus(effectiveStatus(b)) ? 0 : 1);
   const pickup = (b: T) =>
     b.collection_at ? new Date(b.collection_at).getTime() : Number.POSITIVE_INFINITY;
 

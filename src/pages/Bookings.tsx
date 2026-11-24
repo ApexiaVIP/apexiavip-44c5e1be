@@ -6,13 +6,13 @@ import { GET_APP_URL, isInstalledApp } from "@/lib/appLinks";
 import LiveCar from "@/components/LiveCar";
 import ReachChauffeur from "@/components/ReachChauffeur";
 import {
-  ACTIVE_STATUSES,
   DRIVER_STATUS_AS_DISPATCH,
-  FINAL_STATUSES,
   LIVE_POLL_MS,
   MAX_LIVE_CHECKS,
   PENDING_POLL_MS,
   chauffeurPosition,
+  isActiveStatus,
+  isFinalStatus,
   refsToCheck,
   stillRunning,
 } from "@/lib/bookingLive";
@@ -93,27 +93,33 @@ const childrenLine = (children: { age: number }[]) => {
 };
 
 const statusVariant = (status: string): "secondary" | "outline" | "destructive" => {
-  if (status === "Cancelled" || status === "No Show" || status === "Failed") return "destructive";
-  if (ACTIVE_STATUSES.includes(status)) return "outline";
+  const s = status.trim().toLowerCase();
+  if (s === "cancelled" || s === "no show" || s === "failed") return "destructive";
+  if (isActiveStatus(status)) return "outline";
   return "secondary";
 };
 
 // "Confirmed" is reserved for a chauffeur actually being assigned. Before
 // that the booking has only been received, and inside the hour it is
 // subject to availability.
+//
+// Every word is matched in lower case because Dispatch's casing is not ours
+// to depend on, and anything unrecognised falls through to show a member the
+// raw word. "At pickup" against "At Pickup" is exactly that.
 const displayStatus = (status: string, provisional = false) => {
-  if (status === "Pending" || status === "Requested" || status === "Confirmed") {
+  const s = status.trim().toLowerCase();
+  if (s === "pending" || s === "requested" || s === "confirmed" || s === "quotation") {
     return provisional ? "Awaiting availability" : "Received";
   }
-  if (status === "Amendment requested") return "Change requested";
+  if (s === "amendment requested") return "Change requested";
   // Our record is complete; the office is entering it in Dispatch by hand
-  if (status === "Awaiting office") return provisional ? "Awaiting availability" : "Received";
-  if (status === "Dispatched") return "Confirmed";
-  if (status === "En route to pickup") return "On the way";
-  if (status === "At Pickup") return "Arrived";
-  if (status === "Passenger on board") return "On board";
-  if (status === "Clear/Completed" || status === "Clear") return "Completed";
-  if (status === "Invoice") return "Completed";
+  if (s === "awaiting office") return provisional ? "Awaiting availability" : "Received";
+  if (s === "dispatched") return "Confirmed";
+  if (s === "en route to pickup") return "On the way";
+  if (s === "at pickup") return "Arrived";
+  if (s === "passenger on board") return "On board";
+  if (s === "clear/completed" || s === "clear") return "Completed";
+  if (s === "invoice") return "Completed";
   return status;
 };
 
@@ -213,7 +219,7 @@ const Bookings = () => {
     .filter((b) => {
       if (!b.reference) return false;
       if (b.driver_status && b.driver_status !== "clear") return true;
-      if (ACTIVE_STATUSES.includes(b.status)) return true;
+      if (isActiveStatus(b.status)) return true;
       if (!b.collection_at) return false;
       return new Date(b.collection_at).getTime() - now < 90 * 60 * 1000;
     })
@@ -233,7 +239,7 @@ const Bookings = () => {
     // refreshes the chauffeur's position, which the age under the map shows.
     refetchInterval: (query) => {
       const anyActive = (query.state.data ?? []).some(
-        (s) => s.bookingStatus && ACTIVE_STATUSES.includes(s.bookingStatus)
+        (s) => isActiveStatus(s.bookingStatus)
       );
       if (anyActive) return LIVE_POLL_MS;
       return liveRefs.length > 0 ? PENDING_POLL_MS : false;
@@ -269,7 +275,7 @@ const Bookings = () => {
     const fix = chauffeurPosition(b, live, now);
     const driverLat = fix?.lat ?? NaN;
     const driverLng = fix?.lng ?? NaN;
-    const mapVisible = isUpcoming && ACTIVE_STATUSES.includes(effectiveStatus) && !!fix;
+    const mapVisible = isUpcoming && isActiveStatus(effectiveStatus) && !!fix;
     return (
       <div key={b.id} className="border border-border p-6 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -281,7 +287,7 @@ const Bookings = () => {
                 For {familyName}
               </p>
             )}
-            {b.subject_to_availability && !ACTIVE_STATUSES.includes(effectiveStatus) && !FINAL_STATUSES.includes(effectiveStatus) && (
+            {b.subject_to_availability && !isActiveStatus(effectiveStatus) && !isFinalStatus(effectiveStatus) && (
               <p className="text-smoke text-xs mt-1 max-w-sm">
                 Subject to availability. We will text you as soon as a chauffeur is assigned.
               </p>
@@ -295,12 +301,12 @@ const Bookings = () => {
           <Badge
             variant={statusVariant(effectiveStatus)}
             className={
-              ACTIVE_STATUSES.includes(effectiveStatus)
+              isActiveStatus(effectiveStatus)
                 ? "text-champagne border-champagne"
                 : undefined
             }
           >
-            {displayStatus(effectiveStatus, b.subject_to_availability === true && !ACTIVE_STATUSES.includes(effectiveStatus))}
+            {displayStatus(effectiveStatus, b.subject_to_availability === true && !isActiveStatus(effectiveStatus))}
           </Badge>
         </div>
 
@@ -430,7 +436,7 @@ const Bookings = () => {
         )}
 
         {isUpcoming &&
-          ACTIVE_STATUSES.includes(effectiveStatus) &&
+          isActiveStatus(effectiveStatus) &&
           !mapVisible && (
             <p className="text-smoke/70 text-xs tracking-[0.1em] border border-border px-4 py-3">
               Your chauffeur is on the way. The map appears once their phone reports its position;

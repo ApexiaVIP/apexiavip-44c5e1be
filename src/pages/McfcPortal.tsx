@@ -19,10 +19,12 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
 import {
-  ACTIVE_STATUSES,
   chauffeurPosition,
+  isActiveStatus,
+  isPreDispatchStatus,
   LIVE_POLL_MS,
   refsToCheck,
+  statusIs,
   stillRunning,
 } from "@/lib/bookingLive";
 import FleetMap, { type FleetCar, type FleetWaiting } from "@/components/FleetMap";
@@ -737,13 +739,12 @@ const McfcPortal = () => {
       // reporting all day; the booking system only tracks inside its own
       // window. Prefer ours and fall back to theirs, exactly as the
       // member's own tracking screen does.
+      // A fix is only ever somewhere a car can be: the guard against Null
+      // Island, which is what Dispatch sends for most of a booking's life,
+      // lives in chauffeurPosition so both map screens get it.
       const fix = row ? chauffeurPosition(row, live) : null;
       if (!fix) continue;
       const { lat, lng } = fix;
-      // Null Island is what a missing fix looks like once it has been
-      // through a number, and it would put a car in the Atlantic
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-      if (lat === 0 && lng === 0) continue;
       out.push({
         reference,
         lat,
@@ -784,10 +785,18 @@ const McfcPortal = () => {
       if (!live) why = "no answer from the booking system yet";
       else if (lost)
         why = "the booking system cannot find this booking, so it will not track it";
-      else if (!named) why = "no chauffeur named yet";
+      // Dispatch sends back no chauffeur at all until the job is dispatched to
+      // one, which Dever have confirmed happens whether or not a chauffeur has
+      // been allocated. "No chauffeur named yet" reads as nobody being on the
+      // job and sends the desk chasing an allocation already made, so say
+      // which of the two it is.
+      else if (!named)
+        why = isPreDispatchStatus(live.bookingStatus)
+          ? "not sent to a chauffeur yet, so no name with it"
+          : "no chauffeur named yet";
       else if (Number.isFinite(minutesOff) && minutesOff > 15)
         why = "tracking opens 15 minutes before collection";
-      else if (live.bookingStatus && ACTIVE_STATUSES.includes(live.bookingStatus))
+      else if (isActiveStatus(live.bookingStatus))
         why = "on the job, no position reported";
       // Any other status the booking system gives is said in its own words.
       // Guessing at a cause here is how a car that collected hours ago came
@@ -2599,11 +2608,13 @@ const McfcPortal = () => {
                               {(() => {
                                 const live = b.reference ? recentLive[b.reference]?.bookingStatus : null;
                                 if (b.status === "Amendment requested") return "Change requested";
-                                if (live === "Dispatched") return "Chauffeur assigned";
-                                if (live === "En route to pickup") return "On the way";
-                                if (live === "At Pickup") return "Arrived";
-                                if (live === "Passenger on board") return "On board";
-                                if (live === "Cancelled") return "Cancelled";
+                                // Matched whatever casing Dispatch sends, or an
+                                // unrecognised word reaches the desk raw
+                                if (statusIs(live, "Dispatched")) return "Chauffeur assigned";
+                                if (statusIs(live, "En route to pickup")) return "On the way";
+                                if (statusIs(live, "At Pickup")) return "Arrived";
+                                if (statusIs(live, "Passenger on board")) return "On board";
+                                if (statusIs(live, "Cancelled")) return "Cancelled";
                                 if (b.status === "Confirmed") return "Received";
                                 return b.status;
                               })()}
