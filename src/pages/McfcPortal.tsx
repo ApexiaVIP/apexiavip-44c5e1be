@@ -21,6 +21,7 @@ import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/l
 import {
   chauffeurPosition,
   LIVE_POLL_MS,
+  mergeLiveAnswer,
   onTheRoad,
   POSITION_POLL_MS,
   refsToCheck,
@@ -395,14 +396,6 @@ type DeskView = (typeof DESK_VIEWS)[number];
 const viewFromAddress = (): DeskView =>
   DESK_VIEWS.find((v) => v === window.location.hash.replace(/^#\/?/, "")) ?? "desk";
 
-/** The position fields, kept when a newer reply arrives without one. */
-const pickFix = (b: LiveBookingStatus) => ({
-  latitude: b.latitude,
-  longitude: b.longitude,
-  locationDateTime: b.locationDateTime,
-  trackDriverUrl: b.trackDriverUrl,
-});
-
 const lightLabel = "block text-[11px] tracking-[0.18em] uppercase mb-2";
 const lightInput =
   "w-full h-11 bg-white border rounded-none px-3 text-sm outline-none transition-colors";
@@ -724,17 +717,7 @@ const McfcPortal = () => {
       const live = await checkBookingStatuses(refs);
       setRecentLive((prev) => {
         const next = { ...prev };
-        for (const l of live) {
-          // A booking checked moments ago comes back from saved details
-          // with no position on it. Letting that overwrite a car we are
-          // already tracking takes it off the map and then blames the
-          // fifteen minute rule, which is not what happened. Keep the
-          // position we hold until a newer one actually arrives.
-          const had = prev[l.reference];
-          const nowHasFix = l.latitude != null && l.longitude != null;
-          const hadFix = had?.latitude != null && had?.longitude != null;
-          next[l.reference] = !nowHasFix && hadFix ? { ...l, ...pickFix(had) } : l;
-        }
+        for (const l of live) next[l.reference] = mergeLiveAnswer(prev[l.reference], l);
         return next;
       });
       setDispatchAskedAt(Date.now());

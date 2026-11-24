@@ -17,10 +17,12 @@ import {
   isActiveStatus,
   isFinalStatus,
   isPreDispatchStatus,
+  mergeLiveAnswer,
   onTheRoad,
   statusIs,
   stillRunning,
   whyNotOnMap,
+  type PositionedAnswer,
 } from "@/lib/bookingLive";
 
 const atPickup = (status: string) => ({ status, collection_at: "2026-11-24T05:00:00Z" });
@@ -254,5 +256,60 @@ describe("whether anybody is on the road", () => {
     expect(
       onTheRoad({ status: "Passenger on board", collection_at: "2026-11-20T09:00:00Z" }, now)
     ).toBe(false);
+  });
+});
+
+/**
+ * The desk asks the booking system on load, then again when the map is
+ * opened. The second ask is inside Dispatch's thirty seconds, so it answers
+ * from what we saved. This is what stops that second answer undoing the
+ * first, which is how two cars came to sit on the map's waiting list saying
+ * "waiting for the booking system's next answer" and never moving off it.
+ */
+describe("keeping the better of two answers", () => {
+  const liveFix: PositionedAnswer = {
+    reference: "A1",
+    bookingStatus: "Passenger on board",
+    latitude: 53.4808,
+    longitude: -2.2426,
+    locationDateTime: "2026-11-24T12:19:00Z",
+    trackDriverUrl: "https://example/track",
+    driver: { name: "Faz Hussain" },
+  };
+  const saved: PositionedAnswer = {
+    reference: "A1",
+    bookingStatus: null,
+    latitude: null,
+    longitude: null,
+    locationDateTime: null,
+    trackDriverUrl: null,
+    driver: { name: "Faz Hussain" },
+    fromSaved: true,
+  };
+
+  it("does not let a saved answer displace a live one", () => {
+    expect(mergeLiveAnswer(liveFix, saved)).toBe(liveFix);
+  });
+
+  it("takes a saved answer when it is all we have", () => {
+    expect(mergeLiveAnswer(undefined, saved)).toBe(saved);
+    expect(mergeLiveAnswer(null, saved)).toBe(saved);
+  });
+
+  it("lets a saved answer be replaced by a live one", () => {
+    expect(mergeLiveAnswer(saved, liveFix)).toBe(liveFix);
+  });
+
+  it("keeps the position when a live answer arrives without one", () => {
+    const noFix = { ...liveFix, latitude: null, longitude: null, locationDateTime: null };
+    const merged = mergeLiveAnswer(liveFix, noFix);
+    expect(merged.latitude).toBe(53.4808);
+    expect(merged.longitude).toBe(-2.2426);
+    expect(merged.trackDriverUrl).toBe("https://example/track");
+  });
+
+  it("takes a newer position over the one we were holding", () => {
+    const moved = { ...liveFix, latitude: 53.5, longitude: -2.3 };
+    expect(mergeLiveAnswer(liveFix, moved).latitude).toBe(53.5);
   });
 });

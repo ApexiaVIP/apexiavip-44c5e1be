@@ -261,6 +261,49 @@ export const whyNotOnMap = (
   return "the booking system gave no status for this job";
 };
 
+/** A live answer with whatever position came with it. */
+export interface PositionedAnswer extends LiveAnswer {
+  reference: string;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
+  locationDateTime?: string | null;
+  trackDriverUrl?: string | null;
+}
+
+/**
+ * What to keep when a new answer arrives about a job we already know about.
+ *
+ * Two answers in quick succession are the ordinary case on this desk: the
+ * page asks on load, and asks again when the map is opened. The second is
+ * inside Dispatch's thirty seconds, so it comes back from what we saved, and
+ * letting that overwrite the live answer we already had took a car straight
+ * off the map and put our own rate limit on the screen in its place. The
+ * desk read that as a car nobody could account for, which is the opposite of
+ * what had happened.
+ *
+ * So: a saved answer never displaces a live one, and a live answer that
+ * arrives without a position keeps the position we were already holding
+ * until a newer one actually turns up.
+ */
+export const mergeLiveAnswer = <T extends PositionedAnswer>(
+  had: T | undefined | null,
+  incoming: T
+): T => {
+  if (incoming.fromSaved && had && !had.fromSaved) return had;
+  const hasFix = incoming.latitude != null && incoming.longitude != null;
+  const hadFix = had != null && had.latitude != null && had.longitude != null;
+  if (!hasFix && hadFix && had) {
+    return {
+      ...incoming,
+      latitude: had.latitude,
+      longitude: had.longitude,
+      locationDateTime: had.locationDateTime,
+      trackDriverUrl: had.trackDriverUrl,
+    };
+  }
+  return incoming;
+};
+
 /**
  * How many journeys we may ask Dispatch about in one go. The booking-status
  * function enforces the same number; keep the two together.
