@@ -18,7 +18,13 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
-import { ACTIVE_STATUSES, LIVE_POLL_MS, refsToCheck, stillRunning } from "@/lib/bookingLive";
+import {
+  ACTIVE_STATUSES,
+  chauffeurPosition,
+  LIVE_POLL_MS,
+  refsToCheck,
+  stillRunning,
+} from "@/lib/bookingLive";
 import FleetMap, { type FleetCar, type FleetWaiting } from "@/components/FleetMap";
 import { appendStop, lastSetDown } from "@/lib/journey";
 import { useAuth } from "@/hooks/useAuth";
@@ -292,6 +298,15 @@ interface RecentBooking {
   as_directed_hours: number | null;
   /** Where the chauffeur says they have got to, from their own app */
   driver_status?: string | null;
+  /**
+   * Where the chauffeur's own app last put the car. Reported every twenty
+   * seconds while a job runs, where the booking system only tracks from
+   * fifteen minutes before collection until the job is cleared. For a
+   * chauffeur on our app this is the position we have all day.
+   */
+  driver_lat?: number | null;
+  driver_lng?: number | null;
+  driver_position_at?: string | null;
   /** That they are up, or already on the way, answered from their own app */
   chauffeur_ack_at?: string | null;
   chauffeur_ack?: string | null;
@@ -718,8 +733,13 @@ const McfcPortal = () => {
     for (const reference of mapRefs) {
       const live = recentLive[reference];
       const row = recent.find((r) => r.reference === reference);
-      const lat = Number(live?.latitude);
-      const lng = Number(live?.longitude);
+      // The chauffeur's own app reports every twenty seconds and keeps
+      // reporting all day; the booking system only tracks inside its own
+      // window. Prefer ours and fall back to theirs, exactly as the
+      // member's own tracking screen does.
+      const fix = row ? chauffeurPosition(row, live) : null;
+      if (!fix) continue;
+      const { lat, lng } = fix;
       // Null Island is what a missing fix looks like once it has been
       // through a number, and it would put a car in the Atlantic
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
@@ -728,7 +748,8 @@ const McfcPortal = () => {
         reference,
         lat,
         lng,
-        at: live?.locationDateTime ?? null,
+        at: fix.fromOurApp ? null : live?.locationDateTime ?? null,
+        ageMs: fix.fromOurApp && Number.isFinite(fix.ageMs) ? fix.ageMs : null,
         chauffeur: live?.driver?.name || null,
         registration: live?.vehicle?.registration || null,
         passenger: row?.name ?? null,

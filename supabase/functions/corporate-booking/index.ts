@@ -550,7 +550,7 @@ serve(async (req) => {
       const { data: rows, error: recentError } = await supabase
         .from("bookings")
         .select(
-          "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops, journey_type, as_directed_hours, bags, notes, children, client_car, user_id, created_at, driver_status"
+          "reference, travel_date, vehicle, name, status, collection_at, pickup, dropoff, via, stops, journey_type, as_directed_hours, bags, notes, children, client_car, user_id, created_at, driver_status, driver_lat, driver_lng, driver_position_at"
         )
         .eq("corporate", corporate)
         .order("created_at", { ascending: false })

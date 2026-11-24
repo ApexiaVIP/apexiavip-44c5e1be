@@ -26,6 +26,13 @@ export interface FleetCar {
   lng: number;
   /** When the booking system placed the car, so the age can be shown */
   at: string | null;
+  /**
+   * How old a position from our own chauffeur app is. Their app reports in
+   * seconds and stamps the time in ISO, where the booking system sends UK
+   * wall clock in its own format, so the two ages are worked out differently
+   * and the source has to say which one this is.
+   */
+  ageMs: number | null;
   chauffeur: string | null;
   registration: string | null;
   passenger: string | null;
@@ -80,8 +87,17 @@ const MAX_FIT_ZOOM = 15;
  * anyone opens this outside the UK. locationAge.ts already does it properly
  * and the member's own tracking screen uses it, so this uses the same one.
  */
-const ageOf = (at: string | null): string =>
-  at ? locationFreshness(at).text || "position age unknown" : "position age unknown";
+const ageOf = (car: Pick<FleetCar, "at" | "ageMs">): string => {
+  // A position from our own chauffeur app carries its age directly
+  if (car.ageMs != null && Number.isFinite(car.ageMs)) {
+    const mins = Math.round(car.ageMs / 60000);
+    if (mins < 2) return "updated just now";
+    if (mins < 60) return `updated ${mins} min ago`;
+    const hours = Math.floor(mins / 60);
+    return `last seen ${hours} hr${hours > 1 ? "s" : ""} ago`;
+  }
+  return car.at ? locationFreshness(car.at).text || "position age unknown" : "position age unknown";
+};
 
 /** Every time on this screen is a London time, as it is everywhere else here. */
 const ukTime = (value: string | null): string | null => {
@@ -103,7 +119,7 @@ const label = (car: FleetCar): string => {
     car.registration ? `<div>${esc(car.registration)}</div>` : "",
     car.passenger ? `<div style="opacity:.75">${esc(car.passenger)}</div>` : "",
     car.bookingStatus ? `<div style="opacity:.75">${esc(car.bookingStatus)}</div>` : "",
-    `<div style="opacity:.55;font-size:11px;margin-top:2px">${esc(ageOf(car.at))}</div>`,
+    `<div style="opacity:.75;font-size:11px;margin-top:2px">${esc(ageOf(car))}</div>`,
   ];
   return `<div style="font-size:12px;line-height:1.45">${lines.filter(Boolean).join("")}</div>`;
 };
