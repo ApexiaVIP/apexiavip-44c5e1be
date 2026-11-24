@@ -782,6 +782,14 @@ const McfcPortal = () => {
         why = "tracking opens 15 minutes before collection";
       else if (live.bookingStatus && ACTIVE_STATUSES.includes(live.bookingStatus))
         why = "on the job, no position reported";
+      // Any other status the booking system gives is said in its own words.
+      // Guessing at a cause here is how a car that collected hours ago came
+      // to read "has not set off yet", which sent the desk looking for a
+      // late chauffeur instead of a missing position.
+      else if (live.bookingStatus)
+        why = `booking system says "${live.bookingStatus}", no position with it`;
+      else if (Number.isFinite(minutesOff) && minutesOff <= 0)
+        why = "collection time has passed and no position has come through";
       else why = "chauffeur has not set off yet";
       out.push({
         reference,
