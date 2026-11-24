@@ -85,6 +85,13 @@
       "when": 1795472656418,
       "tag": "0011_bookings_vehicle_registration",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795534512224,
+      "tag": "0012_apply_bookings_driver_mobile",
+      "breakpoints": true
     }
   ]
 }

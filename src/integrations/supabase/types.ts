@@ -72,6 +72,7 @@ export type Database = {
           driver_id: string | null
           driver_lat: number | null
           driver_lng: number | null
+          driver_mobile: string | null
           driver_moment: string | null
           driver_name: string | null
           driver_position_at: string | null
@@ -121,6 +122,7 @@ export type Database = {
           driver_id?: string | null
           driver_lat?: number | null
           driver_lng?: number | null
+          driver_mobile?: string | null
           driver_moment?: string | null
           driver_name?: string | null
           driver_position_at?: string | null
@@ -170,6 +172,7 @@ export type Database = {
           driver_id?: string | null
           driver_lat?: number | null
           driver_lng?: number | null
+          driver_mobile?: string | null
           driver_moment?: string | null
           driver_name?: string | null
           driver_position_at?: string | null
