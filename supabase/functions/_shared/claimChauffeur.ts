@@ -17,7 +17,8 @@ interface HeldRow {
   reference: string;
   driver_id: string | null;
   vehicle_registration: string | null;
-  driver_mobile: string | null;
+  /** Absent until migration 0012 has run, so never read without checking. */
+  driver_mobile?: string | null;
 }
 
 interface ChauffeurRow {
@@ -117,14 +118,30 @@ export const claimForChauffeurs = async (answers: DispatchAnswer[]): Promise<num
       ...new Set([...named, ...withCar].map((a) => (a.Reference as string).trim())),
     ];
 
-    const { data: held } = await admin
-      .from("bookings")
-      .select("reference, driver_id, vehicle_registration, driver_mobile")
-      .in("reference", references)
-      .returns<HeldRow[]>();
+    // driver_mobile arrives with its own migration, and this function may be
+    // deployed before it lands. Naming a column that is not there fails the
+    // whole select, which would quietly take the registrations and the
+    // already-claimed jobs down with it, so ask for less rather than nothing.
+    let held: HeldRow[] | null = null;
+    let hasMobileColumn = false;
+    for (const columns of [
+      "reference, driver_id, vehicle_registration, driver_mobile",
+      "reference, driver_id, vehicle_registration",
+    ]) {
+      const attempt = await admin
+        .from("bookings")
+        .select(columns)
+        .in("reference", references)
+        .returns<HeldRow[]>();
+      held = attempt.data;
+      if (!attempt.error) {
+        hasMobileColumn = columns.includes("driver_mobile");
+        break;
+      }
+    }
 
     await recordRegistrations(admin, withCar, held ?? []);
-    await recordMobiles(admin, named, held ?? []);
+    if (hasMobileColumn) await recordMobiles(admin, named, held ?? []);
     if (named.length === 0) return 0;
 
     const { data: chauffeurs } = await admin
