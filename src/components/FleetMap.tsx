@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 // The map engine builds its own worker from a path relative to its own
@@ -17,6 +17,7 @@ import {
   prefersReducedMotion,
   shouldTurn,
 } from "@/lib/trackMarker";
+import { locationFreshness } from "@/lib/locationAge";
 
 /** A car the booking system has given us a position for. */
 export interface FleetCar {
@@ -43,6 +44,15 @@ export interface FleetWaiting {
 interface Props {
   cars: FleetCar[];
   waiting: FleetWaiting[];
+  /**
+   * How many allocated jobs were left out of cars and waiting entirely.
+   *
+   * The booking system is only asked about a limited number of jobs at a
+   * time, so on a full match day there can be more cars out than this screen
+   * is told about. Dropping them silently would have the desk believe it is
+   * looking at the whole convoy when it is not.
+   */
+  notShown?: number;
 }
 
 /** Free vector tiles, no key, the same style the member's own map draws. */
@@ -63,16 +73,26 @@ const INK = "#1C2C5B";
 /** Close enough to read a street name without losing the rest of the fleet. */
 const MAX_FIT_ZOOM = 15;
 
-const ageOf = (at: string | null): string => {
-  if (!at) return "position age unknown";
-  const ms = Date.now() - new Date(at).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "position age unknown";
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return "moments ago";
-  if (mins === 1) return "a minute ago";
-  if (mins < 60) return `${mins} minutes ago`;
-  const hours = Math.floor(mins / 60);
-  return hours === 1 ? "an hour ago" : `${hours} hours ago`;
+/**
+ * Dispatch send the position time as "DD-MMM-YYYY HH:MM" in UK local time
+ * with no offset, so it cannot be handed to Date and subtracted: that reads
+ * it as the viewer's own clock and quietly reports the wrong age the moment
+ * anyone opens this outside the UK. locationAge.ts already does it properly
+ * and the member's own tracking screen uses it, so this uses the same one.
+ */
+const ageOf = (at: string | null): string =>
+  at ? locationFreshness(at).text || "position age unknown" : "position age unknown";
+
+/** Every time on this screen is a London time, as it is everywhere else here. */
+const ukTime = (value: string | null): string | null => {
+  if (!value) return null;
+  const t = new Date(value).getTime();
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleTimeString("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
 const label = (car: FleetCar): string => {
@@ -111,15 +131,26 @@ interface Held {
  * an empty map is the ordinary state for most of the day. It says as much on
  * the face of it, because a blank map with no explanation reads as broken.
  */
-const FleetMap = ({ cars, waiting }: Props) => {
+const FleetMap = ({ cars, waiting, notShown = 0 }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const held = useRef(new Map<string, Held>());
-  const readyRef = useRef(false);
   /** Once the desk has moved the map, it belongs to them, not to us. */
   const takenOverRef = useRef(false);
   /** Which cars the last fit framed, so a new arrival reframes but a step does not. */
   const framedRef = useRef("");
+  /** The latest framing, so the recentre control can call it. */
+  const fitRef = useRef<(() => void) | null>(null);
+  /** Shown once the desk has taken the map, so they can hand it back. */
+  const [taken, setTaken] = useState(false);
+
+  /** Put every car back in view, and resume following them. */
+  const frameAll = () => {
+    takenOverRef.current = false;
+    framedRef.current = "";
+    setTaken(false);
+    fitRef.current?.();
+  };
 
   // Build once. Rebuilding on every position would throw the view away.
   useEffect(() => {
@@ -132,15 +163,16 @@ const FleetMap = ({ cars, waiting }: Props) => {
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-    map.on("load", () => {
-      readyRef.current = true;
-    });
     // Dragging or zooming by hand is the desk saying where it wants to look
     map.on("dragstart", () => {
       takenOverRef.current = true;
+      setTaken(true);
     });
     map.on("zoomstart", (e) => {
-      if ((e as unknown as { originalEvent?: unknown }).originalEvent) takenOverRef.current = true;
+      if ((e as unknown as { originalEvent?: unknown }).originalEvent) {
+        takenOverRef.current = true;
+        setTaken(true);
+      }
     });
     mapRef.current = map;
     return () => {
@@ -151,7 +183,6 @@ const FleetMap = ({ cars, waiting }: Props) => {
       held.current.clear();
       map.remove();
       mapRef.current = null;
-      readyRef.current = false;
     };
   }, []);
 
@@ -232,10 +263,8 @@ const FleetMap = ({ cars, waiting }: Props) => {
 
     // Frame the fleet when the set of cars changes, not when one of them
     // moves, and never once the desk has taken hold of the map themselves.
-    const framing = [...seen].sort().join(",");
-    if (framing && framing !== framedRef.current && !takenOverRef.current) {
-      framedRef.current = framing;
-      const placed = cars.filter((c) => seen.has(c.reference));
+    const placed = cars.filter((c) => seen.has(c.reference));
+    const fit = () => {
       if (placed.length === 1) {
         map.easeTo({ center: [placed[0].lng, placed[0].lat], zoom: MAX_FIT_ZOOM });
       } else if (placed.length > 1) {
@@ -246,6 +275,13 @@ const FleetMap = ({ cars, waiting }: Props) => {
         for (const c of placed) bounds.extend([c.lng, c.lat]);
         map.fitBounds(bounds, { padding: 64, maxZoom: MAX_FIT_ZOOM, duration: 800 });
       }
+    };
+    fitRef.current = fit;
+
+    const framing = [...seen].sort().join(",");
+    if (framing && framing !== framedRef.current && !takenOverRef.current) {
+      framedRef.current = framing;
+      fit();
     }
     if (!framing) framedRef.current = "";
   }, [cars]);
@@ -267,6 +303,16 @@ const FleetMap = ({ cars, waiting }: Props) => {
           className="w-full h-[420px] sm:h-[560px] border border-border"
           aria-label="Live map of allocated cars"
         />
+        {taken && cars.length > 0 && (
+          <button
+            type="button"
+            onClick={frameAll}
+            className="absolute left-3 bottom-3 px-3 py-2.5 text-[10px] tracking-[0.18em] uppercase border bg-white/95 hover:bg-white transition-colors"
+            style={{ color: INK, borderColor: "rgba(0,0,0,0.15)" }}
+          >
+            Show all cars
+          </button>
+        )}
         {nothingYet && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6">
             <div
@@ -277,7 +323,7 @@ const FleetMap = ({ cars, waiting }: Props) => {
                 boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
               }}
             >
-              <p className="text-xs tracking-[0.22em] uppercase mb-2 opacity-60">
+              <p className="text-xs tracking-[0.22em] uppercase mb-2 opacity-80">
                 No cars on the road yet
               </p>
               <p className="text-sm leading-relaxed opacity-80">
@@ -285,6 +331,7 @@ const FleetMap = ({ cars, waiting }: Props) => {
                 fifteen minutes before the collection, or sooner if the chauffeur sets off early.
                 {soonest
                   ? ` The next collection is at ${soonest.toLocaleTimeString("en-GB", {
+                      timeZone: "Europe/London",
                       hour: "2-digit",
                       minute: "2-digit",
                     })}.`
@@ -297,28 +344,29 @@ const FleetMap = ({ cars, waiting }: Props) => {
 
       {waiting.length > 0 && (
         <div className="mt-6">
-          <p className="text-[11px] tracking-[0.22em] uppercase mb-3 opacity-60">
+          <p className="text-[11px] tracking-[0.22em] uppercase mb-3 opacity-80">
             Allocated, not yet on the map
           </p>
           <ul className="divide-y divide-border border border-border">
             {waiting.map((w) => (
               <li key={w.reference} className="px-4 py-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
                 <span className="text-sm font-medium">
-                  {w.collectionAt
-                    ? new Date(w.collectionAt).toLocaleTimeString("en-GB", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "Time to confirm"}
+                  {ukTime(w.collectionAt) ?? "Time to confirm"}
                 </span>
                 <span className="text-sm opacity-85">{w.passenger || "Passenger to confirm"}</span>
                 {/* Only when there is one. The reason beside it already says
                     so otherwise, and saying it twice reads as two faults. */}
-                {w.chauffeur && <span className="text-sm opacity-70">{w.chauffeur}</span>}
-                <span className="text-xs opacity-55 ml-auto">{w.why}</span>
+                {w.chauffeur && <span className="text-sm opacity-85">{w.chauffeur}</span>}
+                <span className="text-xs opacity-80 ml-auto">{w.why}</span>
               </li>
             ))}
           </ul>
+          {notShown > 0 && (
+            <p className="mt-3 text-xs opacity-80">
+              {notShown} further {notShown === 1 ? "job is" : "jobs are"} booked and not shown
+              here. The booking system is asked about the cars going soonest first.
+            </p>
+          )}
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
-import { ACTIVE_STATUSES, LIVE_POLL_MS, refsToCheck } from "@/lib/bookingLive";
+import { ACTIVE_STATUSES, LIVE_POLL_MS, refsToCheck, stillRunning } from "@/lib/bookingLive";
 import FleetMap, { type FleetCar, type FleetWaiting } from "@/components/FleetMap";
 import { appendStop, lastSetDown } from "@/lib/journey";
 import { useAuth } from "@/hooks/useAuth";
@@ -370,6 +370,14 @@ const invokeDesk = async (body: Record<string, unknown>) => {
   return data;
 };
 
+/** The position fields, kept when a newer reply arrives without one. */
+const pickFix = (b: LiveBookingStatus) => ({
+  latitude: b.latitude,
+  longitude: b.longitude,
+  locationDateTime: b.locationDateTime,
+  trackDriverUrl: b.trackDriverUrl,
+});
+
 const lightLabel = "block text-[11px] tracking-[0.18em] uppercase mb-2";
 const lightInput =
   "w-full h-11 bg-white border rounded-none px-3 text-sm outline-none transition-colors";
@@ -401,6 +409,8 @@ const McfcPortal = () => {
   const [recent, setRecent] = useState<RecentBooking[]>([]);
   /** Driver and vehicle from the booking system, by reference */
   const [recentLive, setRecentLive] = useState<Record<string, LiveBookingStatus>>({});
+  /** The current bookings, read by the map's beat without restarting it. */
+  const recentRef = useRef<RecentBooking[]>([]);
   // Amending an existing car: its reference; Dispatch overwrites on resubmit
   const [amendRef, setAmendRef] = useState<string | null>(null);
   const [cancelConfirmRef, setCancelConfirmRef] = useState<string | null>(null);
@@ -639,6 +649,10 @@ const McfcPortal = () => {
     loadRecent();
   }, [loadRecent]);
 
+  useEffect(() => {
+    recentRef.current = recent;
+  }, [recent]);
+
   /**
    * The live map is the one screen here that needs a beat rather than a
    * refresh. Asking faster is not faster: Dispatch refuse a whole request
@@ -649,15 +663,26 @@ const McfcPortal = () => {
     if (view !== "map" || !mfaVerified || !hasDeskAccess) return;
     let stopped = false;
     const beat = async () => {
-      const refs = refsToCheck(recent);
+      const refs = refsToCheck(recentRef.current);
       if (refs.length === 0) return;
       try {
         const live = await checkBookingStatuses(refs);
         if (stopped) return;
-        setRecentLive((prev) => ({
-          ...prev,
-          ...Object.fromEntries(live.map((l) => [l.reference, l])),
-        }));
+        setRecentLive((prev) => {
+          const next = { ...prev };
+          for (const l of live) {
+            // A booking checked moments ago comes back from saved details
+            // with no position on it. Letting that overwrite a car we are
+            // already tracking takes it off the map and then blames the
+            // fifteen minute rule, which is not what happened. Keep the
+            // position we hold until a newer one actually arrives.
+            const had = prev[l.reference];
+            const nowHasFix = l.latitude != null && l.longitude != null;
+            const hadFix = had?.latitude != null && had?.longitude != null;
+            next[l.reference] = !nowHasFix && hadFix ? { ...l, ...pickFix(had) } : l;
+          }
+          return next;
+        });
       } catch {
         // Keep the last positions we had. An empty map would say the cars
         // have gone, and we do not know that.
@@ -669,10 +694,24 @@ const McfcPortal = () => {
       stopped = true;
       clearInterval(timer);
     };
-  }, [view, mfaVerified, hasDeskAccess, recent]);
+    // `recent` is deliberately not a dependency. It changes identity on every
+    // booking, amendment and cancellation, and each restart fires an
+    // immediate ask. The ref keeps the beat reading the current list without
+    // the effect tearing down and asking again off the back of it.
+  }, [view, mfaVerified, hasDeskAccess]);
 
   /** The jobs worth watching: on the road first, then by how soon they go. */
   const mapRefs = useMemo(() => refsToCheck(recent), [recent]);
+
+  /**
+   * Allocated jobs the map was never told about, because the booking system
+   * is only asked about a capped number at a time. Shown on the screen
+   * rather than dropped, so a full match day cannot look like a quiet one.
+   */
+  const notShownCount = useMemo(() => {
+    const running = recent.filter((r) => r.reference && stillRunning(r, Date.now()));
+    return Math.max(0, running.length - mapRefs.length);
+  }, [recent, mapRefs]);
 
   const fleetCars = useMemo<FleetCar[]>(() => {
     const out: FleetCar[] = [];
@@ -1570,7 +1609,7 @@ const McfcPortal = () => {
             key={t.key}
             type="button"
             onClick={() => setView(t.key)}
-            className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-3 sm:py-2.5 text-[10px] sm:text-xs tracking-[0.1em] sm:tracking-[0.18em] uppercase transition-colors"
+            className="inline-flex items-center justify-center min-h-[44px] sm:min-h-0 gap-1.5 sm:gap-2 px-3 sm:px-5 py-3 sm:py-2.5 text-[10px] sm:text-xs tracking-[0.1em] sm:tracking-[0.18em] uppercase transition-colors"
             style={
               view === t.key
                 ? { backgroundColor: NAVY, color: "#ffffff" }
@@ -2881,7 +2920,7 @@ const McfcPortal = () => {
                   Live Map
                 </h1>
               </div>
-              <p className="text-xs tracking-[0.12em] uppercase text-white/70 max-w-sm text-right">
+              <p className="text-xs tracking-[0.12em] uppercase text-white max-w-sm text-right">
                 {fleetCars.length === 0
                   ? "No car is reporting a position yet"
                   : fleetCars.length === 1
@@ -2890,7 +2929,7 @@ const McfcPortal = () => {
               </p>
             </div>
             <div className="bg-white/90 p-6 sm:p-8">
-              <FleetMap cars={fleetCars} waiting={fleetWaiting} />
+              <FleetMap cars={fleetCars} waiting={fleetWaiting} notShown={notShownCount} />
             </div>
           </>
         )}
