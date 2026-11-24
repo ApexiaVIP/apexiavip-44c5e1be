@@ -17,6 +17,7 @@ interface HeldRow {
   reference: string;
   driver_id: string | null;
   vehicle_registration: string | null;
+  driver_mobile: string | null;
 }
 
 interface ChauffeurRow {
@@ -57,6 +58,38 @@ const recordRegistrations = async (
 };
 
 /**
+ * Keep the chauffeur's number Dispatch has given, for the same reason as the
+ * registration: the match day schedule is printed before the jobs are
+ * dispatched, and Dispatch sends no Driver object until they are. Held once,
+ * the number is on the sheet whatever Dispatch says at the moment it is
+ * printed.
+ */
+const recordMobiles = async (
+  admin: ReturnType<typeof adminClient>,
+  named: DispatchAnswer[],
+  held: HeldRow[]
+) => {
+  const saved = new Map(held.map((row) => [row.reference, row.driver_mobile]));
+  const byMobile = new Map<string, string[]>();
+  for (const answer of named) {
+    const reference = (answer.Reference ?? "").trim();
+    const mobile = (answer.Driver?.Mobile ?? "").trim();
+    if (!reference || !mobile || !saved.has(reference)) continue;
+    if (saved.get(reference) === mobile) continue;
+    const references = byMobile.get(mobile) ?? [];
+    if (!references.includes(reference)) references.push(reference);
+    byMobile.set(mobile, references);
+  }
+  for (const [mobile, references] of byMobile) {
+    const { error } = await admin
+      .from("bookings")
+      .update({ driver_mobile: mobile })
+      .in("reference", references);
+    if (error) console.error("could not record chauffeur number", references.join(", "), error.message);
+  }
+};
+
+/**
  * Put every job Dispatch has named a chauffeur on into that chauffeur's hands.
  *
  * Called by whoever happens to have asked Dispatch, because Dispatch will
@@ -86,11 +119,12 @@ export const claimForChauffeurs = async (answers: DispatchAnswer[]): Promise<num
 
     const { data: held } = await admin
       .from("bookings")
-      .select("reference, driver_id, vehicle_registration")
+      .select("reference, driver_id, vehicle_registration, driver_mobile")
       .in("reference", references)
       .returns<HeldRow[]>();
 
     await recordRegistrations(admin, withCar, held ?? []);
+    await recordMobiles(admin, named, held ?? []);
     if (named.length === 0) return 0;
 
     const { data: chauffeurs } = await admin

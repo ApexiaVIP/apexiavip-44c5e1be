@@ -612,14 +612,22 @@ serve(async (req) => {
           .returns<ScheduleRow[]>();
       const columns =
         "reference, name, vehicle, passengers, collection_at, pickup, dropoff, via, stops, status, notes, children, client_car, driver_status, status_checked_at, driver_id, driver_name, vehicle_registration";
-      // Whether the chauffeur has said they are up, so the desk can stop
-      // messaging them one at a time. The columns arrive with their
-      // migration, which lands after this does, and a desk that cannot see
-      // the answer must still see the day.
-      let { data: rows, error: schedError } = await schedule(
-        `${columns}, chauffeur_ack_at, chauffeur_ack`
-      );
-      if (schedError) ({ data: rows, error: schedError } = await schedule(columns));
+      // Columns that arrive with their own migration, which can land after
+      // this function does: whether the chauffeur has said they are up, and
+      // the chauffeur's number. A desk that cannot see one of them must still
+      // see the day, so they are dropped in turn rather than failing the view.
+      let rows: ScheduleRow[] | null = null;
+      let schedError: { message?: string } | null = null;
+      for (const extra of [
+        "chauffeur_ack_at, chauffeur_ack, driver_mobile",
+        "chauffeur_ack_at, chauffeur_ack",
+        "",
+      ]) {
+        const attempt = await schedule(extra ? `${columns}, ${extra}` : columns);
+        rows = attempt.data;
+        schedError = attempt.error;
+        if (!attempt.error) break;
+      }
       if (schedError) throw schedError;
       let active = (rows ?? []).filter(
         (r) => r.status !== "Failed" && r.status !== "Cancelled"
@@ -638,13 +646,37 @@ serve(async (req) => {
         .map((r) => r.reference as string)
         .filter(Boolean);
 
+      // The chauffeur's number as we hold it ourselves.
+      //
+      // Dispatch sends no Driver object until a job has been dispatched to a
+      // chauffeur, and a match day schedule is printed well before that, so
+      // waiting on Dispatch for the number leaves the column blank on exactly
+      // the sheet that needs it. We use the number Dispatch gave us when it
+      // last told us, and failing that the number on the chauffeur's own
+      // profile, which is the one our office holds.
+      const driverIds = [
+        ...new Set(active.map((r) => r.driver_id as string | null).filter(Boolean)),
+      ] as string[];
+      const { data: driverProfiles } = driverIds.length
+        ? await supabase.from("profiles").select("id, phone").in("id", driverIds)
+        : { data: [] as { id: string; phone: string | null }[] };
+      const profilePhone = new Map(
+        (driverProfiles ?? []).map((p) => [p.id as string, (p.phone as string | null) ?? ""])
+      );
+      const heldMobile = (r: ScheduleRow | undefined) =>
+        !r
+          ? ""
+          : ((r.driver_mobile as string | null) ?? "") ||
+            (r.driver_id ? profilePhone.get(r.driver_id as string) ?? "" : "");
+      const rowOf = new Map(active.map((r) => [r.reference as string, r]));
+
       // A booking held back answers from the chauffeur saved on it, so the
       // desk does not see TBC for a car that has a chauffeur on it. fromSaved
       // marks it as not a live answer; a live answer, below, replaces it.
       const fromSavedRow = (r: ScheduleRow) => ({
         bookingStatus: r.status ?? null,
         driverName: (r.driver_name as string | null) ?? "",
-        driverMobile: "",
+        driverMobile: heldMobile(r),
         vehicleDescription: "",
         vehicleRegistration: (r.vehicle_registration as string | null) ?? "",
         fromSaved: true,
@@ -703,7 +735,10 @@ serve(async (req) => {
               live[b.Reference] = {
                 bookingStatus: b?.BookingStatus ?? null,
                 driverName: b?.Driver?.Name ?? "",
-                driverMobile: b?.Driver?.Mobile ?? "",
+                // Dispatch's number while it has one, ours the rest of the
+                // time, so the column is never blank for a chauffeur we can
+                // reach by either route
+                driverMobile: (b?.Driver?.Mobile ?? "") || heldMobile(rowOf.get(b.Reference)),
                 vehicleDescription: b?.Vehicle?.Description ?? "",
                 vehicleRegistration: b?.Vehicle?.Registration ?? "",
               };
