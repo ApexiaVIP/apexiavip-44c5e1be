@@ -21,6 +21,8 @@ import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/l
 import {
   chauffeurPosition,
   LIVE_POLL_MS,
+  onTheRoad,
+  POSITION_POLL_MS,
   refsToCheck,
   statusIs,
   stillRunning,
@@ -386,6 +388,13 @@ const invokeDesk = async (body: Record<string, unknown>) => {
   return data;
 };
 
+const DESK_VIEWS = ["desk", "fixtures", "map", "people", "addresses", "schedule"] as const;
+type DeskView = (typeof DESK_VIEWS)[number];
+
+/** Which view the address asks for, if it asks for one we have. */
+const viewFromAddress = (): DeskView =>
+  DESK_VIEWS.find((v) => v === window.location.hash.replace(/^#\/?/, "")) ?? "desk";
+
 /** The position fields, kept when a newer reply arrives without one. */
 const pickFix = (b: LiveBookingStatus) => ({
   latitude: b.latitude,
@@ -405,9 +414,17 @@ const lightInputStyle = {
 const McfcPortal = () => {
   const { user, profile, loading, mfaVerified, mfaResolved, signOut, isAdmin } = useAuth();
 
-  const [view, setView] = useState<"desk" | "fixtures" | "map" | "people" | "addresses" | "schedule">(
-    "desk"
-  );
+  const [view, setView] = useState<DeskView>(viewFromAddress);
+
+  // Keep the view in the address, so a refresh comes back to where the desk
+  // was. Watching the live map for an hour and being dropped back on the
+  // booking form by a reload meant clicking back and waiting on the booking
+  // system all over again. replaceState rather than a hash change, so the
+  // back button still leaves the page instead of cycling the tabs.
+  useEffect(() => {
+    const target = `#${view}`;
+    if (window.location.hash !== target) window.history.replaceState(null, "", target);
+  }, [view]);
   const [passengerGroups, setPassengerGroups] = useState<{ group: string; names: string[] }[]>([]);
   const [passengerOptions, setPassengerOptions] = useState<Passenger[]>([]);
   const [addresses, setAddresses] = useState<CorporateAddress[]>([]);
@@ -425,6 +442,8 @@ const McfcPortal = () => {
   const [recent, setRecent] = useState<RecentBooking[]>([]);
   /** Driver and vehicle from the booking system, by reference */
   const [recentLive, setRecentLive] = useState<Record<string, LiveBookingStatus>>({});
+  const [dispatchAsking, setDispatchAsking] = useState(false);
+  const [dispatchAskedAt, setDispatchAskedAt] = useState<number | null>(null);
   /** The current bookings, read by the map's beat without restarting it. */
   const recentRef = useRef<RecentBooking[]>([]);
   // Amending an existing car: its reference; Dispatch overwrites on resubmit
@@ -670,51 +689,87 @@ const McfcPortal = () => {
   }, [recent]);
 
   /**
-   * The live map is the one screen here that needs a beat rather than a
-   * refresh. Asking faster is not faster: Dispatch refuse a whole request
-   * when any booking in it was asked about in the last thirty seconds, so a
-   * quick poll loses the position of every car at once, not just the one.
+   * Our own chauffeurs' positions, read from our own records.
+   *
+   * This asks the booking system for nothing, so the thirty second rule does
+   * not apply and it can run as often as the desk wants to watch a car move.
+   * The previous array is kept when nothing has actually changed, because its
+   * identity is what redraws the map and this runs every few seconds.
+   */
+  const loadPositions = useCallback(async () => {
+    if (!user || !hasDeskAccess || !mfaVerified) return;
+    const { data } = await supabase.functions.invoke("corporate-booking", {
+      body: { action: "recent", desk },
+    });
+    const rows = (Array.isArray(data?.recent) ? data.recent : []) as RecentBooking[];
+    if (rows.length === 0) return;
+    setRecent((prev) => (JSON.stringify(prev) === JSON.stringify(rows) ? prev : rows));
+  }, [user, hasDeskAccess, mfaVerified, desk]);
+
+  /**
+   * What the booking system says, which is the only source for a chauffeur
+   * working Dispatch's app rather than ours.
+   *
+   * Asking faster is not faster: Dispatch refuse a whole request when any
+   * booking in it was asked about in the last thirty seconds, so a quick poll
+   * loses the answer for every car at once, not just the one. This is also
+   * what the refresh button runs, and a refused answer says so on the screen
+   * rather than being dressed up as news about a car.
+   */
+  const refreshDispatch = useCallback(async () => {
+    const refs = refsToCheck(recentRef.current);
+    if (refs.length === 0) return;
+    setDispatchAsking(true);
+    try {
+      const live = await checkBookingStatuses(refs);
+      setRecentLive((prev) => {
+        const next = { ...prev };
+        for (const l of live) {
+          // A booking checked moments ago comes back from saved details
+          // with no position on it. Letting that overwrite a car we are
+          // already tracking takes it off the map and then blames the
+          // fifteen minute rule, which is not what happened. Keep the
+          // position we hold until a newer one actually arrives.
+          const had = prev[l.reference];
+          const nowHasFix = l.latitude != null && l.longitude != null;
+          const hadFix = had?.latitude != null && had?.longitude != null;
+          next[l.reference] = !nowHasFix && hadFix ? { ...l, ...pickFix(had) } : l;
+        }
+        return next;
+      });
+      setDispatchAskedAt(Date.now());
+    } catch {
+      // Keep the last positions we had. An empty map would say the cars
+      // have gone, and we do not know that.
+    } finally {
+      setDispatchAsking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view !== "map" || !mfaVerified || !hasDeskAccess) return;
+    refreshDispatch();
+    const timer = setInterval(refreshDispatch, LIVE_POLL_MS);
+    return () => clearInterval(timer);
+    // `recent` is deliberately not a dependency. It changes identity on every
+    // booking, amendment and cancellation, and each restart fires an
+    // immediate ask. refreshDispatch reads the current list from a ref.
+  }, [view, mfaVerified, hasDeskAccess, refreshDispatch]);
+
+  /**
+   * The quick beat, for watching a car move. Only while somebody is actually
+   * driving: an empty desk has nothing to animate and should not be polling
+   * at all. The check is inside the tick rather than in the dependencies, so
+   * every position that arrives does not restart the clock.
    */
   useEffect(() => {
     if (view !== "map" || !mfaVerified || !hasDeskAccess) return;
-    let stopped = false;
-    const beat = async () => {
-      const refs = refsToCheck(recentRef.current);
-      if (refs.length === 0) return;
-      try {
-        const live = await checkBookingStatuses(refs);
-        if (stopped) return;
-        setRecentLive((prev) => {
-          const next = { ...prev };
-          for (const l of live) {
-            // A booking checked moments ago comes back from saved details
-            // with no position on it. Letting that overwrite a car we are
-            // already tracking takes it off the map and then blames the
-            // fifteen minute rule, which is not what happened. Keep the
-            // position we hold until a newer one actually arrives.
-            const had = prev[l.reference];
-            const nowHasFix = l.latitude != null && l.longitude != null;
-            const hadFix = had?.latitude != null && had?.longitude != null;
-            next[l.reference] = !nowHasFix && hadFix ? { ...l, ...pickFix(had) } : l;
-          }
-          return next;
-        });
-      } catch {
-        // Keep the last positions we had. An empty map would say the cars
-        // have gone, and we do not know that.
-      }
+    const tick = () => {
+      if (recentRef.current.some((r) => onTheRoad(r))) loadPositions();
     };
-    beat();
-    const timer = setInterval(beat, LIVE_POLL_MS);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
-    // `recent` is deliberately not a dependency. It changes identity on every
-    // booking, amendment and cancellation, and each restart fires an
-    // immediate ask. The ref keeps the beat reading the current list without
-    // the effect tearing down and asking again off the back of it.
-  }, [view, mfaVerified, hasDeskAccess]);
+    const timer = setInterval(tick, POSITION_POLL_MS);
+    return () => clearInterval(timer);
+  }, [view, mfaVerified, hasDeskAccess, loadPositions]);
 
   /** The jobs worth watching: on the road first, then by how soon they go. */
   const mapRefs = useMemo(() => refsToCheck(recent), [recent]);
@@ -2932,13 +2987,43 @@ const McfcPortal = () => {
                   Live Map
                 </h1>
               </div>
-              <p className="text-xs tracking-[0.12em] uppercase text-white max-w-sm text-right">
-                {fleetCars.length === 0
-                  ? "No car is reporting a position yet"
-                  : fleetCars.length === 1
-                    ? "One car on the road"
-                    : `${fleetCars.length} cars on the road`}
-              </p>
+              <div className="text-right">
+                <p className="text-xs tracking-[0.12em] uppercase text-white max-w-sm">
+                  {fleetCars.length === 0
+                    ? "No car is reporting a position yet"
+                    : fleetCars.length === 1
+                      ? "One car on the road"
+                      : `${fleetCars.length} cars on the road`}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadPositions();
+                    refreshDispatch();
+                  }}
+                  disabled={dispatchAsking}
+                  className="mt-3 inline-flex items-center gap-2 border border-white/60 px-4 py-2 text-[11px] tracking-[0.18em] uppercase text-white transition-colors hover:bg-white/10 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${dispatchAsking ? "animate-spin" : ""}`} />
+                  {dispatchAsking ? "Asking" : "Refresh"}
+                </button>
+                {/*
+                  The booking system will not answer about the same job twice
+                  inside thirty seconds, so say when we last got through. A
+                  desk pressing refresh and seeing nothing change otherwise
+                  has no way to tell a quiet road from a broken screen.
+                */}
+                {dispatchAskedAt !== null && (
+                  <p className="mt-2 text-[10px] tracking-[0.12em] uppercase text-white/60">
+                    Booking system last asked{" "}
+                    {new Date(dispatchAskedAt).toLocaleTimeString("en-GB", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </p>
+                )}
+              </div>
             </div>
             <div className="bg-white/90 p-6 sm:p-8">
               <FleetMap cars={fleetCars} waiting={fleetWaiting} notShown={notShownCount} />

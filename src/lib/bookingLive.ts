@@ -122,6 +122,11 @@ export const stillRunning = (b: LiveBooking, now: number = Date.now()): boolean 
   return pickup > now - expectedRunHours(b) * 3600 * 1000;
 };
 
+/** Is somebody driving this job right now, by anybody's account? */
+export const onTheRoad = (b: LiveBooking, now: number = Date.now()): boolean =>
+  stillRunning(b, now) &&
+  ((!!b.driver_status && b.driver_status !== "clear") || isActiveStatus(effectiveStatus(b)));
+
 /** How fresh our own position has to be before we trust it over Dispatch's. */
 export const OUR_POSITION_FRESH_MS = 2 * 60 * 1000;
 
@@ -312,6 +317,18 @@ export const DISPATCH_RECHECK_MS = 30_000;
  */
 export const LIVE_POLL_MS = 35_000;
 export const PENDING_POLL_MS = 45_000;
+
+/**
+ * How often the live map reads our own chauffeurs' positions.
+ *
+ * Our own app reports every twenty seconds and we read our own records to
+ * see it, which costs the booking system nothing and so is not bound by
+ * DISPATCH_RECHECK_MS. That is what lets the desk watch a car move rather
+ * than jump. It changes nothing for a chauffeur working Dispatch's app
+ * instead of ours: their position cannot refresh faster than Dispatch
+ * sends it, however often we look.
+ */
+export const POSITION_POLL_MS = 6_000;
 
 /**
  * The least the booking-status ceiling can be without stopping our own app

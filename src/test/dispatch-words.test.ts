@@ -17,6 +17,7 @@ import {
   isActiveStatus,
   isFinalStatus,
   isPreDispatchStatus,
+  onTheRoad,
   statusIs,
   stillRunning,
   whyNotOnMap,
@@ -214,5 +215,44 @@ describe("why a car is not on the map", () => {
     expect(whyNotOnMap({ driver: named, bookingStatus: "Dispatched" }, null, now)).toBe(
       "on the job, no position reported"
     );
+  });
+});
+
+/**
+ * The quick six second beat only runs while somebody is driving, so this
+ * decides whether the desk polls at all. Getting it wrong either stops the
+ * map animating or has an empty desk polling all night.
+ */
+describe("whether anybody is on the road", () => {
+  const now = Date.parse("2026-11-24T12:20:00Z");
+  const job = (over: Record<string, unknown> = {}) => ({
+    status: "Confirmed",
+    collection_at: "2026-11-24T12:00:00Z",
+    ...over,
+  });
+
+  it("counts a chauffeur who has pressed something in our own app", () => {
+    expect(onTheRoad(job({ driver_status: "pob" }), now)).toBe(true);
+    expect(onTheRoad(job({ driver_status: "en_route" }), now)).toBe(true);
+  });
+
+  it("counts a chauffeur the booking system says is working, in any casing", () => {
+    expect(onTheRoad(job({ status: "at pickup" }), now)).toBe(true);
+    expect(onTheRoad(job({ status: "Passenger on board" }), now)).toBe(true);
+  });
+
+  it("does not count a job that has been cleared", () => {
+    expect(onTheRoad(job({ driver_status: "clear" }), now)).toBe(false);
+    expect(onTheRoad(job({ status: "Clear/Completed" }), now)).toBe(false);
+  });
+
+  it("does not count a booking nobody has started", () => {
+    expect(onTheRoad(job({ status: "Confirmed" }), now)).toBe(false);
+  });
+
+  it("does not count yesterday, however its status got stuck", () => {
+    expect(
+      onTheRoad({ status: "Passenger on board", collection_at: "2026-11-20T09:00:00Z" }, now)
+    ).toBe(false);
   });
 });
