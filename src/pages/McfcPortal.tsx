@@ -776,7 +776,14 @@ const McfcPortal = () => {
       const minutesOff = Number.isFinite(due) ? (due - Date.now()) / 60000 : NaN;
       const named = live?.driver?.name;
       let why: string;
+      // A booking the system cannot find will never start tracking, so
+      // promising that tracking opens before collection is a false
+      // reassurance on a screen the desk plans around. Say it plainly and
+      // early, before any of the waiting reasons below.
+      const lost = !!live && /not\s*found/i.test(live.message ?? "");
       if (!live) why = "no answer from the booking system yet";
+      else if (lost)
+        why = "the booking system cannot find this booking, so it will not track it";
       else if (!named) why = "no chauffeur named yet";
       else if (Number.isFinite(minutesOff) && minutesOff > 15)
         why = "tracking opens 15 minutes before collection";
