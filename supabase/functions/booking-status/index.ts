@@ -373,11 +373,25 @@ serve(async (req) => {
     // A held booking answers from what we saved rather than not at all, or
     // every screen blanks its chauffeur until the next refresh. fromSaved says
     // so, so a saved answer is never mistaken for a live one.
+    //
+    // Every field is present, including the ones we have nothing for. Leaving
+    // them off made the saved answer look like a live one carrying no status,
+    // and the live map then read a booking we had simply not asked about as a
+    // car that should have reported a position by now and had not. A missing
+    // field reads as an answer. An absent one has to say so.
     const fromSavedRow = (reference: string) => {
       const saved = visible.find((v) => v.reference === reference);
       return {
         reference,
         status: saved?.status ?? null,
+        bookingStatus: null,
+        latitude: null,
+        longitude: null,
+        locationDateTime: null,
+        trackDriverUrl: null,
+        message: null,
+        totalAmount: null,
+        currencyCode: null,
         driver: saved?.driverName ? { name: saved.driverName, mobile: "", photoUrl: "" } : null,
         vehicle: saved?.vehicleRegistration
           ? { description: "", registration: saved.vehicleRegistration, photoUrl: "" }

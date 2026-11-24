@@ -192,6 +192,70 @@ export const chauffeurPosition = (
   return ours;
 };
 
+/** What the booking system last told us about a job, as a screen sees it. */
+export interface LiveAnswer {
+  bookingStatus?: string | null;
+  message?: string | null;
+  driver?: { name?: string | null } | null;
+  /** True when this is the last answer we held, not a new one */
+  fromSaved?: boolean;
+}
+
+/**
+ * Why a job is not on the map, said in words that are true of it.
+ *
+ * "No position" covers half a dozen different situations and leaves the desk
+ * unable to tell a car that has not set off from one we have lost, which is
+ * the mistake the live map exists to stop making. Every branch here reports
+ * something we were actually told. None of them guesses at a cause: a screen
+ * that invents one sends somebody looking for a late chauffeur when what is
+ * missing is a position, and that has now happened three times.
+ */
+export const whyNotOnMap = (
+  live: LiveAnswer | null | undefined,
+  collectionAt: string | null | undefined,
+  now: number = Date.now()
+): string => {
+  const due = collectionAt ? new Date(collectionAt).getTime() : NaN;
+  const minutesOff = Number.isFinite(due) ? (due - now) / 60000 : NaN;
+
+  if (!live) return "no answer from the booking system yet";
+
+  // A booking the system cannot find will never start tracking, so promising
+  // that tracking opens before collection is a false reassurance on a screen
+  // the desk plans around. Say it plainly, before any of the waiting reasons.
+  if (/not\s*found/i.test(live.message ?? "")) {
+    return "the booking system cannot find this booking, so it will not track it";
+  }
+
+  // The last answer we held is not a new one, so nothing in it is evidence
+  // about where the car is now. Saying anything else here reports our own
+  // rate limit as though it were news about the chauffeur.
+  if (live.fromSaved) return "waiting for the booking system's next answer";
+
+  // Dispatch sends back no chauffeur at all until the job is dispatched to
+  // one, which Dever have confirmed happens whether or not a chauffeur has
+  // been allocated. "No chauffeur named yet" reads as nobody being on the job
+  // and sends the desk chasing an allocation already made.
+  if (!live.driver?.name) {
+    return isPreDispatchStatus(live.bookingStatus)
+      ? "not sent to a chauffeur yet, so no name with it"
+      : "no chauffeur named yet";
+  }
+
+  if (Number.isFinite(minutesOff) && minutesOff > 15) {
+    return "tracking opens 15 minutes before collection";
+  }
+  if (isActiveStatus(live.bookingStatus)) return "on the job, no position reported";
+  // Any other status is said in the booking system's own words
+  if (live.bookingStatus) {
+    return `booking system says "${live.bookingStatus}", no position with it`;
+  }
+  // Nothing is left but a reply carrying no status at all. That says nothing
+  // about the car, so it must not be dressed up as though it did.
+  return "the booking system gave no status for this job";
+};
+
 /**
  * How many journeys we may ask Dispatch about in one go. The booking-status
  * function enforces the same number; keep the two together.

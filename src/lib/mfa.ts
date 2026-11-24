@@ -52,6 +52,8 @@ export interface LiveBookingStatus {
   totalAmount: number | null;
   currencyCode: string | null;
   message: string | null;
+  /** True when this is the last answer we held rather than a new one */
+  fromSaved?: boolean;
 }
 
 /** Live Dispatch status for the member's own bookings. */

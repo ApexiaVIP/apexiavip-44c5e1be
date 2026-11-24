@@ -20,12 +20,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { cancelBooking, checkBookingStatuses, type LiveBookingStatus } from "@/lib/mfa";
 import {
   chauffeurPosition,
-  isActiveStatus,
-  isPreDispatchStatus,
   LIVE_POLL_MS,
   refsToCheck,
   statusIs,
   stillRunning,
+  whyNotOnMap,
 } from "@/lib/bookingLive";
 import FleetMap, { type FleetCar, type FleetWaiting } from "@/components/FleetMap";
 import { appendStop, lastSetDown } from "@/lib/journey";
@@ -773,46 +772,12 @@ const McfcPortal = () => {
       if (placed.has(reference)) continue;
       const row = recent.find((r) => r.reference === reference);
       const live = recentLive[reference];
-      const due = row?.collection_at ? new Date(row.collection_at).getTime() : NaN;
-      const minutesOff = Number.isFinite(due) ? (due - Date.now()) / 60000 : NaN;
-      const named = live?.driver?.name;
-      let why: string;
-      // A booking the system cannot find will never start tracking, so
-      // promising that tracking opens before collection is a false
-      // reassurance on a screen the desk plans around. Say it plainly and
-      // early, before any of the waiting reasons below.
-      const lost = !!live && /not\s*found/i.test(live.message ?? "");
-      if (!live) why = "no answer from the booking system yet";
-      else if (lost)
-        why = "the booking system cannot find this booking, so it will not track it";
-      // Dispatch sends back no chauffeur at all until the job is dispatched to
-      // one, which Dever have confirmed happens whether or not a chauffeur has
-      // been allocated. "No chauffeur named yet" reads as nobody being on the
-      // job and sends the desk chasing an allocation already made, so say
-      // which of the two it is.
-      else if (!named)
-        why = isPreDispatchStatus(live.bookingStatus)
-          ? "not sent to a chauffeur yet, so no name with it"
-          : "no chauffeur named yet";
-      else if (Number.isFinite(minutesOff) && minutesOff > 15)
-        why = "tracking opens 15 minutes before collection";
-      else if (isActiveStatus(live.bookingStatus))
-        why = "on the job, no position reported";
-      // Any other status the booking system gives is said in its own words.
-      // Guessing at a cause here is how a car that collected hours ago came
-      // to read "has not set off yet", which sent the desk looking for a
-      // late chauffeur instead of a missing position.
-      else if (live.bookingStatus)
-        why = `booking system says "${live.bookingStatus}", no position with it`;
-      else if (Number.isFinite(minutesOff) && minutesOff <= 0)
-        why = "collection time has passed and no position has come through";
-      else why = "chauffeur has not set off yet";
       out.push({
         reference,
         passenger: row?.name ?? null,
-        chauffeur: named || null,
+        chauffeur: live?.driver?.name || null,
         collectionAt: row?.collection_at ?? null,
-        why,
+        why: whyNotOnMap(live, row?.collection_at ?? null),
       });
     }
     return out;

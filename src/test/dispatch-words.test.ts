@@ -19,6 +19,7 @@ import {
   isPreDispatchStatus,
   statusIs,
   stillRunning,
+  whyNotOnMap,
 } from "@/lib/bookingLive";
 
 const atPickup = (status: string) => ({ status, collection_at: "2026-11-24T05:00:00Z" });
@@ -138,5 +139,80 @@ describe("where to draw the car", () => {
         now
       )
     ).toBeNull();
+  });
+});
+
+describe("why a car is not on the map", () => {
+  const SOON = "2026-11-24T12:00:00Z";
+  const now = Date.parse("2026-11-24T12:20:00Z");
+  const named = { name: "Irfan Siddiqui" };
+
+  it("says nothing has come back when nothing has", () => {
+    expect(whyNotOnMap(null, SOON, now)).toBe("no answer from the booking system yet");
+  });
+
+  it("does not promise tracking for a booking the system cannot find", () => {
+    expect(whyNotOnMap({ message: "Booking not found", driver: named }, SOON, now)).toBe(
+      "the booking system cannot find this booking, so it will not track it"
+    );
+  });
+
+  /**
+   * The one this was written for. A booking asked about in the last thirty
+   * seconds comes back from what we saved, with a chauffeur's name on it and
+   * no status. Read as a live answer it looked like a car that had passed its
+   * collection time without reporting, and the desk went looking for it. It
+   * was our own rate limit.
+   */
+  it("reports our own rate limit as ours, not as news about the car", () => {
+    expect(
+      whyNotOnMap(
+        { driver: named, bookingStatus: null, fromSaved: true },
+        SOON,
+        now
+      )
+    ).toBe("waiting for the booking system's next answer");
+  });
+
+  it("tells a job not yet sent to a chauffeur from one with nobody on it", () => {
+    expect(whyNotOnMap({ bookingStatus: "Pending" }, SOON, now)).toBe(
+      "not sent to a chauffeur yet, so no name with it"
+    );
+    expect(whyNotOnMap({ bookingStatus: "Dispatched" }, SOON, now)).toBe(
+      "no chauffeur named yet"
+    );
+  });
+
+  it("explains the fifteen minute rule only while it is still the reason", () => {
+    const early = Date.parse("2026-11-24T11:00:00Z");
+    expect(whyNotOnMap({ driver: named, bookingStatus: "Dispatched" }, SOON, early)).toBe(
+      "tracking opens 15 minutes before collection"
+    );
+  });
+
+  it("says a working car has reported no position, in any casing", () => {
+    expect(whyNotOnMap({ driver: named, bookingStatus: "at pickup" }, SOON, now)).toBe(
+      "on the job, no position reported"
+    );
+  });
+
+  it("repeats any other status in the booking system's own words", () => {
+    expect(whyNotOnMap({ driver: named, bookingStatus: "Invoice" }, SOON, now)).toBe(
+      'booking system says "Invoice", no position with it'
+    );
+  });
+
+  it("never guesses that a chauffeur has not set off", () => {
+    // A live answer with no status says nothing about the car, and used to
+    // read "collection time has passed and no position has come through"
+    const why = whyNotOnMap({ driver: named, bookingStatus: null }, SOON, now);
+    expect(why).toBe("the booking system gave no status for this job");
+    expect(why).not.toMatch(/set off|collection time/);
+  });
+
+  it("copes with a booking that has no collection time at all", () => {
+    expect(whyNotOnMap({ driver: named, bookingStatus: "Dispatched" }, null, now)).toBe(
+      "on the job, no position reported"
+    );
   });
 });
