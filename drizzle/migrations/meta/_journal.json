@@ -92,6 +92,13 @@
       "when": 1795534512224,
       "tag": "0012_apply_bookings_driver_mobile",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795609849884,
+      "tag": "0013_avatars_not_world_readable",
+      "breakpoints": true
     }
   ]
 }
