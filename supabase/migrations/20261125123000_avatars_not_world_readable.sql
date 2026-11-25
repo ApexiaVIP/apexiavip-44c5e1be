@@ -9,8 +9,15 @@
 --
 -- The bucket itself was made private at some point in the dashboard, and the
 -- app moved to signed URLs, but the policy never followed. Half a fix is why
--- this sat open. Both halves are set here so the repo matches what is live
--- and a rebuild cannot quietly reopen it.
+-- this sat open.
+--
+-- The bucket's own public flag is NOT set here, and cannot be: the migration
+-- tool refuses any SQL that writes to storage.buckets and rejects the whole
+-- file for it. It reads public = false live today, so there is nothing to
+-- change, but that half is held in the dashboard rather than in this repo.
+-- It matters, because a public bucket serves its objects through a path that
+-- skips these policies entirely. If anybody ever flips it back, the rules
+-- below stop applying to reads.
 --
 -- Who is allowed to see a photograph, taken from the three places the app
 -- actually renders one:
@@ -18,8 +25,6 @@
 --   a primary member's family group, listed on their profile
 --   any member's, by an administrator, on the admin screen
 -- Nobody else, and never anonymously.
-
-UPDATE storage.buckets SET public = false WHERE id = 'avatars';
 
 DROP POLICY IF EXISTS "Avatars are publicly readable" ON storage.objects;
 DROP POLICY IF EXISTS "A member reads their own avatar" ON storage.objects;
