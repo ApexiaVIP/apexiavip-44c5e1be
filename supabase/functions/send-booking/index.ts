@@ -374,12 +374,14 @@ serve(async (req) => {
     // Record this request for rate limiting
     await supabase.from("rate_limits").insert({ ip_address: ip, endpoint: "send-booking" });
 
+    let storedAssignedBookingId: string | number | null = null;
     if (amendReference) {
       const { data: existing } = await supabase
         .from("bookings")
-        .select("reference, user_id")
+        .select("reference, user_id, assigned_booking_id")
         .eq("reference", amendReference)
         .maybeSingle();
+      storedAssignedBookingId = existing?.assigned_booking_id ?? null;
       if (!existing || existing.user_id !== userData.user.id) {
         return new Response(JSON.stringify({ success: false, error: "Booking not found" }), {
           status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -555,6 +557,7 @@ serve(async (req) => {
     const dispatchUrl = bookingTransferUrl(DISPATCH_TRANSFER_REFERENCE);
 
     let dispatchFailureMessage: string | null = null;
+    let amendDuplicateWarning: string | null = null;
     let returnFailureMessage: string | null = null;
 
     try {
@@ -589,6 +592,32 @@ serve(async (req) => {
       if (dispatchFailureMessage) {
         console.error("Dispatch transfer failed:", dispatchFailureMessage);
       } else if (amendReference) {
+        // Dispatch answering "success" to an amendment does not prove it
+        // amended anything. When the match fails it creates a second job
+        // instead, which is how a ghost booking reached a match day without
+        // anybody noticing until the office saw it on screen the next
+        // morning. A different AssignedBookingID coming back is that
+        // happening, so say so rather than overwrite our record in silence.
+        //
+        // Reported, not failed. We do not yet know whether Dispatch returns
+        // the original id on a matched amendment or a fresh one every time,
+        // so treating a mismatch as a refusal could dead-end every change.
+        const returnedBookingId = dispatchBooking?.AssignedBookingID ?? null;
+        if (
+          returnedBookingId &&
+          storedAssignedBookingId &&
+          String(returnedBookingId) !== String(storedAssignedBookingId)
+        ) {
+          amendDuplicateWarning =
+            `We hold Dispatch booking ${storedAssignedBookingId} against this reference, ` +
+            `and the amendment came back as ${returnedBookingId}.`;
+          console.error(
+            "Amendment may have duplicated:",
+            amendReference,
+            storedAssignedBookingId,
+            returnedBookingId
+          );
+        }
         // Amendment accepted: write the new details over our record
         await supabase
           .from("bookings")
@@ -716,11 +745,26 @@ serve(async (req) => {
           ${detailRows}
         </table>
         ${
-          dispatchFailureMessage && !amendReference
+          dispatchFailureMessage
             ? `<p style="margin-top: 24px; padding: 14px 16px; background: #3A1A1A; border-left: 3px solid #e05a5a; color: #ffb4b4; font-size: 13px;">
-                 <strong>THIS BOOKING IS NOT IN DISPATCH</strong> &mdash; please enter it by hand.<br/>
+                 <strong>${
+                   amendReference
+                     ? "THIS CHANGE IS NOT IN DISPATCH"
+                     : "THIS BOOKING IS NOT IN DISPATCH"
+                 }</strong>, please ${amendReference ? "apply it" : "enter it"} by hand.<br/>
                  Reason given: ${sanitize(dispatchFailureMessage)}<br/>
-                 The member has been told we have their booking and will confirm it shortly.
+                 The member has been told we have their ${
+                   amendReference ? "change" : "booking"
+                 } and will confirm it shortly.
+               </p>`
+            : ""
+        }
+        ${
+          amendDuplicateWarning
+            ? `<p style="margin-top: 24px; padding: 14px 16px; background: #3A1A1A; border-left: 3px solid #e05a5a; color: #ffb4b4; font-size: 13px;">
+                 <strong>DISPATCH MAY NOW HOLD TWO JOBS FOR THIS REFERENCE</strong>, please check and remove the old one.<br/>
+                 ${sanitize(amendDuplicateWarning)}<br/>
+                 The change itself has been applied to the newer job.
                </p>`
             : ""
         }
@@ -757,7 +801,7 @@ serve(async (req) => {
               : "Booking Enquiry"
         }: ${safeName}${accountHolder ? ` for ${sanitize(accountHolder.full_name)}` : ""} (${safeVehicle})${clientCar ? " - CLIENT'S OWN CAR" : ""}${
           children.length > 0 ? " - CHILD SEATS" : ""
-        }${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}${
+        }${amendDuplicateWarning ? " - POSSIBLE DUPLICATE IN DISPATCH" : ""}${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}${
           availability ? " - SUBJECT TO AVAILABILITY" : ""
         }`,
         html: htmlBody,
