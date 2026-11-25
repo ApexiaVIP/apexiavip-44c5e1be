@@ -15,9 +15,6 @@ verify_jwt = false
 [functions.sms-2fa]
 verify_jwt = false
 
-[functions.admin-gen-link]
-verify_jwt = false
-
 [functions.phone-login]
 verify_jwt = false
 
