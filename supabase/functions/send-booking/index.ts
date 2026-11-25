@@ -611,18 +611,21 @@ serve(async (req) => {
           amendDuplicateWarning =
             `We hold Dispatch booking ${storedAssignedBookingId} against this reference, ` +
             `and the amendment came back as ${returnedBookingId}.`;
+          dispatchFailureMessage =
+            "Dispatch created a second booking instead of amending the first";
           console.error(
-            "Amendment may have duplicated:",
+            "Amendment duplicated:",
             amendReference,
             storedAssignedBookingId,
             returnedBookingId
           );
+        } else {
+          // Amendment accepted: write the new details over our record
+          await supabase
+            .from("bookings")
+            .update({ ...bookingRow, status: "Confirmed" })
+            .eq("reference", bookingReference);
         }
-        // Amendment accepted: write the new details over our record
-        await supabase
-          .from("bookings")
-          .update({ ...bookingRow, status: "Confirmed" })
-          .eq("reference", bookingReference);
       } else {
         // Link our record to the booking created in Dispatch
         await supabase
@@ -745,7 +748,7 @@ serve(async (req) => {
           ${detailRows}
         </table>
         ${
-          dispatchFailureMessage
+          dispatchFailureMessage && !amendDuplicateWarning
             ? `<p style="margin-top: 24px; padding: 14px 16px; background: #3A1A1A; border-left: 3px solid #e05a5a; color: #ffb4b4; font-size: 13px;">
                  <strong>${
                    amendReference
@@ -762,9 +765,9 @@ serve(async (req) => {
         ${
           amendDuplicateWarning
             ? `<p style="margin-top: 24px; padding: 14px 16px; background: #3A1A1A; border-left: 3px solid #e05a5a; color: #ffb4b4; font-size: 13px;">
-                 <strong>DISPATCH MAY NOW HOLD TWO JOBS FOR THIS REFERENCE</strong>, please check and remove the old one.<br/>
+                 <strong>DISPATCH NOW HOLDS TWO JOBS FOR THIS REFERENCE</strong>, please remove the original by hand.<br/>
                  ${sanitize(amendDuplicateWarning)}<br/>
-                 The change itself has been applied to the newer job.
+                 The new details are on the new job. The original is still there at its old time.
                </p>`
             : ""
         }
@@ -793,15 +796,17 @@ serve(async (req) => {
         to: ["info@apexiavip.com"],
         subject: `${
           amendReference
-            ? dispatchFailureMessage
-              ? "ACTION NEEDED - Booking AMENDED (APPLY BY HAND)"
-              : "Booking AMENDED"
+            ? amendDuplicateWarning
+              ? "ACTION NEEDED - Booking AMENDED (DUPLICATE IN DISPATCH)"
+              : dispatchFailureMessage
+                ? "ACTION NEEDED - Booking AMENDED (APPLY BY HAND)"
+                : "Booking AMENDED"
             : dispatchFailureMessage
               ? "ACTION NEEDED - NOT IN DISPATCH (ENTER BY HAND)"
               : "Booking Enquiry"
         }: ${safeName}${accountHolder ? ` for ${sanitize(accountHolder.full_name)}` : ""} (${safeVehicle})${clientCar ? " - CLIENT'S OWN CAR" : ""}${
           children.length > 0 ? " - CHILD SEATS" : ""
-        }${amendDuplicateWarning ? " - POSSIBLE DUPLICATE IN DISPATCH" : ""}${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}${
+        }${wantsReturn ? (returnFailureMessage ? " - RETURN NEEDS ENTERING" : " - PLUS RETURN") : ""}${
           availability ? " - SUBJECT TO AVAILABILITY" : ""
         }`,
         html: htmlBody,
