@@ -7,8 +7,16 @@
  * runs until somebody says it has finished.
  */
 
-/** Statuses where the journey is over */
+/**
+ * Statuses where the journey is over.
+ *
+ * "Clear" is Dispatch's own word, confirmed 25 November. "Clear/Completed" is
+ * ours, written on a booking by the chauffeur app, so both have to be here:
+ * without "Clear" a finished job stayed on the live map until the twelve hour
+ * backstop gave up on it.
+ */
 export const FINAL_STATUSES = [
+  "Clear",
   "Clear/Completed",
   "Completed",
   "Cancelled",
@@ -17,9 +25,17 @@ export const FINAL_STATUSES = [
   "Failed",
 ];
 
-/** Statuses meaning a chauffeur is actively working the job */
+/**
+ * Statuses meaning a chauffeur is actively working the job.
+ *
+ * "Accepted" comes from Dever's list of 25 November. Their earlier answer said
+ * a job stays "Dispatched" once the chauffeur accepts, so the two accounts
+ * disagree and we have asked. Reading it as working is the safe side of that:
+ * a chauffeur who has accepted is on the job either way.
+ */
 export const ACTIVE_STATUSES = [
   "Dispatched",
+  "Accepted",
   "En route to pickup",
   "At Pickup",
   "Passenger on board",

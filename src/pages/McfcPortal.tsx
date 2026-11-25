@@ -2614,9 +2614,14 @@ const McfcPortal = () => {
                                 // Matched whatever casing Dispatch sends, or an
                                 // unrecognised word reaches the desk raw
                                 if (statusIs(live, "Dispatched")) return "Chauffeur assigned";
+                                if (statusIs(live, "Accepted")) return "Chauffeur assigned";
                                 if (statusIs(live, "En route to pickup")) return "On the way";
                                 if (statusIs(live, "At Pickup")) return "Arrived";
                                 if (statusIs(live, "Passenger on board")) return "On board";
+                                if (statusIs(live, "Soon to clear")) return "On board";
+                                if (statusIs(live, "Clear")) return "Completed";
+                                if (statusIs(live, "Completed")) return "Completed";
+                                if (statusIs(live, "No Show")) return "No show";
                                 if (statusIs(live, "Cancelled")) return "Cancelled";
                                 if (b.status === "Confirmed") return "Received";
                                 return b.status;

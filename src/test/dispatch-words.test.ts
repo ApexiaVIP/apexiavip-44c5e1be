@@ -40,6 +40,17 @@ describe("a status the booking system sends, in whatever casing", () => {
     expect(isActiveStatus("passenger on board")).toBe(true);
   });
 
+  // Dever's full list, given 25 November. These three were missing from ours,
+  // and a word we do not know is a car in the wrong place on the desk.
+  it("reads a chauffeur who has accepted as working", () => {
+    expect(isActiveStatus("Accepted")).toBe(true);
+    expect(isActiveStatus("accepted")).toBe(true);
+  });
+
+  it("reads a job about to finish as still working", () => {
+    expect(isActiveStatus("Soon to clear")).toBe(true);
+  });
+
   it("does not read a status we have never been told about as working", () => {
     expect(isActiveStatus("Pending")).toBe(false);
     expect(isActiveStatus("Quotation")).toBe(false);
@@ -52,6 +63,19 @@ describe("a status the booking system sends, in whatever casing", () => {
     expect(isFinalStatus("cancelled")).toBe(true);
     expect(isFinalStatus("Clear/Completed")).toBe(true);
     expect(isFinalStatus("NO SHOW")).toBe(true);
+  });
+
+  // "Clear" is their word and "Clear/Completed" is ours. Without their one, a
+  // finished job sat on the live map until the backstop timed it out.
+  it("reads their word for a cleared job as finished, not just ours", () => {
+    expect(isFinalStatus("Clear")).toBe(true);
+    expect(isFinalStatus("clear")).toBe(true);
+    expect(isFinalStatus("Completed")).toBe(true);
+  });
+
+  it("does not confuse a cleared job with one still running", () => {
+    expect(isActiveStatus("Clear")).toBe(false);
+    expect(stillRunning({ status: "Clear", collection_at: "2026-11-25T09:00:00Z" })).toBe(false);
   });
 
   it("tells a job not yet sent to a chauffeur from one with nobody on it", () => {
